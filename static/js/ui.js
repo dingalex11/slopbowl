@@ -184,7 +184,7 @@ async function joinOnlineRoom() {
         if (window.firebaseAuthReady) await window.firebaseAuthReady;
         if (!window.getFirebaseUser?.()) throw new Error('Sign in before joining an online match.');
         const { roomId, name, team, captain } = onlineLobbyValues();
-        const profile = await window.joinOnlineRoom(roomId, name, team, captain);
+        const profile = await window.joinOnlineRoomApi(roomId, name, team, captain);
         window.onlineProfile = profile;
         await connectToRoom(roomId, await window.getUserApiKey?.());
     } catch (error) {
@@ -198,7 +198,7 @@ async function createOnlineRoom() {
         if (window.firebaseAuthReady) await window.firebaseAuthReady;
         if (!window.getFirebaseUser?.()) throw new Error('Sign in before creating an online match.');
         const { roomId, name, team, captain } = onlineLobbyValues();
-        const profile = await window.createOnlineRoom(roomId, name, team, captain);
+        const profile = await window.createOnlineRoomApi(roomId, name, team, captain);
         window.onlineProfile = profile;
         await connectToRoom(roomId, await window.getUserApiKey?.());
     } catch (error) {

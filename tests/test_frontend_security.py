@@ -40,6 +40,16 @@ class FrontendSecurityTests(unittest.TestCase):
         self.assertIn("!/^[a-z0-9][a-z0-9-]{0,63}$/.test(currentRoomId)", source)
         self.assertNotIn("replace(/[^a-z0-9-]/g, '-')", source)
 
+    def test_online_room_api_helpers_do_not_override_lobby_handlers(self):
+        auth_source = (ROOT / "static/js/auth.js").read_text(encoding="utf-8")
+        ui_source = (ROOT / "static/js/ui.js").read_text(encoding="utf-8")
+        self.assertIn("window.createOnlineRoomApi = async", auth_source)
+        self.assertIn("window.joinOnlineRoomApi = async", auth_source)
+        self.assertNotIn("window.createOnlineRoom = async", auth_source)
+        self.assertNotIn("window.joinOnlineRoom = async", auth_source)
+        self.assertIn("window.createOnlineRoomApi(roomId, name, team, captain)", ui_source)
+        self.assertIn("window.joinOnlineRoomApi(roomId, name, team, captain)", ui_source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -166,7 +166,7 @@ window.getUserApiKey = async () => window.sessionGroqApiKey || null;
 window.getFirebaseIdToken = async () => auth.currentUser ? auth.currentUser.getIdToken() : null;
 window.getFirebaseUser = () => auth.currentUser;
 
-window.joinOnlineRoom = async (roomId, name, team, captain) => {
+window.joinOnlineRoomApi = async (roomId, name, team, captain) => {
     const user = auth.currentUser;
     if (!user) throw new Error("Sign in before joining an online match.");
     const token = await user.getIdToken();
@@ -180,7 +180,7 @@ window.joinOnlineRoom = async (roomId, name, team, captain) => {
     return result;
 };
 
-window.createOnlineRoom = async (roomId, name, team, captain) => {
+window.createOnlineRoomApi = async (roomId, name, team, captain) => {
     const user = auth.currentUser;
     if (!user) throw new Error("Sign in before creating an online match.");
     const token = await user.getIdToken();
