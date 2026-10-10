@@ -107,12 +107,27 @@
                 </p>
             </div>
 
-            <div class="w-full max-w-sm space-y-4">
-                <input type="text" id="room-id-input" placeholder="e.g., semifinals-a" class="w-full bg-isodark border border-isoborder rounded-xl px-4 py-4 text-xl text-white font-mono text-center uppercase focus:outline-none focus:border-teamA transition-colors">
-                
-                <button onclick="joinRoom()" class="w-full px-8 py-4 bg-teamA hover:bg-teal-300 text-isodark font-black font-mono text-sm uppercase tracking-wider rounded-xl shadow-lg transition transform hover:scale-105 active:scale-95">
-                    JOIN MATCH ROOM
+            <div class="w-full max-w-sm space-y-3">
+                <input type="text" id="room-id-input" placeholder="Room code (e.g. semifinals-a)" class="w-full bg-isodark border border-isoborder rounded-xl px-4 py-3 text-lg text-white font-mono text-center uppercase focus:outline-none focus:border-teamA transition-colors">
+                <input type="text" id="online-player-name" maxlength="64" placeholder="Your name" class="w-full bg-isodark border border-isoborder rounded-xl px-4 py-3 text-white font-mono focus:outline-none focus:border-teamA">
+                <select id="online-team-choice" class="w-full bg-isodark border border-isoborder rounded-xl px-4 py-3 text-white font-mono">
+                    <option value="Team A">Join Team A</option>
+                    <option value="Team B">Join Team B</option>
+                </select>
+                <label class="flex items-center justify-center gap-2 text-sm text-slate-300 font-mono">
+                    <input type="checkbox" id="online-captain-claim" class="accent-teal-400">
+                    Claim captain (one per team)
+                </label>
+                <button onclick="createOnlineRoom()" class="w-full px-8 py-3 bg-teamA hover:bg-teal-300 text-isodark font-black font-mono text-sm uppercase tracking-wider rounded-xl shadow-lg transition">
+                    CREATE ONLINE MATCH
                 </button>
+                <button onclick="joinOnlineRoom()" class="w-full px-8 py-3 bg-blue-700 hover:bg-blue-600 text-white font-black font-mono text-sm uppercase tracking-wider rounded-xl shadow-lg transition">
+                    JOIN ONLINE MATCH
+                </button>
+                <button onclick="joinRoom()" class="w-full px-4 py-2 text-xs text-slate-400 hover:text-white font-mono uppercase tracking-wider">
+                    In-person moderator station
+                </button>
+                <p id="online-lobby-status" class="min-h-5 text-xs text-amber-400 font-mono"></p>
             </div>
         </div>
 
@@ -245,13 +260,19 @@
                         ⏸ PAUSE
                     </button>
                 </div>
-                <!-- FORCE BUZZ BUTTONS -->
-                <div class="w-full md:w-auto flex space-x-3 border-t md:border-t-0 md:border-l border-isoborder pt-3 md:pt-0 md:pl-4">
-                    <button onclick="sendEvent('BUZZ', {team: 'Team A', player: 'Manual-A'})" class="flex-1 md:w-32 bg-teamA/10 hover:bg-teamA border border-teamA text-teamA hover:text-isodark py-2 rounded font-bold transition text-xs shadow-lg uppercase">
-                        Force Buzz A
+                <div id="online-roster" class="w-full flex flex-wrap justify-center md:justify-start gap-2 min-h-6"></div>
+                <!-- Physical backup buzzes stay available only in in-person rooms. -->
+                <div id="manual-buzz-controls" class="w-full md:w-auto flex space-x-3 border-t md:border-t-0 md:border-l border-isoborder pt-3 md:pt-0 md:pl-4 hidden">
+                    <button onclick="sendEvent('BUZZ', {team: 'Team A', player: 'Manual-A'})" class="moderator-only-control flex-1 md:w-32 bg-teamA/10 hover:bg-teamA border border-teamA text-teamA hover:text-isodark py-2 rounded font-bold transition text-xs shadow-lg uppercase">
+                        Manual Buzz A
                     </button>
-                    <button onclick="sendEvent('BUZZ', {team: 'Team B', player: 'Manual-B'})" class="flex-1 md:w-32 bg-teamB/10 hover:bg-teamB border border-teamB text-teamB hover:text-isodark py-2 rounded font-bold transition text-xs shadow-lg uppercase">
-                        Force Buzz B
+                    <button onclick="sendEvent('BUZZ', {team: 'Team B', player: 'Manual-B'})" class="moderator-only-control flex-1 md:w-32 bg-teamB/10 hover:bg-teamB border border-teamB text-teamB hover:text-isodark py-2 rounded font-bold transition text-xs shadow-lg uppercase">
+                        Manual Buzz B
+                    </button>
+                </div>
+                <div id="online-buzz-controls" class="hidden w-full md:w-auto border-t md:border-t-0 md:border-l border-isoborder pt-3 md:pt-0 md:pl-4">
+                    <button id="btn-online-buzz" onclick="sendEvent('BUZZ', {})" disabled class="w-full md:w-56 bg-rose-700 disabled:bg-zinc-700 disabled:text-zinc-400 hover:bg-rose-600 text-white py-3 rounded-lg font-black font-mono text-lg tracking-wider shadow-lg disabled:cursor-not-allowed">
+                        BUZZ
                     </button>
                 </div>
                     <div class="flex space-x-3 mt-2 md:mt-0">
@@ -605,7 +626,7 @@
     <div id="settings-modal" class="hidden fixed inset-0 z-[100] bg-black/80 flex items-center justify-center backdrop-blur-sm">
         <div class="bg-isopanel border border-isoborder p-6 rounded-xl w-[450px] shadow-2xl space-y-4">
             <h2 class="text-xl font-black text-white tracking-wide">USER <span class="text-teamA">SETTINGS</span></h2>
-            <p class="text-[11px] text-slate-400 font-mono leading-relaxed">Store your Groq API Key here. This key will be routed securely to your isolated Match Room and stored in your cloud profile.</p>
+            <p class="text-[11px] text-slate-400 font-mono leading-relaxed">Enter your Groq API Key for this browser session. It is sent to the match owner backend over the authenticated secure WebSocket and is not saved in your cloud profile.</p>
             
             <div id="settings-status" class="hidden text-xs p-2 rounded font-mono"></div>
             
@@ -621,7 +642,16 @@
     <script src="/static/js/camera.js"></script>
     <script src="/static/js/pdf_parser.js"></script>
     <script src="/static/js/analytics.js"></script>
-    <!-- Add Firebase Auth Script -->
+    <script>
+        window.FIREBASE_CONFIG = {
+            apiKey: "__FIREBASE_API_KEY__",
+            authDomain: "__FIREBASE_AUTH_DOMAIN__",
+            projectId: "__FIREBASE_PROJECT_ID__",
+            storageBucket: "__FIREBASE_STORAGE_BUCKET__",
+            messagingSenderId: "__FIREBASE_MESSAGING_SENDER_ID__",
+            appId: "__FIREBASE_APP_ID__"
+        };
+    </script>
     <script type="module" src="/static/js/auth.js"></script>
 </body>
 </html>

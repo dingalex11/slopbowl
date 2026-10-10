@@ -13,21 +13,18 @@ import {
     doc, 
     setDoc, 
     getDoc,
+    updateDoc,
+    deleteField,
     collection, 
     addDoc, 
     getDocs
 } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-// Your Firebase project configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyBWoq9NNYIejMv6D8JM_oP0g_SGdH_ykJc",
-  authDomain: "slopbowl-fe316.firebaseapp.com",
-  projectId: "slopbowl-fe316",
-  storageBucket: "slopbowl-fe316.firebasestorage.app",
-  messagingSenderId: "73153730852",
-  appId: "1:73153730852:web:e5eccfdc8fd8b4a6e23bb1",
-  measurementId: "G-LLKJL520M9"
-};
+// Firebase web config is public by design; use environment-injected values at build/deploy time.
+const firebaseConfig = window.FIREBASE_CONFIG;
+if (!firebaseConfig || !firebaseConfig.apiKey || !firebaseConfig.projectId) {
+    throw new Error("Firebase configuration is missing. Configure FIREBASE_CONFIG before loading auth.js.");
+}
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
@@ -51,7 +48,11 @@ const btnSaveSettings = document.getElementById('btn-save-settings');
 const settingsStatus = document.getElementById('settings-status');
 
 // --- CONSOLIDATED AUTHENTICATION STATE OBSERVER ---
+let resolveFirebaseAuthReady;
+window.firebaseAuthReady = new Promise((resolve) => { resolveFirebaseAuthReady = resolve; });
+
 onAuthStateChanged(auth, async (user) => {
+    resolveFirebaseAuthReady(user || null);
     const cloudPacketSection = document.getElementById('cloud-packet-section');
     const btnSaveCloud = document.getElementById('btn-save-cloud');
     const btnCloudAnalytics = document.getElementById('btn-cloud-analytics');
@@ -72,11 +73,11 @@ onAuthStateChanged(auth, async (user) => {
         if (btnSaveCloud) btnSaveCloud.classList.remove('hidden');
         if (btnCloudAnalytics) btnCloudAnalytics.classList.remove('hidden');
         
-        // 3. Fetch User Data (API Key & Cloud Packets)
-        const docRef = doc(db, "users", user.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists() && docSnap.data().groqApiKey) {
-            settingsApiKeyInput.value = docSnap.data().groqApiKey;
+        // Remove keys written by the old implementation; new keys stay in this session only.
+        settingsApiKeyInput.value = "";
+        const legacyUserDoc = await getDoc(doc(db, "users", user.uid));
+        if (legacyUserDoc.exists() && legacyUserDoc.data().groqApiKey) {
+            await updateDoc(legacyUserDoc.ref, { groqApiKey: deleteField() });
         }
         await window.populateCloudPackets();
 
@@ -87,6 +88,7 @@ onAuthStateChanged(auth, async (user) => {
         btnShowLogin.classList.remove('hidden');
         userEmailDisplay.innerText = "";
         settingsApiKeyInput.value = "";
+        window.sessionGroqApiKey = null;
 
         // 2. Hide Cloud Feature Buttons
         if (cloudPacketSection) {
@@ -144,12 +146,8 @@ btnSaveSettings?.addEventListener('click', async () => {
         settingsStatus.innerText = "Saving...";
         settingsStatus.className = "text-xs text-amber-400 bg-amber-950/50 border border-amber-900 p-2 rounded font-mono block";
         
-        await setDoc(doc(db, "users", user.uid), {
-            groqApiKey: apiKey,
-            updatedAt: new Date().toISOString()
-        }, { merge: true });
-
-        settingsStatus.innerText = "✅ API Key saved securely to your cloud profile!";
+        window.sessionGroqApiKey = apiKey;
+        settingsStatus.innerText = "✅ API Key held for this browser session only.";
         settingsStatus.className = "text-xs text-emerald-400 bg-emerald-950/50 border border-emerald-900 p-2 rounded font-mono block";
         
         setTimeout(() => {
@@ -164,16 +162,62 @@ btnSaveSettings?.addEventListener('click', async () => {
 
 // --- GLOBAL EXPORTS FOR OTHER SCRIPTS ---
 
-window.getUserApiKey = async () => {
+window.getUserApiKey = async () => window.sessionGroqApiKey || null;
+window.getFirebaseIdToken = async () => auth.currentUser ? auth.currentUser.getIdToken() : null;
+window.getFirebaseUser = () => auth.currentUser;
+
+window.joinOnlineRoom = async (roomId, name, team, captain) => {
     const user = auth.currentUser;
-    if (user) {
-        const docRef = doc(db, "users", user.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists() && docSnap.data().groqApiKey) {
-            return docSnap.data().groqApiKey;
-        }
+    if (!user) throw new Error("Sign in before joining an online match.");
+    const token = await user.getIdToken();
+    const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ name, team, captain: Boolean(captain) })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "Unable to join online match.");
+    return result;
+};
+
+window.createOnlineRoom = async (roomId, name, team, captain) => {
+    const user = auth.currentUser;
+    if (!user) throw new Error("Sign in before creating an online match.");
+    const token = await user.getIdToken();
+    const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/online`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ name, team, captain: Boolean(captain) })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "Unable to create online match.");
+    return result;
+};
+
+window.assignRoomSeat = async (roomId, uid, seat) => {
+    const user = auth.currentUser;
+    if (!user || user.uid !== uid || !["A-1", "A-C", "A-3", "A-4", "A-5", "B-1", "B-C", "B-3", "B-4", "B-5"].includes(seat)) {
+        throw new Error("Invalid seat assignment");
     }
-    return null; 
+    const roomSnapshot = await getDoc(doc(db, "rooms", roomId));
+    if (!roomSnapshot.exists() || roomSnapshot.data().ownerUid !== user.uid) {
+        throw new Error("Only the room moderator may assign seats");
+    }
+    await setDoc(doc(db, "rooms", roomId, "participants", uid), { seat });
+};
+
+window.ensureRoomOwnership = async (roomId, uid) => {
+    const roomRef = doc(db, "rooms", roomId);
+    const roomSnapshot = await getDoc(roomRef);
+    if (roomSnapshot.exists()) return roomSnapshot.data().ownerUid === uid;
+    try {
+        await setDoc(roomRef, { ownerUid: uid, createdAt: new Date().toISOString() });
+    } catch (error) {
+        const concurrentCreate = await getDoc(roomRef);
+        if (!concurrentCreate.exists()) throw error;
+        return concurrentCreate.data().ownerUid === uid;
+    }
+    return true;
 };
 
 window.savePacketToCloud = async (packetName, packetData) => {

@@ -131,10 +131,13 @@ if (bankFileInput) {
         }
         
         try {
+            if (!file.name.toLowerCase().endsWith('.json') || file.size > 5 * 1024 * 1024) {
+                throw new Error("Choose a JSON question bank no larger than 5 MB.");
+            }
             const text = await file.text();
             const bankJson = JSON.parse(text);
-            if (!Array.isArray(bankJson) || bankJson.length === 0 || !bankJson[0].tossup_text) {
-                throw new Error("Invalid format. Must be an array of questions.");
+            if (!Array.isArray(bankJson) || bankJson.length === 0 || bankJson.length > 500 || !bankJson[0].tossup_text) {
+                throw new Error("Invalid format. Choose 1–500 questions with tossup text.");
             }
             sendEvent('LOAD_BANK', { bank: bankJson });
             if(bankFileName) {
@@ -143,7 +146,7 @@ if (bankFileInput) {
             }
         } catch (err) {
             if(bankFileName) {
-                bankFileName.innerText = `❌ Error: Invalid JSON file`;
+                bankFileName.innerText = `❌ ${err.message || "Invalid JSON file"}`;
                 bankFileName.className = "text-xs text-red-500 font-mono font-bold";
             }
         }
@@ -151,32 +154,109 @@ if (bankFileInput) {
 }
 let currentRoomId = null;
 
+async function connectToRoom(roomId, apiKey = null) {
+    const existingRoom = window.activeRoomId;
+    if (existingRoom && existingRoom === roomId) return;
+    window.activeRoomId = roomId;
+    currentRoomId = roomId;
+    window.history.pushState({ room: roomId }, "", `?room=${roomId}`);
+    document.getElementById('view-lobby')?.classList.add('hidden');
+    document.getElementById('view-lobby')?.classList.remove('flex');
+    document.getElementById('view-match')?.classList.remove('hidden');
+    document.getElementById('view-match')?.classList.add('flex');
+    if (typeof setupComplete !== 'undefined') setupComplete = true;
+    connectWebSocket(roomId, apiKey);
+}
+
+function onlineLobbyValues() {
+    const roomId = document.getElementById('room-id-input')?.value.trim().toLowerCase() || '';
+    const name = document.getElementById('online-player-name')?.value.trim() || '';
+    const team = document.getElementById('online-team-choice')?.value;
+    const captain = Boolean(document.getElementById('online-captain-claim')?.checked);
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(roomId)) throw new Error('Enter a valid room code.');
+    if (!name || name.length > 64 || /[\\u0000-\\u001f]/.test(name)) throw new Error('Enter a name between 1 and 64 characters.');
+    return { roomId, name, team, captain };
+}
+
+async function joinOnlineRoom() {
+    const status = document.getElementById('online-lobby-status');
+    try {
+        if (window.firebaseAuthReady) await window.firebaseAuthReady;
+        if (!window.getFirebaseUser?.()) throw new Error('Sign in before joining an online match.');
+        const { roomId, name, team, captain } = onlineLobbyValues();
+        const profile = await window.joinOnlineRoom(roomId, name, team, captain);
+        window.onlineProfile = profile;
+        await connectToRoom(roomId, await window.getUserApiKey?.());
+    } catch (error) {
+        if (status) status.innerText = error.message;
+    }
+}
+
+async function createOnlineRoom() {
+    const status = document.getElementById('online-lobby-status');
+    try {
+        if (window.firebaseAuthReady) await window.firebaseAuthReady;
+        if (!window.getFirebaseUser?.()) throw new Error('Sign in before creating an online match.');
+        const { roomId, name, team, captain } = onlineLobbyValues();
+        const profile = await window.createOnlineRoom(roomId, name, team, captain);
+        window.onlineProfile = profile;
+        await connectToRoom(roomId, await window.getUserApiKey?.());
+    } catch (error) {
+        if (status) status.innerText = error.message;
+    }
+}
+
 async function joinRoom() {
     const input = document.getElementById('room-id-input');
     
     if (input && input.value.trim() !== '') {
-        currentRoomId = input.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        const requestedRoomId = input.value.trim().toLowerCase();
+        if (window.ws && window.ws.readyState === WebSocket.OPEN && window.activeRoomId !== requestedRoomId) {
+            alert("Disconnect from the current moderator station before opening another match room.");
+            return;
+        }
+        currentRoomId = requestedRoomId;
+        if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(currentRoomId)) {
+            alert("Room code must be 1–64 letters, numbers, or hyphens and start with a letter or number.");
+            return;
+        }
         
         window.history.pushState({room: currentRoomId}, "", `?room=${currentRoomId}`);
         
         const lobbyView = document.getElementById('view-lobby');
-        const landingView = document.getElementById('view-landing');
-        if (lobbyView) {
-            lobbyView.classList.add('hidden');
-            lobbyView.classList.remove('flex');
-        }
-        if (landingView) {
-            landingView.classList.remove('hidden');
-            landingView.classList.add('flex');
-        }
         
-        // Fetch the user's cloud API key before connecting
-        let apiKey = null;
-        if (window.getUserApiKey) {
-            apiKey = await window.getUserApiKey();
+        if (window.firebaseAuthReady) await window.firebaseAuthReady;
+        const idToken = window.getFirebaseIdToken ? await window.getFirebaseIdToken() : null;
+        if (!idToken) {
+            alert("Please sign in before creating or joining a match room.");
+            document.getElementById('auth-modal')?.classList.remove('hidden');
+            return;
         }
-        
-        connectWebSocket(currentRoomId, apiKey);
+        const user = window.getFirebaseUser ? window.getFirebaseUser() : null;
+        if (!user) {
+            alert("Sign-in is still initializing. Please try again.");
+            return;
+        }
+        try {
+            const ownsRoom = await window.ensureRoomOwnership(currentRoomId, user.uid);
+            if (!ownsRoom) {
+                alert("This room is not yours. Use the online match join form for player rooms.");
+                return;
+            }
+        } catch (error) {
+            alert(`Unable to initialize room: ${error.message}`);
+            return;
+        }
+        const existingRoom = window.activeRoomId;
+        if (existingRoom && existingRoom === currentRoomId) return;
+        window.activeRoomId = currentRoomId;
+        const joinButton = document.querySelector('#view-lobby button[onclick="joinRoom()"]');
+        if (joinButton) joinButton.disabled = true;
+        try {
+            connectWebSocket(currentRoomId, window.getUserApiKey ? await window.getUserApiKey() : null);
+        } finally {
+            if (joinButton) joinButton.disabled = false;
+        }
     } else {
         alert("⚠️ Please enter a valid room code.");
     }
@@ -185,10 +265,16 @@ async function joinRoom() {
 function confirmSetup() {
     const getVal = (id, defaultVal) => {
         const el = document.getElementById(id);
-        return (el && el.value.trim() !== '') ? el.value.trim() : defaultVal;
+        const value = (el && el.value.trim() !== '') ? el.value.trim() : defaultVal;
+        if (value.length > 64 || /[\u0000-\u001f]/.test(value)) {
+            throw new Error('Team and player names must be 64 characters or fewer and contain no control characters.');
+        }
+        return value;
     };
 
-    const rosterData = {
+    let rosterData;
+    try {
+        rosterData = {
         teams: {
             "Team A": getVal('input-team-a-name', "Team A"),
             "Team B": getVal('input-team-b-name', "Team B")
@@ -205,7 +291,11 @@ function confirmSetup() {
             "B-4": getVal('roster-B-4', "Player 4"),
             "B-5": getVal('roster-B-5', "Player 5")
         }
-    };
+        };
+    } catch (error) {
+        alert(error.message);
+        return;
+    }
     
     sendEvent('SAVE_ROSTER', rosterData);
     updateRosterNames(rosterData); 

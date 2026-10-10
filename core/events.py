@@ -1,7 +1,8 @@
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+
 
 class EventType(Enum):
     BUZZ = auto()
@@ -21,12 +22,13 @@ class EventType(Enum):
     BONUS_ANSWER_LOCKED = auto()
     TOSSUP_RESULT = auto()
     BONUS_RESULT = auto()
-    
-    # --- ADDED TO FIX TRACEBACK ---
-    READING_DONE = auto() 
+    READING_DONE = auto()
+
 
 @dataclass
 class Event:
-    type: EventType | str # Allow string types for dynamic frontend events
-    timestamp: float = field(default_factory=time.time)
+    type: EventType | str
     payload: Dict[str, Any] = field(default_factory=dict)
+    timestamp: float = field(default_factory=time.time)
+    user_id: Optional[str] = None
+    role: Optional[str] = None

@@ -5,3 +5,6 @@ openai
 opencv-python-headless
 numpy
 python-dotenv
+firebase-admin
+SpeechRecognition
+pypdf

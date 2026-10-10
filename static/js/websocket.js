@@ -3,12 +3,24 @@ let currentSpokenWord = "";
 let isReading = false;
 
 let ws;
+window.ws = null;
 let reconnectDelay = 2000;
 let pingInterval;
 
 let audioUnlocked = false;
 let currentCategoryAbbrev = "GEN";
 let currentStageType = "TOSSUP";
+let assignedSeat = null;
+let currentUserRole = null;
+let currentRoomMode = 'in_person';
+let currentTeam = null;
+let currentReadingId = null;
+let onlineBuzzOpen = false;
+let isOnlineCaptain = false;
+let currentOnlineBuzzTeam = null;
+let onlineCaptainOnly = false;
+let isReadingOnline = false;
+let onlineReadCompletions = new Set();
 
 // --- ACTION TIMER LOGIC ---
 let actionTimerInterval = null;
@@ -81,42 +93,71 @@ document.addEventListener('click', () => {
 // Update the signature to accept apiKey
 function connectWebSocket(roomId, apiKey = null) {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws/${roomId}`);
+    const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws/${encodeURIComponent(roomId)}`);
+    ws = socket;
+    window.ws = socket;
 
-    ws.onopen = () => {
+    socket.onopen = async () => {
         const statusEl = document.getElementById('header-status');
-        if (statusEl) statusEl.innerText = `READY (ROOM: ${roomId.toUpperCase()})`;
-        
-        reconnectDelay = 2000; 
-        
-        // --- NEW: Send the API key payload immediately upon connection ---
-        if (apiKey) {
-            ws.send(JSON.stringify({ type: "AUTH_INIT", payload: { api_key: apiKey } }));
-        }
-        
-        if (pingInterval) clearInterval(pingInterval);
-        pingInterval = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "PING", payload: {} }));
+        if (statusEl) statusEl.innerText = `CONNECTING TO MATCH (${roomId.toUpperCase()})`;
+        try {
+            const idToken = window.getFirebaseIdToken ? await window.getFirebaseIdToken() : null;
+            if (!idToken || socket.readyState !== WebSocket.OPEN) {
+                socket.close(4401, "Sign in required");
+                return;
             }
-        }, 15000);
+            socket.send(JSON.stringify({ type: "AUTH_INIT", payload: { id_token: idToken, api_key: apiKey || "" } }));
+        } catch (error) {
+            console.warn('Unable to authenticate moderator station', error);
+            socket.close(4401, "Sign in required");
+        }
     };
-    
-    // ... KEEP THE REST OF YOUR ws.onmessage AND ws.onclose THE SAME ...
-
-    // ... Keep the rest of your ws.onmessage and ws.onclose exactly the same ...
-    // BUT update the reconnect logic inside ws.onclose to pass the roomId again:
-    // setTimeout(() => connectWebSocket(roomId), reconnectDelay);
-
-// REMOVE OR COMMENT OUT THIS LINE AT THE BOTTOM OF THE FILE
-// connectWebSocket();
-
-    ws.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        const payload = data.payload || {};
+    socket.onmessage = function(event) {
+        let data;
+        try {
+            data = JSON.parse(event.data);
+        } catch (error) {
+            console.error('Ignoring malformed WebSocket message', error);
+            return;
+        }
+        if (!data || typeof data !== 'object' || typeof data.type !== 'string') return;
+        const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+        if (data.type === 'CONNECTED' && socket === ws) {
+            reconnectDelay = 2000;
+            if (payload.mode === 'online') window.onlineProfile = { name: payload.name, team: payload.team, captain: payload.captain };
+            const connectedStatus = document.getElementById('header-status');
+            if (connectedStatus) connectedStatus.innerText = `READY (ROOM: ${roomId.toUpperCase()})`;
+            if (pingInterval) clearInterval(pingInterval);
+            pingInterval = setInterval(() => {
+                if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "PING", payload: {} }));
+            }, 15000);
+        }
         const statusEl = document.getElementById('header-status');
 
-        if (data.type === 'UPDATE_STATUS') {
+        if (data.type === 'CONNECTED') {
+            currentUserRole = payload.role || 'viewer';
+            currentRoomMode = payload.mode || 'in_person';
+            assignedSeat = payload.seat || null;
+            currentTeam = payload.team || null;
+            isOnlineCaptain = Boolean(payload.captain);
+            const onlineBuzzControls = document.getElementById('online-buzz-controls');
+            const manualBuzzControls = document.getElementById('manual-buzz-controls');
+            onlineBuzzControls?.classList.toggle('hidden', currentRoomMode !== 'online');
+            manualBuzzControls?.classList.toggle('hidden', currentRoomMode !== 'in_person' || currentUserRole !== 'owner');
+            document.querySelectorAll('.moderator-only-control').forEach((control) => {
+                control.classList.toggle('hidden', currentUserRole !== 'owner');
+            });
+            document.querySelectorAll('.viewer-only-control').forEach((control) => {
+                control.classList.toggle('hidden', currentUserRole === 'owner');
+            });
+            const ownTeamName = currentTeam === 'Team A' ? document.getElementById('header-team-a-name') : document.getElementById('header-team-b-name');
+            if (ownTeamName && payload.name) ownTeamName.title = `You are ${payload.name}${isOnlineCaptain ? ' (Captain)' : ''}`;
+            updateOnlineBuzzButton();
+        }
+        else if (data.type === 'ROOM_ROSTER') {
+            renderOnlineRoster(payload.players || []);
+        }
+        else if (data.type === 'UPDATE_STATUS') {
             if (statusEl) statusEl.innerText = payload.text || 'READY';
             
             // EXACT TRIGGER: Start the 5-second physical timer only when the backend opens the buzz window
@@ -152,6 +193,8 @@ function connectWebSocket(roomId, apiKey = null) {
         }
         else if (data.type === 'UPDATE_QUESTION') {
             currentStageType = "TOSSUP";
+            const questionDisplay = document.getElementById('stage-title-text');
+            if (questionDisplay) questionDisplay.innerText = payload.text || '';
             setStage('READ_TOSSUP'); 
             
             const catMap = {
@@ -242,8 +285,11 @@ function connectWebSocket(roomId, apiKey = null) {
                         // Strip the " *" indicator if it exists so the input box is clean
                         const currentText = cell.innerText.replace(' *', '').trim();
                         
-                        cell.innerHTML = `<input type="text" class="w-full bg-isodark text-white font-mono text-center border border-teamA py-1 focus:outline-none" value="${currentText}">`;
-                        const input = cell.querySelector('input');
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.className = 'w-full bg-isodark text-white font-mono text-center border border-teamA py-1 focus:outline-none';
+                        input.value = currentText;
+                        cell.replaceChildren(input);
                         input.focus();
                         
                         const saveEdit = () => {
@@ -259,7 +305,12 @@ function connectWebSocket(roomId, apiKey = null) {
                             });
                         };
                         
-                        input.onblur = saveEdit;
+                        let editSaved = false;
+                        input.onblur = () => {
+                            if (editSaved) return;
+                            editSaved = true;
+                            saveEdit();
+                        };
                         input.onkeydown = (e) => { if (e.key === 'Enter') input.blur(); };
                     };
                 };
@@ -324,13 +375,33 @@ function connectWebSocket(roomId, apiKey = null) {
             }
         }
         else if (data.type === 'START_READING') {
+            if (payload.moderator_only && currentUserRole !== 'owner') return;
+            if (currentRoomMode === 'online') {
+                currentReadingId = payload.reading_id || null;
+                isReadingOnline = true;
+                onlineReadCompletions = new Set();
+            }
             speakText(payload.text);
         }
+        else if (data.type === 'OPEN_BUZZ') {
+            onlineBuzzOpen = true;
+            currentOnlineBuzzTeam = payload.team || null;
+            onlineCaptainOnly = Boolean(payload.captain_only);
+            updateOnlineBuzzButton();
+        }
+        else if (data.type === 'CLOSE_BUZZ') {
+            onlineBuzzOpen = false;
+            currentOnlineBuzzTeam = null;
+            onlineCaptainOnly = false;
+            updateOnlineBuzzButton();
+        }
         else if (data.type === 'START_LISTENING') {
+            // In-person requests only reach the moderator; online requests only reach the answerer.
             const timeout = payload.timeout || 5.0;
             
             if (timeout > 15.0) {
                 currentStageType = "BONUS";
+                updateOnlineBuzzButton();
                 const label = document.getElementById('action-timer-label');
                 if (label) label.innerText = "BONUS CONFER (20s)";
                 startActionTimer(20.0, 5.0);
@@ -398,25 +469,63 @@ function connectWebSocket(roomId, apiKey = null) {
         }
     };
 
-    ws.onerror = (err) => {
+    socket.onerror = (err) => {
         console.warn("WebSocket Error, closing to trigger reconnect...", err);
-        ws.close();
+        socket.close();
     };
 
-    ws.onclose = () => { 
+    socket.onclose = (event) => { 
         const statusEl = document.getElementById('header-status');
+        currentUserRole = null;
+        if (window.ws === socket) window.ws = null;
+        if ([4400, 4401, 4403, 4404, 4409, 4410, 4429, 4503].includes(event.code)) {
+            if (statusEl) {
+                const messages = {4400: 'INVALID ROOM CODE', 4401: 'SIGN IN TO CONNECT', 4403: 'ROOM ACCESS DENIED', 4404: 'ROOM NOT AVAILABLE', 4409: 'MESSAGE TOO LARGE', 4410: 'MODERATOR STATION DISCONNECTED', 4429: 'ROOM BUSY - RETRY MANUALLY', 4503: 'ROOM SERVICE UNAVAILABLE'};
+                statusEl.innerText = messages[event.code] || 'CONNECTION CLOSED';
+            }
+            if (window.activeRoomId === roomId) window.activeRoomId = null;
+            if (pingInterval) clearInterval(pingInterval);
+            return;
+        }
         if (statusEl) statusEl.innerText = 'DISCONNECTED - RECONNECTING...'; 
         
         if (pingInterval) clearInterval(pingInterval);
         
         // FIX: Wrap in an anonymous function so it doesn't evaluate immediately
-        setTimeout(() => connectWebSocket(roomId), reconnectDelay);
+        const closedSocket = socket;
+        setTimeout(async () => {
+            if (ws !== closedSocket) return;
+            try {
+                if (window.firebaseAuthReady) await window.firebaseAuthReady;
+                const refreshedToken = window.getFirebaseIdToken ? await window.getFirebaseIdToken() : null;
+                if (!refreshedToken) {
+                    if (statusEl) statusEl.innerText = 'DISCONNECTED - SIGN IN TO RECONNECT';
+                    return;
+                }
+                const refreshedKey = window.getUserApiKey ? await window.getUserApiKey() : null;
+                if (ws === closedSocket) connectWebSocket(roomId, refreshedKey);
+            } catch (error) {
+                console.warn('Reconnect authentication failed', error);
+                if (statusEl) statusEl.innerText = 'DISCONNECTED - SIGN IN TO RECONNECT';
+            }
+        }, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
     };
 }
 
 function sendEvent(eventType, payload = {}) {
     if (ws && ws.readyState === WebSocket.OPEN) {
+        const playerEvents = currentRoomMode === 'online' && ['PING', 'BUZZ', 'ANSWER_AUDIO', 'READING_DONE'].includes(eventType);
+        if (currentUserRole !== 'owner' && !playerEvents) {
+            console.warn(`Room permission required for ${eventType}.`);
+            return;
+        }
+        if (currentRoomMode === 'online' && eventType === 'BUZZ' && (!onlineBuzzOpen || currentTeam !== currentOnlineBuzzTeam || (onlineCaptainOnly && !isOnlineCaptain))) return;
+        if (currentRoomMode === 'online' && eventType === 'READING_DONE') {
+            if (!currentReadingId || onlineReadCompletions.has(currentReadingId)) return;
+            onlineReadCompletions.add(currentReadingId);
+            payload = { reading_id: currentReadingId };
+        }
         ws.send(JSON.stringify({ type: eventType, payload: payload }));
     } else {
         console.warn(`Cannot send event ${eventType}: WebSocket is not open.`);
@@ -424,6 +533,26 @@ function sendEvent(eventType, payload = {}) {
 }
 
 // --- TEXT TO SPEECH (TTS) LOGIC ---
+function updateOnlineBuzzButton() {
+    const button = document.getElementById('btn-online-buzz');
+    if (!button) return;
+    const canBuzz = onlineBuzzOpen && currentTeam === currentOnlineBuzzTeam && (!onlineCaptainOnly || isOnlineCaptain);
+    button.disabled = currentRoomMode !== 'online' || !canBuzz;
+    button.textContent = onlineBuzzOpen && currentTeam !== currentOnlineBuzzTeam ? 'OTHER TEAM BUZZING' : (onlineBuzzOpen && onlineCaptainOnly && !isOnlineCaptain ? 'CAPTAIN BUZZES BONUS' : (canBuzz ? 'BUZZ NOW' : 'BUZZ CLOSED'));
+}
+
+function renderOnlineRoster(players) {
+    const holder = document.getElementById('online-roster');
+    if (!holder) return;
+    holder.replaceChildren();
+    players.forEach((player) => {
+        const item = document.createElement('span');
+        item.className = 'px-2 py-1 rounded bg-isodark border border-isoborder text-xs text-slate-300';
+        item.textContent = `${player.name} · ${player.team}${player.captain ? ' · Captain' : ''}`;
+        holder.appendChild(item);
+    });
+}
+
 function speakText(text) {
     try {
         if (window._activeUtterance) {
@@ -457,13 +586,23 @@ function speakText(text) {
             utterance.onend = () => {
                 isReading = false;
                 currentSpokenWord = "";
-                sendEvent('READING_DONE', {});
+                if (currentRoomMode === 'online') {
+                    if (currentReadingId && !onlineReadCompletions.has(currentReadingId)) sendEvent('READING_DONE', {});
+                    isReadingOnline = false;
+                } else {
+                    sendEvent('READING_DONE', {});
+                }
                 // The timer trigger has been removed from here so it doesn't fire after reading the result!
             };
 
             utterance.onerror = (e) => {
                 isReading = false;
-                sendEvent('READING_DONE', {});
+                if (currentRoomMode === 'online') {
+                    if (currentReadingId && !onlineReadCompletions.has(currentReadingId)) sendEvent('READING_DONE', {});
+                    isReadingOnline = false;
+                } else {
+                    sendEvent('READING_DONE', {});
+                }
             };
             
             synth.speak(utterance);
@@ -533,9 +672,10 @@ async function startListening(timeoutSeconds, expiresAt) {
 }
 
 // --- MANUAL BACKUP BUZZERS ---
-document.addEventListener('keydown', function(event) {
-    if (document.activeElement.tagName === 'INPUT') return;
+document.addEventListener('keydown', function(event) {        if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
     const key = event.key.toLowerCase();
-    if (key === 'a') sendEvent('BUZZ', { team: 'Team A', player: 'A-1' });
-    else if (key === 'b') sendEvent('BUZZ', { team: 'Team B', player: 'B-1' });
+    if ((key === 'a' || key === 'b') && currentUserRole === 'owner' && currentRoomMode !== 'online') {
+        const team = key === 'a' ? 'Team A' : 'Team B';
+        sendEvent('BUZZ', { team, player: key === 'a' ? 'Manual-A' : 'Manual-B' });
+    }
 });

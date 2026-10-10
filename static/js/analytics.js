@@ -39,35 +39,82 @@ function resetAnalytics() {
 }
 
 async function handleCSVFiles(files) {
-    csvStatusText.innerText = "PROCESSING CSV DATA...";
-    csvStatusText.className = "text-xs font-mono mt-1 block uppercase text-amber-500 font-bold";
-
+    if (files.length > 20) {
+        if (csvStatusText) csvStatusText.innerText = "Select no more than 20 match files at a time.";
+        return;
+    }
+    if (csvStatusText) {
+        csvStatusText.innerText = "PROCESSING CSV DATA...";
+        csvStatusText.className = "text-xs font-mono mt-1 block uppercase text-amber-500 font-bold";
+    }
+    let accepted = 0;
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        if (!file.name.endsWith('.csv')) continue;
+        if (!file.name.toLowerCase().endsWith('.csv')) continue;
         
-        const text = await file.text();
-        processCSVData(text, file.name);
+        if (file.size > 10 * 1024 * 1024) {
+            if (csvStatusText) csvStatusText.innerText = `${file.name} is larger than the 10 MB limit.`;
+            continue;
+        }
+        try {
+            const text = await file.text();
+            processCSVData(text, file.name);
+            accepted += 1;
+        } catch (error) {
+            if (csvStatusText) csvStatusText.innerText = `${file.name}: ${error.message}`;
+        }
     }
 
     renderAnalyticsTables();
     
-    csvCountBadge.style.display = "block";
-    csvCountBadge.innerText = `${gamesProcessed.size} GAMES PROCESSED`;
-    csvStatusText.innerText = "ANALYTICS COMPILED SUCCESSFULLY";
-    csvStatusText.className = "text-xs font-mono mt-1 block uppercase text-teamA font-bold";
+    if (csvCountBadge) {
+        csvCountBadge.style.display = "block";
+        csvCountBadge.innerText = `${gamesProcessed.size} GAMES PROCESSED`;
+    }
+    if (csvStatusText && accepted > 0) {
+        csvStatusText.innerText = "ANALYTICS COMPILED SUCCESSFULLY";
+        csvStatusText.className = "text-xs font-mono mt-1 block uppercase text-teamA font-bold";
+    }
+}
+
+function parseCSVRows(csvText) {
+    if (csvText.length > 10 * 1024 * 1024) throw new Error('CSV exceeds the 10 MB limit');
+    const rows = [];
+    let row = [];
+    let field = '';
+    let quoted = false;
+    for (let i = 0; i < csvText.length; i++) {
+        const char = csvText[i];
+        if (quoted) {
+            if (char === '"' && csvText[i + 1] === '"') { field += '"'; i++; }
+            else if (char === '"') quoted = false;
+            else field += char;
+        } else if (char === '"') quoted = true;
+        else if (char === ',') { row.push(field); field = ''; }
+        else if (char === '\n') {
+            row.push(field.replace(/\r$/, ''));
+            rows.push(row);
+            if (rows.length > 100000) throw new Error('CSV exceeds the 100,000 row limit');
+            row = [];
+            field = '';
+        }
+        else field += char;
+    }
+    if (quoted) throw new Error('Malformed CSV: unclosed quoted field');
+    if (field.length || row.length) { row.push(field.replace(/\r$/, '')); rows.push(row); }
+    return rows;
 }
 
 function processCSVData(csvText, fileName) {
+    const rows = parseCSVRows(csvText);
+    if (!rows.length) return;
+    if (gamesProcessed.has(fileName)) return;
     gamesProcessed.add(fileName);
-    const lines = csvText.trim().split('\n');
-    const headers = lines[0].split(',').map(h => h.trim());
-    
-    lines.slice(1).forEach(line => {
-        const values = line.split(',');
-        let row = {};
-        headers.forEach((h, i) => row[h] = values[i] ? values[i].trim() : '');
+    const headers = rows[0].map((header) => header.trim());
 
+    rows.slice(1).forEach((values) => {
+        const row = {};
+        headers.forEach((header, i) => { row[header] = values[i] ? values[i].trim() : ''; });
         const eventType = row['Event_Type'];
         const team = row['Team'];
         const player = row['Player'];
@@ -127,15 +174,19 @@ function renderAnalyticsTables() {
         const ppb = data.correct > 0 ? (data.bonus_points / data.correct).toFixed(2) : "0.00";
 
         const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="py-2 px-3 font-bold">${team}</td>
-            <td class="py-2 px-3">${gp}</td>
-            <td class="py-2 px-3">${data.total_points}</td>
-            <td class="py-2 px-3 text-teamA">${ppg}</td>
-            <td class="py-2 px-3 text-purple-300 font-bold">${ppb}</td>
-            <td class="py-2 px-3">${data.correct}</td>
-            <td class="py-2 px-3 text-red-400">${data.negs}</td>
-        `;
+        const teamCell = document.createElement('td');
+        teamCell.className = 'py-2 px-3 font-bold';
+        teamCell.textContent = team;
+        tr.append(teamCell);
+        for (const [value, className] of [
+            [gp, 'py-2 px-3'], [data.total_points, 'py-2 px-3'], [ppg, 'py-2 px-3 text-teamA'],
+            [ppb, 'py-2 px-3 text-purple-300 font-bold'], [data.correct, 'py-2 px-3'], [data.negs, 'py-2 px-3 text-red-400']
+        ]) {
+            const cell = document.createElement('td');
+            cell.className = className;
+            cell.textContent = String(value);
+            tr.append(cell);
+        }
         if(teamStatsBody) teamStatsBody.appendChild(tr);
     });
 
@@ -151,18 +202,26 @@ function renderAnalyticsTables() {
         const avgSpd = p.buzzes > 0 && p.total_speed > 0 ? (p.total_speed / p.buzzes).toFixed(3) : "N/A";
 
         const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="py-2 px-3 font-bold">
-                <span class="block">${pKey.split('-')[1].trim()}</span>
-                <span class="text-[9px] text-slate-500">${p.team}</span>
-            </td>
-            <td class="py-2 px-3">${p.points}</td>
-            <td class="py-2 px-3">${ppg}</td>
-            <td class="py-2 px-3 text-amber-300 font-bold">${ppa}</td>
-            <td class="py-2 px-3 ${intAcc > 50 ? 'text-teamA' : 'text-slate-400'}">${intAcc}%</td>
-            <td class="py-2 px-3 text-red-400">${intRate}%</td>
-            <td class="py-2 px-3 text-cyan-400">${avgSpd}</td>
-        `;
+        const identityCell = document.createElement('td');
+        identityCell.className = 'py-2 px-3 font-bold';
+        const playerName = document.createElement('span');
+        playerName.className = 'block';
+        playerName.textContent = pKey.split('-').slice(1).join('-').trim();
+        const teamName = document.createElement('span');
+        teamName.className = 'text-[9px] text-slate-500';
+        teamName.textContent = p.team;
+        identityCell.append(playerName, teamName);
+        tr.append(identityCell);
+        for (const [value, className] of [
+            [p.points, 'py-2 px-3'], [ppg, 'py-2 px-3'], [ppa, 'py-2 px-3 text-amber-300 font-bold'],
+            [`${intAcc}%`, `py-2 px-3 ${intAcc > 50 ? 'text-teamA' : 'text-slate-400'}`],
+            [`${intRate}%`, 'py-2 px-3 text-red-400'], [avgSpd, 'py-2 px-3 text-cyan-400']
+        ]) {
+            const cell = document.createElement('td');
+            cell.className = className;
+            cell.textContent = String(value);
+            tr.append(cell);
+        }
         if(playerStatsBody) playerStatsBody.appendChild(tr);
     });
 }
@@ -200,7 +259,7 @@ if (btnCloudAnalytics) {
                     const values = headers.map(h => {
                         let val = row[h] !== undefined ? row[h] : "";
                         // Wrap in quotes to prevent internal commas from breaking the parser
-                        return `"${val}"`; 
+                        return `"${String(val).replaceAll('"', '""')}"`; 
                     });
                     csvContent += values.join(",") + "\n";
                 });

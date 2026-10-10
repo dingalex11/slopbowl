@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      match /{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    // Room IDs identify an in-person match; the owner is its moderator account.
+    // Authenticated users may observe; match controls are enforced by the WebSocket backend.
+    match /rooms/{roomId} {
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['ownerUid', 'createdAt'])
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow read: if request.auth != null;
+      allow update, delete: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+  }
+}

@@ -69,7 +69,7 @@ function sendFrameToBackend() {
     // Throttle slightly to ~30fps if needed, or let requestAnimationFrame run free
     setTimeout(() => {
         requestAnimationFrame(sendFrameToBackend);
-    }, 33);
+    }, 200);
 
     if (typeof ws === 'undefined' || ws.readyState !== WebSocket.OPEN) return;
     
