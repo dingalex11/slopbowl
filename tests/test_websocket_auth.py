@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from services import ui_service
+from services import auth_service, ui_service
 
 
 class FakeUser:
@@ -50,6 +50,30 @@ class FakeSocket:
 
 
 class WebSocketAuthorizationTests(unittest.TestCase):
+    def test_get_room_info_reads_room_defaults_from_snapshot_data(self):
+        class Snapshot:
+            exists = True
+
+            def to_dict(self):
+                return {"ownerUid": "owner"}
+
+        class Document:
+            def get(self, **kwargs):
+                return Snapshot()
+
+        class Collection:
+            def document(self, room_id):
+                return Document()
+
+        class Client:
+            def collection(self, name):
+                return Collection()
+
+        with patch.object(auth_service, "_firebase_app", return_value=object()), patch.object(
+            auth_service.firestore, "client", return_value=Client()
+        ):
+            self.assertEqual(auth_service.get_room_info("room"), {"owner_uid": "owner", "mode": "in_person"})
+
     def test_moderator_interface_and_static_client_load(self):
         client = TestClient(ui_service.app)
         page = client.get("/")

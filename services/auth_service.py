@@ -45,8 +45,9 @@ def get_room_info(room_id: str) -> dict[str, str]:
         raise RuntimeError("Room authorization service is unavailable") from exc
     if not snapshot.exists:
         raise PermissionError("Room does not exist")
-    owner_uid = snapshot.get("ownerUid")
-    mode = snapshot.get("mode", "in_person")
+    room_data = snapshot.to_dict() or {}
+    owner_uid = room_data.get("ownerUid")
+    mode = room_data.get("mode", "in_person")
     if not isinstance(owner_uid, str) or not owner_uid or mode not in {"in_person", "online"}:
         raise PermissionError("Room metadata is invalid")
     return {"owner_uid": owner_uid, "mode": mode}
@@ -109,7 +110,8 @@ def join_online_room(room_id: str, uid: str, name: str, team: str, captain: bool
         @firestore.transactional
         def claim(transaction):
             room_snapshot = room_ref.get(transaction=transaction)
-            if not room_snapshot.exists or room_snapshot.get("mode", "in_person") != "online":
+            room_data = room_snapshot.to_dict() or {}
+            if not room_snapshot.exists or room_data.get("mode", "in_person") != "online":
                 raise PermissionError("This is not an online match room")
             participant_ref = room_ref.collection("participants").document(uid)
             participant_snapshot = participant_ref.get(transaction=transaction)
