@@ -39,6 +39,28 @@ class FrontendSecurityTests(unittest.TestCase):
         self.assertIn("renderOnlineRoster", source)
         self.assertIn("ROOM_ROSTER", source)
 
+    def test_a_stopped_or_replaced_read_never_reports_completion(self):
+        """Only the read that is actually being spoken may report completion.
+
+        Chrome fires 'error: interrupted' when speech is cancelled, which the old
+        client forwarded as READING_DONE. The server takes the next completion as the
+        current read finishing, so those phantom replies skipped the following
+        question and started its 5-second buzz timer at the same moment.
+        """
+        source = (ROOT / "static/js/websocket.js").read_text(encoding="utf-8")
+        self.assertIn("let readingGeneration = 0;", source)
+        self.assertIn("const generation = ++readingGeneration;", source)
+        self.assertIn("if (generation !== readingGeneration) return;", source)
+        self.assertIn("function cancelSpeech()", source)
+        self.assertIn("function sendReadingDone(readingId)", source)
+        # The buzz path stops the read through cancelSpeech (handlers detached) rather
+        # than cancelling the speech engine directly, which left a completion behind.
+        self.assertNotIn("if (isReading) {\n                synth.cancel();", source)
+        # Completions carry the id of the read they belong to, not whichever read the
+        # page happens to be on when the event fires.
+        self.assertIn("const readingId = payload.reading_id || currentReadingId;", source)
+        self.assertIn("speakText(payload.text, payload.reading_id || null);", source)
+
     def test_room_codes_are_validated_instead_of_rewritten(self):
         source = (ROOT / "static/js/ui.js").read_text(encoding="utf-8")
         self.assertIn("!/^[a-z0-9][a-z0-9-]{0,63}$/.test(currentRoomId)", source)

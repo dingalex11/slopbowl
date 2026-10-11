@@ -74,6 +74,49 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message["type"], "UPDATE_STATUS")
         self.assertIn("already in progress", message["payload"]["text"].lower())
 
+    async def test_stale_reading_completion_cannot_skip_the_next_read(self):
+        """A completion left over from an earlier speech must not satisfy a fresh read.
+
+        Otherwise hitting Start Tossup jumps straight to the buzz window (and its
+        5-second timer) without ever reading the question.
+        """
+        moderator = ScienceBowlModerator(
+            use_audio=True,
+            initial_bank=[{"tossup_text": "Question", "tossup_answer": "Answer"}],
+        )
+        moderator.state.transition_to(GameState.READING_TOSSUP)
+        moderator.inbound_queue.put_nowait(Event(type="READING_DONE", payload={}))
+
+        task = asyncio.create_task(moderator._handle_tossup_attempt(moderator.question_bank[0]))
+
+        async def collect_until_status(timeout=1.0):
+            seen = []
+            deadline = asyncio.get_running_loop().time() + timeout
+            while asyncio.get_running_loop().time() < deadline:
+                try:
+                    message = await asyncio.wait_for(moderator.outbound_queue.get(), 0.05)
+                except asyncio.TimeoutError:
+                    continue
+                seen.append(message)
+                if message.get("type") == "UPDATE_STATUS" and message["payload"].get("text") == "⏳ 5 Seconds to Buzz...":
+                    return seen
+            return seen
+
+        try:
+            early = await collect_until_status(0.5)
+            early_statuses = [m["payload"].get("text") for m in early if m.get("type") == "UPDATE_STATUS"]
+            self.assertNotIn("⏳ 5 Seconds to Buzz...", early_statuses, "the stale completion skipped the read")
+            self.assertIn("🔊 Reading Tossup...", early_statuses)
+
+            # The real completion still advances the question normally.
+            moderator.inbound_queue.put_nowait(Event(type="READING_DONE", payload={}))
+            late = await collect_until_status(1.0)
+            late_statuses = [m["payload"].get("text") for m in late if m.get("type") == "UPDATE_STATUS"]
+            self.assertIn("⏳ 5 Seconds to Buzz...", late_statuses)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
     async def test_tossup_talk_window_is_four_seconds(self):
         """The mic window a player is given to speak must be the configured 4 seconds."""
         moderator = ScienceBowlModerator(

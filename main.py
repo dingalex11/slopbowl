@@ -325,22 +325,31 @@ class ScienceBowlModerator:
             elif evt_type in ["FORCE_RESET_STATE", "CHALLENGE"]:
                 return Event(type="FORCE_RESET_STATE")
 
+    def _drop_stale_reading_completions(self):
+        """Discard read completions left over from an earlier speech.
+
+        A stopped utterance reports completion just like a finished one (the browser
+        fires 'error: interrupted' on cancel), so a surplus reply can be sitting in the
+        queue when the next read begins. Without this the stale reply satisfies the
+        fresh read and the question jumps straight to the buzz window and its timer.
+        """
+        kept = []
+        while not self.inbound_queue.empty():
+            try:
+                event = self.inbound_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
+            if evt_type != "READING_DONE":
+                kept.append(event)
+        for event in kept:
+            self.inbound_queue.put_nowait(event)
+
     async def _speak_and_wait(self, text: str, *, moderator_only: bool = False):
         if not self.use_audio or not text:
             return
-            
-        requeue_events = []
-        while not self.inbound_queue.empty():
-            try:
-                evt = self.inbound_queue.get_nowait()
-                evt_type = evt.type.name if hasattr(evt.type, 'name') else str(evt.type)
-                if evt_type != "READING_DONE":
-                    requeue_events.append(evt)
-            except asyncio.QueueEmpty:
-                break
-                
-        for evt in requeue_events:
-            self.inbound_queue.put_nowait(evt)
+
+        self._drop_stale_reading_completions()
 
         reading_id = self._new_reading_id(moderator_only=moderator_only)
         payload = {"text": text, "moderator_only": moderator_only}
@@ -402,6 +411,7 @@ class ScienceBowlModerator:
         if not skip_read:
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "🔊 Reading Tossup..."}})
             if self.use_audio and text_to_read:
+                self._drop_stale_reading_completions()
                 reading_id = self._new_reading_id()
                 reading_payload = {"text": text_to_read}
                 if reading_id:
@@ -522,18 +532,7 @@ class ScienceBowlModerator:
         await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🔊 {phrase}"}})
         
         if self.use_audio:
-            requeue_events = []
-            while not self.inbound_queue.empty():
-                try:
-                    evt = self.inbound_queue.get_nowait()
-                    evt_type = evt.type.name if hasattr(evt.type, 'name') else str(evt.type)
-                    if evt_type != "READING_DONE":
-                        requeue_events.append(evt)
-                except asyncio.QueueEmpty:
-                    break
-            
-            for evt in requeue_events:
-                self.inbound_queue.put_nowait(evt)
+            self._drop_stale_reading_completions()
 
             reading_id = self._new_reading_id()
             reading_payload = {"text": phrase}

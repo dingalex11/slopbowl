@@ -21,6 +21,10 @@ let currentOnlineBuzzTeam = null;
 let onlineCaptainOnly = false;
 let isReadingOnline = false;
 let onlineReadCompletions = new Set();
+// Every read gets its own generation: restarting or stopping speech bumps it, so an
+// utterance from an earlier read can never report completion for the read the server
+// is waiting on.
+let readingGeneration = 0;
 
 // --- ACTION TIMER LOGIC ---
 let actionTimerInterval = null;
@@ -400,7 +404,7 @@ function connectWebSocket(roomId, apiKey = null) {
                 onlineReadCompletions = new Set();
             }
             advancePlayerToBuzzer();
-            speakText(payload.text);
+            speakText(payload.text, payload.reading_id || null);
         }
         else if (data.type === 'OPEN_BUZZ') {
             onlineBuzzOpen = true;
@@ -472,9 +476,12 @@ function connectWebSocket(roomId, apiKey = null) {
         else if (data.type === 'BUZZ') {
             stopActionTimer(); 
             if (isReading) {
-                synth.cancel();
-                isReading = false;
-                sendEvent('LOG_BUZZPOINT', { buzzpoint: currentSpokenWord });
+                const spokenWord = currentSpokenWord;
+                // Stopping the read must not report a completion: the server takes the
+                // next completion it sees as this read finishing, and that used to
+                // start the next question's 5-second buzz timer before it was read.
+                cancelSpeech();
+                sendEvent('LOG_BUZZPOINT', { buzzpoint: spokenWord });
             }
             
             setStage('BUZZ');
@@ -587,9 +594,10 @@ function sendEvent(eventType, payload = {}) {
         }
         if (currentRoomMode === 'online' && eventType === 'BUZZ' && (!buzzWindowAllowsMe() || (onlineCaptainOnly && !isOnlineCaptain))) return;
         if (currentRoomMode === 'online' && eventType === 'READING_DONE') {
-            if (!currentReadingId || onlineReadCompletions.has(currentReadingId)) return;
-            onlineReadCompletions.add(currentReadingId);
-            payload = { reading_id: currentReadingId };
+            const readingId = payload.reading_id || currentReadingId;
+            if (!readingId || onlineReadCompletions.has(readingId)) return;
+            onlineReadCompletions.add(readingId);
+            payload = { reading_id: readingId };
         }
         ws.send(JSON.stringify({ type: eventType, payload: payload }));
     } else {
@@ -664,26 +672,55 @@ function renderOnlineRoster(players) {
     }
 }
 
-function speakText(text) {
+function sendReadingDone(readingId) {
+    if (currentRoomMode === 'online') {
+        sendEvent('READING_DONE', { reading_id: readingId || currentReadingId });
+    } else {
+        sendEvent('READING_DONE', {});
+    }
+}
+
+function cancelSpeech() {
+    readingGeneration++;  // Anything still speaking is stale from here on.
+    if (window._activeUtterance) {
+        window._activeUtterance.onend = null;
+        window._activeUtterance.onerror = null;
+    }
+    window._activeUtterance = null;
+    isReading = false;
+    synth.cancel();
+}
+
+function speakText(text, readingId = null) {
     try {
+        const generation = ++readingGeneration;
+
         if (window._activeUtterance) {
             window._activeUtterance.onend = null;
             window._activeUtterance.onerror = null;
         }
-        
+        window._activeUtterance = null;
+
         synth.cancel(); 
         
         if (!text || text.trim() === "") {
-            sendEvent('READING_DONE', {});
+            isReading = false;
+            sendReadingDone(readingId);
             return;
         }
 
+        // A read counts as in flight from the request onward, so a buzz during the
+        // 50ms start delay stops it before it is spoken.
+        isReading = true;
+
         setTimeout(() => {
+            // A newer read already replaced this one, so this utterance must stay silent.
+            if (generation !== readingGeneration) return;
+
             const utterance = new SpeechSynthesisUtterance(text);
             window._activeUtterance = utterance; 
             
             utterance.rate = 1.1; 
-            isReading = true;
             
             utterance.onboundary = (event) => {
                 if (event.name === 'word') {
@@ -693,33 +730,26 @@ function speakText(text) {
                     // logging but never displayed on screen.
                 }
             };
-            
-            utterance.onend = () => {
+
+            const finishReading = () => {
+                // An utterance that was stopped (or replaced) reports 'interrupted'
+                // just like a finished one. Sending that as a completion satisfies the
+                // next read early, which skips the question and starts the buzz timer.
+                if (generation !== readingGeneration) return;
                 isReading = false;
                 currentSpokenWord = "";
-                if (currentRoomMode === 'online') {
-                    if (currentReadingId && !onlineReadCompletions.has(currentReadingId)) sendEvent('READING_DONE', {});
-                    isReadingOnline = false;
-                } else {
-                    sendEvent('READING_DONE', {});
-                }
+                if (currentRoomMode === 'online') isReadingOnline = false;
+                sendReadingDone(readingId);
                 // The timer trigger has been removed from here so it doesn't fire after reading the result!
             };
 
-            utterance.onerror = (e) => {
-                isReading = false;
-                if (currentRoomMode === 'online') {
-                    if (currentReadingId && !onlineReadCompletions.has(currentReadingId)) sendEvent('READING_DONE', {});
-                    isReadingOnline = false;
-                } else {
-                    sendEvent('READING_DONE', {});
-                }
-            };
+            utterance.onend = finishReading;
+            utterance.onerror = finishReading;
             
             synth.speak(utterance);
         }, 50);
     } catch (err) {
-        sendEvent('READING_DONE', {});
+        sendReadingDone(readingId);
     }
 }
 
