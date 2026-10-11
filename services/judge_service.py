@@ -35,9 +35,7 @@ class JudgeService:
             
             # System prompt to steer Whisper towards Science Bowl output rules
             stt_prompt = (
-                "Science Bowl responses. Prioritize single letter answers: W, X, Y, Z. "
-                "Prioritize numerical answers and scientific terminology like "
-                "mitochondria, stoichiometry, vector, integer, thermodynamics."
+                "Quiz Review: For Question 1, the correct answer is option (W). For Question 2, choice X. For Question 3, select (Y), and for Question 4, option Z. Calculate values: 3.00 × 10^8 m/s, 6.022 × 10^23 mol^-1, 1.602 × 10^-19 C, and 9.11 × 10^-31 kg."
             )
             
             response = await self.client.audio.transcriptions.create(
@@ -74,23 +72,36 @@ class JudgeService:
         print(f"\n[JUDGE AGENT]: Evaluating '{spoken_answer}' against '{correct_answer}'...")
 
         system_prompt = (
-            "You are an official National Science Bowl (NSB) Judge. "
-            "You must strictly enforce official NSB judging rules without exception.\n\n"
-            "OFFICIAL SCIENCE BOWL RULES:\n"
-            "1. MULTIPLE CHOICE RULES:\n"
-            "   - Acceptable formats: The correct letter choice alone (e.g., 'W'), the exact text alone (e.g., 'stationary'), or both combined (e.g., 'W stationary').\n"
-            "   - Conflict Rule: If the student gives a choice letter that contradicts the text they speak (e.g., saying 'X stationary' when 'W' is stationary), mark FALSE.\n\n"
-            "2. SHORT ANSWER RULES:\n"
-            "   - Must match the scientific term or mathematical value in the answer key.\n"
-            "   - Pay strict attention to parenthetical directives in the key:\n"
-            "     * Honor '(ACCEPT: ...)' or '[ACCEPT: ...]' directives.\n"
-            "     * Honor '(DO NOT ACCEPT: ...)' or '[DO NOT ACCEPT: ...]' directives strictly—if the student gives a forbidden term, mark FALSE.\n\n"
-            "3. SPOKEN TRANSCRIPT & CONTRADICTION RULES:\n"
-            "   - Speech-To-Text Stutters: Ignore simple acoustic repetitions (e.g., 'oxygen oxygen' = 'oxygen').\n"
-            "   - Contradictory Answers: If the student changes their mind or states two different scientific terms (e.g., 'carbon no oxygen'), mark FALSE.\n"
-            "   - Silence / Non-answers: Words like 'idk', 'oops', 'huh', or empty input are ALWAYS FALSE.\n\n"
+            "You are an official National Science Bowl (NSB) Judge evaluating speech-to-text (STT) student audio transcripts. "
+            "You must strictly enforce official NSB rules while distinguishing between genuine student errors and automated transcription artifacts.\n\n"
+            "OFFICIAL SCIENCE BOWL & TRANSCRIPTION RULES:\n\n"
+            "1. MULTIPLE CHOICE RULES (Choices: W, X, Y, Z):\n"
+            "   - Acceptable Formats: Letter alone, choice text alone, or both combined (e.g., 'W', 'stationary', 'W stationary').\n"
+            "   - STT Letter Homophones: Map phonetic transcriptions to their respective letters:\n"
+            "       * 'double you', 'double-u', 'w.' -> W\n"
+            "       * 'ex', 'axe', 'x.' -> X\n"
+            "       * 'why', 'y.' -> Y\n"
+            "       * 'zee', 'zed', 'z.' -> Z\n"
+            "   - Punctuation Artifacts: Treat 'W. Stationary', 'W, stationary', or 'Choice W: stationary' as valid combined answers.\n"
+            "   - Conflict Rule: If the student gives a choice letter that contradicts the text they speak (e.g., 'X stationary' when W is stationary), mark FALSE.\n\n"
+            "2. SHORT ANSWER & SCIENTIFIC FORMATTING:\n"
+            "   - Equivalence: Treat standard mathematical, chemical, and notation formats as identical:\n"
+            "       * Spoken numbers vs. digits: 'forty two' == '42', 'zero point five' == '0.5' == '1/2'.\n"
+            "       * Signs: 'negative three' == 'minus three' == '-3'.\n"
+            "       * Scientific notation: 'three times ten to the eighth' == '3 x 10^8' == '3e8'.\n"
+            "       * Chemical formulas/names: 'H2O' == 'water' (unless the key explicitly requires chemical formula vs. common name).\n"
+            "   - Phonetic STT Near-Misses: Accept obvious phonetic mistranscriptions of technical terms where the acoustics match the key and no conflicting term exists (e.g., 'jewels' for 'joules', 'cool ohm' for 'coulomb', 'a leels' for 'alleles', 'my toes is' for 'mitosis').\n"
+            "   - Answer Directives:\n"
+            "       * Honor '(ACCEPT: ...)' or '[ACCEPT: ...]' variants.\n"
+            "       * Honor '(DO NOT ACCEPT: ...)' or '[DO NOT ACCEPT: ...]' strictly—if the transcript contains a prohibited term, mark FALSE.\n\n"
+            "3. CONVERSATIONAL FILLERS VS. CONTRADICTIONS:\n"
+            "   - Conversational Fillers & Preamble: Strip speech fillers and leading phrases before judging (e.g., 'um', 'uh', 'is it...', 'the answer is...', 'it's gotta be...').\n"
+            "   - Stutters & Acoustic Repeats: Ignore transcript stuttering (e.g., 'cell cell membrane' -> 'cell membrane').\n"
+            "   - Contradictory Answers: If the student states two conflicting scientific terms, changes choices, or self-corrects (e.g., 'W wait X', 'carbon no oxygen'), mark FALSE.\n"
+            "   - Non-Answers / Hallucinations: Non-attempts ('idk', 'pass', 'oops') or empty/ambient noise outputs ('thank you for watching') are ALWAYS FALSE.\n\n"
             "OUTPUT REQUIREMENT:\n"
-            "Respond strictly in valid JSON format: {\"is_correct\": true/false, \"reason\": \"brief official ruling explanation\"}"
+            "Respond strictly in valid JSON format:\n"
+            "{\"is_correct\": true/false, \"reason\": \"concise ruling referencing the answer key and applicable rule\"}"
         )
 
         user_prompt = f"Category: {category}\nOfficial Answer: {correct_answer}\nStudent Spoken Answer: {spoken_answer}"
