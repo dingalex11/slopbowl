@@ -2,6 +2,7 @@ import asyncio
 import unittest
 
 from core.events import Event
+from core.state_machine import GameState
 from main import ScienceBowlModerator
 
 
@@ -72,6 +73,37 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
         message = await moderator.outbound_queue.get()
         self.assertEqual(message["type"], "UPDATE_STATUS")
         self.assertIn("already in progress", message["payload"]["text"].lower())
+
+    async def test_tossup_talk_window_is_four_seconds(self):
+        """The mic window a player is given to speak must be the configured 4 seconds."""
+        moderator = ScienceBowlModerator(
+            use_audio=True,
+            initial_bank=[{"tossup_text": "Question", "tossup_answer": "Answer"}],
+        )
+        moderator.state.transition_to(GameState.READING_TOSSUP)
+        task = asyncio.create_task(moderator._handle_tossup_attempt(moderator.question_bank[0]))
+
+        async def drive_to_listening():
+            """Follow the tossup handshake until the server opens the answer window."""
+            while True:
+                message = await asyncio.wait_for(moderator.outbound_queue.get(), 3.0)
+                kind = message.get("type")
+                if kind == "START_READING":
+                    moderator.inbound_queue.put_nowait(Event(type="READING_DONE", payload={}))
+                    moderator.inbound_queue.put_nowait(Event(type="BUZZ", payload={"team": "Team A"}))
+                elif kind == "BUZZ":
+                    # Confirm the reader is done so the loop reaches the answer window.
+                    moderator.inbound_queue.put_nowait(Event(type="READING_DONE", payload={}))
+                elif kind == "START_LISTENING":
+                    return message
+
+        try:
+            listening = await drive_to_listening()
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        self.assertEqual(listening["payload"]["timeout"], 4.0)
 
 
 if __name__ == "__main__":

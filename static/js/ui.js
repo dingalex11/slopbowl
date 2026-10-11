@@ -1,8 +1,6 @@
-// SLOPBOWL app glue: room lifecycle, setup, match clock, stage badges.
+// SLOPBOWL app glue: room lifecycle, setup, stage badges.
 // DOM navigation lives in slopbowl_ui.js (navigateTo/openModal/showToast).
 let setupComplete = false;
-let matchTimerInterval = null;
-let matchTimeSeconds = 480;
 let isMatchPaused = false;
 let currentRoomId = null;
 
@@ -34,17 +32,12 @@ function updateRosterNames(rosterData) {
 
 // --- CHALLENGE ---
 function triggerChallenge() {
-    // 1. Immediately pause the clock if it's currently running
-    if (typeof isMatchPaused !== 'undefined' && !isMatchPaused) {
-        togglePause();
-    }
-
-    // 2. Kill the Text-to-Speech immediately so the reader shuts up
+    // Kill the Text-to-Speech immediately so the reader shuts up
     if (window.speechSynthesis) {
         window.speechSynthesis.cancel();
     }
 
-    // 3. Tell the backend to kill the current question and advance
+    // Tell the backend to kill the current question and advance
     sendEvent('CHALLENGE', {});
     showToast('Challenge submitted — question paused and skipped');
 }
@@ -408,31 +401,11 @@ function confirmSetup() {
     navigateTo(5);
 }
 
-// --- MATCH CLOCK ---
+// --- MATCH START ---
+// There is no global match clock: the match runs off live play and question counts.
 function beginMatch() {
     const overlay = document.getElementById('match-start-overlay');
     if (overlay) overlay.classList.add('hidden');
-
-    const timerDisplay = document.getElementById('main-timer-display');
-
-    if (matchTimerInterval) clearInterval(matchTimerInterval);
-
-    matchTimerInterval = setInterval(() => {
-        if (isMatchPaused) return;
-
-        if (matchTimeSeconds <= 0) {
-            clearInterval(matchTimerInterval);
-            timerDisplay.innerText = "00:00";
-            timerDisplay.classList.add("text-neonPink", "animate-pulse");
-            timerDisplay.classList.remove("text-neonCyan");
-            return;
-        }
-
-        matchTimeSeconds--;
-        const m = Math.floor(matchTimeSeconds / 60);
-        const s = matchTimeSeconds % 60;
-        timerDisplay.innerText = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    }, 1000);
 }
 
 function togglePause() {

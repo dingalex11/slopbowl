@@ -22,6 +22,10 @@ from services.camera_service import VisionService
 
 MANUAL_START_EVENTS = ("MANUAL_START_TOSSUP", "MANUAL_REREAD_TOSSUP", "MANUAL_START_BONUS")
 
+# Seconds a player gets to speak once the mic opens: the tossup answer window and
+# the bonus captain's answer window both use this.
+ANSWER_WINDOW_SECONDS = 4.0
+
 # Events the loops must keep serving while a question is live. Anything here is
 # processed (or answered) instead of being silently dropped mid-read or mid-buzz.
 ADMIN_EVENTS = (
@@ -149,7 +153,7 @@ class ScienceBowlModerator:
 
         elif evt_type == "MATCH_BEGIN":
             if self.question_bank and self.current_q_idx < len(self.question_bank):
-                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✅ Match timer started. Ready for the first tossup."}})
+                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✅ Match started. Ready for the first tossup."}})
 
         elif evt_type == "SAVE_ROSTER":
             self.custom_teams = event.payload.get("teams", {})
@@ -558,7 +562,7 @@ class ScienceBowlModerator:
             self.answer_audio_open = True
             await self.outbound_queue.put({
                 "type": "START_LISTENING", 
-                "payload": {"timeout": 8.0, "expires_at": current_sys_time + 8.0, **({"target_user_id": self.answering_user_id} if self.online_mode else {})}
+                "payload": {"timeout": ANSWER_WINDOW_SECONDS, "expires_at": current_sys_time + ANSWER_WINDOW_SECONDS, **({"target_user_id": self.answering_user_id} if self.online_mode else {})}
             })
             try:
                 while True:
@@ -861,10 +865,10 @@ class ScienceBowlModerator:
                             self.current_q_idx += 1
                             continue
 
-                        # --- DYNAMIC LISTEN TIMEOUT (MIN 8 SECS OR REMAINING TIME) ---
+                        # --- DYNAMIC LISTEN TIMEOUT (ANSWER WINDOW OR REMAINING TIME) ---
                         elapsed_confer = asyncio.get_running_loop().time() - start_bonus_time
                         remaining_confer = max(0.0, 20.0 - elapsed_confer)
-                        listen_time = min(8.0, remaining_confer)
+                        listen_time = min(ANSWER_WINDOW_SECONDS, remaining_confer)
                         if self.online_mode and not buzzed_in:
                             listen_time = 0.0
                         
