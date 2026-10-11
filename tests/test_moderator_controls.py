@@ -3,7 +3,7 @@ import unittest
 
 from core.events import Event
 from core.state_machine import GameState
-from main import ScienceBowlModerator
+from main import READ_FAILED_WARNING, ScienceBowlModerator
 
 
 class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
@@ -116,6 +116,39 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+    async def test_failed_read_warns_instead_of_claiming_the_question_was_read(self):
+        """A station that cannot speak must say so; the read is not a finished read.
+
+        Otherwise the buzz window (and its 5-second timer) opens with the question
+        never having been read, which is what the moderator actually saw.
+        """
+        moderator = ScienceBowlModerator(
+            use_audio=True,
+            initial_bank=[{"tossup_text": "Question", "tossup_answer": "Answer"}],
+        )
+        moderator.state.transition_to(GameState.READING_TOSSUP)
+        task = asyncio.create_task(moderator._handle_tossup_attempt(moderator.question_bank[0]))
+
+        async def drive_failed_read():
+            statuses = []
+            while True:
+                message = await asyncio.wait_for(moderator.outbound_queue.get(), 3.0)
+                if message.get("type") == "START_READING":
+                    moderator.inbound_queue.put_nowait(Event(type="READING_FAILED", payload={}))
+                elif message.get("type") == "UPDATE_STATUS":
+                    statuses.append(message["payload"]["text"])
+                    if len(statuses) >= 3:
+                        return statuses
+
+        try:
+            statuses = await drive_failed_read()
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        self.assertIn("⏳ 5 Seconds to Buzz...", statuses)
+        self.assertIn(READ_FAILED_WARNING, statuses)
 
     async def test_tossup_talk_window_is_four_seconds(self):
         """The mic window a player is given to speak must be the configured 4 seconds."""

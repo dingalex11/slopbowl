@@ -342,6 +342,51 @@ class WebSocketAuthorizationTests(unittest.TestCase):
         self.assertTrue(reading_id)
         self.assertEqual(moderator.reading_completions, set())
 
+    def test_a_failed_read_is_only_reported_by_the_reading_station(self):
+        """A listener that cannot speak must not end the room's read.
+
+        The moderator station is the reader; its failure is forwarded (with the read's
+        id) so the moderator is told, while a listener's failure is answered privately.
+        """
+        from main import ScienceBowlModerator
+
+        def drive(uid, event_type, expect_forwarded, expect_error):
+            moderator = ScienceBowlModerator(use_audio=True, initial_bank=[])
+            moderator.online_mode = True
+            moderator.online_participants = {
+                "owner": ui_service.RoomConnection(FakeSocket(), "owner", "owner", team="Team A", player_name="Host"),
+                "player": ui_service.RoomConnection(FakeSocket(), "player", "player", team="Team A", player_name="Ada"),
+            }
+            reading_id = moderator._new_reading_id()
+            profile = {"name": "Host", "team": "Team A", "captain": False}
+
+            async def fake_connect(websocket, room_id, user_id, role, seat=None, **kwargs):
+                await websocket.send_json({"type": "CONNECTED", "payload": {"role": role, "mode": "online", **profile}})
+                return moderator, ui_service.RoomConnection(websocket, user_id, role, team="Team A", player_name="Host")
+
+            with patch.object(ui_service, "verify_id_token", return_value=FakeUser(uid)), patch.object(
+                ui_service, "get_room_info", return_value={"owner_uid": "owner", "mode": "online"}
+            ), patch.object(ui_service, "get_room_participant", return_value=profile), patch.object(
+                ui_service.manager, "connect", side_effect=fake_connect
+            ), patch.object(ui_service.manager, "disconnect", new=AsyncMock()):
+                client = TestClient(ui_service.app)
+                with client.websocket_connect("/ws/read-room", headers={"origin": "http://testserver"}) as websocket:
+                    websocket.send_json({"type": "AUTH_INIT", "payload": {"id_token": "signed-token"}})
+                    self.assertEqual(websocket.receive_json()["type"], "CONNECTED")
+                    websocket.send_json({"type": event_type, "payload": {"reading_id": reading_id}})
+                    if expect_error:
+                        self.assertEqual(websocket.receive_json()["type"], "ERROR")
+            if expect_forwarded:
+                event = moderator.inbound_queue.get_nowait()
+                self.assertEqual(event.type, event_type)
+                self.assertEqual(event.payload, {"reading_id": reading_id})
+            else:
+                self.assertTrue(moderator.inbound_queue.empty())
+
+        drive("owner", "READING_FAILED", True, False)
+        drive("owner", "READING_DONE", True, False)
+        drive("player", "READING_FAILED", False, True)
+
     def test_authenticated_player_buzz_uses_joined_identity_and_captain_claim(self):
         async def verify_buzz(profile, should_accept):
             moderator = FakeModerator()

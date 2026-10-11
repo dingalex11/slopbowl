@@ -40,6 +40,15 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_client_event("ADJUST_SCORE", {"team": "Team A", "delta": 1_000_000})
 
+    def test_failed_read_carries_the_same_read_id_as_a_completion(self):
+        reading_id = "a" * 32
+        self.assertEqual(validate_client_event("READING_DONE", {"reading_id": reading_id})["reading_id"], reading_id)
+        self.assertEqual(validate_client_event("READING_FAILED", {"reading_id": reading_id})["reading_id"], reading_id)
+        with self.assertRaises(ValueError):
+            validate_client_event("READING_FAILED", {"reading_id": "not-a-read-id"})
+        with self.assertRaises(ValueError):
+            validate_client_event("READING_FAILED", {"reading_id": reading_id, "error": "synthesis-failed"})
+
     def test_roster_values_reject_control_characters_and_extra_keys(self):
         self.assertEqual(
             validate_client_event("SAVE_ROSTER", {"teams": {"Team A": "Ravens"}, "players": {"A-1": "Ada"}})["teams"]["Team A"],

@@ -586,7 +586,7 @@ function announcePacketLoaded(payload) {
 
 function sendEvent(eventType, payload = {}) {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        const playerEvents = currentRoomMode === 'online' && ['PING', 'BUZZ', 'ANSWER_AUDIO', 'READING_DONE'].includes(eventType);
+        const playerEvents = currentRoomMode === 'online' && ['PING', 'BUZZ', 'ANSWER_AUDIO', 'READING_DONE', 'READING_FAILED'].includes(eventType);
         if (currentUserRole !== 'owner' && !playerEvents) {
             console.warn(`Room permission required for ${eventType}.`);
             showEventFeedback('Moderator controls are locked in this room.');
@@ -680,6 +680,16 @@ function sendReadingDone(readingId) {
     }
 }
 
+function sendReadingFailed(readingId) {
+    // Distinct from a completion: a station that could not speak has not read the
+    // question, and the server must not open the buzz window believing it was read.
+    if (currentRoomMode === 'online') {
+        sendEvent('READING_FAILED', { reading_id: readingId || currentReadingId });
+    } else {
+        sendEvent('READING_FAILED', {});
+    }
+}
+
 function cancelSpeech() {
     readingGeneration++;  // Anything still speaking is stale from here on.
     if (window._activeUtterance) {
@@ -712,45 +722,62 @@ function speakText(text, readingId = null) {
         // A read counts as in flight from the request onward, so a buzz during the
         // 50ms start delay stops it before it is spoken.
         isReading = true;
-
-        setTimeout(() => {
-            // A newer read already replaced this one, so this utterance must stay silent.
-            if (generation !== readingGeneration) return;
-
-            const utterance = new SpeechSynthesisUtterance(text);
-            window._activeUtterance = utterance; 
-            
-            utterance.rate = 1.1; 
-            
-            utterance.onboundary = (event) => {
-                if (event.name === 'word') {
-                    const wordStr = text.substring(event.charIndex);
-                    currentSpokenWord = wordStr.split(/[ \n\r\t]+/, 1)[0].replace(/[^a-zA-Z0-9-]/g, '');
-                    // AUDIO-ONLY READOUT: the spoken word is tracked for buzzpoint
-                    // logging but never displayed on screen.
-                }
-            };
-
-            const finishReading = () => {
-                // An utterance that was stopped (or replaced) reports 'interrupted'
-                // just like a finished one. Sending that as a completion satisfies the
-                // next read early, which skips the question and starts the buzz timer.
-                if (generation !== readingGeneration) return;
-                isReading = false;
-                currentSpokenWord = "";
-                if (currentRoomMode === 'online') isReadingOnline = false;
-                sendReadingDone(readingId);
-                // The timer trigger has been removed from here so it doesn't fire after reading the result!
-            };
-
-            utterance.onend = finishReading;
-            utterance.onerror = finishReading;
-            
-            synth.speak(utterance);
-        }, 50);
+        scheduleUtterance(text, readingId, generation, 0);
     } catch (err) {
         sendReadingDone(readingId);
     }
+}
+
+function scheduleUtterance(text, readingId, generation, attempt) {
+    setTimeout(() => {
+        // A newer read replaced this one, so this utterance must stay silent.
+        if (generation !== readingGeneration) return;
+
+        const utterance = new SpeechSynthesisUtterance(text);
+        window._activeUtterance = utterance;
+
+        utterance.rate = 1.1;
+
+        utterance.onboundary = (event) => {
+            if (event.name === 'word') {
+                const wordStr = text.substring(event.charIndex);
+                currentSpokenWord = wordStr.split(/[ \n\r\t]+/, 1)[0].replace(/[^a-zA-Z0-9-]/g, '');
+                // AUDIO-ONLY READOUT: the spoken word is tracked for buzzpoint
+                // logging but never displayed on screen.
+            }
+        };
+
+        const finishReading = (failed) => {
+            if (generation !== readingGeneration) return;
+            isReading = false;
+            window._activeUtterance = null;
+            if (currentRoomMode === 'online') isReadingOnline = false;
+            if (failed) {
+                sendReadingFailed(readingId);
+                return;
+            }
+            currentSpokenWord = "";
+            sendReadingDone(readingId);
+            // The timer trigger has been removed from here so it doesn't fire after reading the result!
+        };
+
+        utterance.onend = () => finishReading(false);
+        utterance.onerror = () => {
+            // An utterance we stopped ourselves is already filtered by the generation
+            // guard, so anything arriving here came from outside us: another page that
+            // stole the speech engine, or a browser that cannot speak at all. Neither
+            // means the question has been read, so retry once, then say so plainly.
+            if (generation !== readingGeneration) return;
+            if (attempt === 0) {
+                synth.cancel();
+                scheduleUtterance(text, readingId, generation, 1);
+                return;
+            }
+            finishReading(true);
+        };
+
+        synth.speak(utterance);
+    }, attempt === 0 ? 50 : 350);
 }
 
 // --- MICROPHONE RECORDING LOGIC (FOR GROQ WHISPER) ---

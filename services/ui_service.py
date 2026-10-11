@@ -22,10 +22,24 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=str(PROJECT_ROOT / "static")), name="static")
 
-OWNER_ONLY_EVENTS = {"SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY", "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP",    "PAUSE_MATCH", "MATCH_BEGIN", "READING_DONE", "ANSWER_AUDIO", "LOG_BUZZPOINT", "AUTH_INIT"}
+
+@app.middleware("http")
+async def _revalidate_client_code(request: Request, call_next):
+    """Make browsers revalidate the client code instead of caching it heuristically.
+
+    A tab holding an older websocket.js keeps speaking the older read protocol, which
+    makes an already-deployed fix look like a live bug. no-cache still permits 304s.
+    """
+    response = await call_next(request)
+    cacheable = request.url.path.startswith("/static/") or response.headers.get("content-type", "").startswith("text/html")
+    if cacheable:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+OWNER_ONLY_EVENTS = {"SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY", "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP",    "PAUSE_MATCH", "MATCH_BEGIN", "READING_DONE", "READING_FAILED", "ANSWER_AUDIO", "LOG_BUZZPOINT", "AUTH_INIT"}
 OWNER_ONLY_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "DOWNLOAD_CSV", "DEBUG_FRAME"}
 ONLINE_PUBLIC_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "UPDATE_STATUS", "UPDATE_SCORE", "BUZZ", "ROOM_ROSTER", "CONNECTED", "ERROR", "OPEN_BUZZ", "CLOSE_BUZZ"}
-ONLINE_PLAYER_EVENTS = {"BUZZ", "ANSWER_AUDIO", "READING_DONE", "PING"}
+ONLINE_PLAYER_EVENTS = {"BUZZ", "ANSWER_AUDIO", "READING_DONE", "READING_FAILED", "PING"}
 
 
 @dataclass(eq=False)
@@ -505,16 +519,25 @@ async def room_websocket_endpoint(websocket: WebSocket, room_id: str):
                 continue
             if mode == "online" and event_type == "PING":
                 continue
-            if mode == "online" and event_type == "READING_DONE":
+            if mode == "online" and event_type in ("READING_DONE", "READING_FAILED"):
                 expected = moderator.current_reading_id
                 if not expected or event_payload.get("reading_id") != expected:
+                    continue
+                if event_type == "READING_FAILED" and user.uid not in moderator.reading_expected_users:
+                    # A listener whose own browser could not speak does not end the room's
+                    # read; only the station that reads the question decides when it is over.
+                    logger.warning("Read %s could not be spoken by %s", expected, user.uid)
+                    await websocket.send_json({"type": "ERROR", "payload": {"message": "Your browser could not read this question aloud."}})
                     continue
                 if user.uid not in moderator.online_participants or user.uid in moderator.reading_completions:
                     continue
                 moderator.reading_completions.add(user.uid)
                 if moderator.reading_expected_users.issubset(moderator.reading_completions):
+                    # Names the station that ended the read, so a read that ends too early
+                    # can be traced from the server logs alone.
+                    logger.info("Read %s ended by %s (%s)", expected, user.uid, event_type)
                     try:
-                        moderator.inbound_queue.put_nowait(Event(type="READING_DONE", payload={"reading_id": expected}, user_id=user.uid, role=role))
+                        moderator.inbound_queue.put_nowait(Event(type=event_type, payload={"reading_id": expected}, user_id=user.uid, role=role))
                     except asyncio.QueueFull:
                         await websocket.send_json({"type": "ERROR", "payload": {"message": "Room is busy"}})
                 continue

@@ -8,7 +8,7 @@ from core.config import MAX_AUDIO_BYTES, MAX_FRAME_BYTES, MAX_QUESTIONS_PER_BANK
 
 ROOM_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 EVENT_TYPES = {
-    "PING", "BUZZ", "READING_DONE", "ANSWER_AUDIO", "PROCESS_FRAME",
+    "PING", "BUZZ", "READING_DONE", "READING_FAILED", "ANSWER_AUDIO", "PROCESS_FRAME",
     "SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION",
     "CALIBRATE_BASELINE", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY",
     "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT",
@@ -80,7 +80,8 @@ def validate_client_event(event_type: Any, payload: Any) -> dict[str, Any]:
                 raise ValueError("Invalid player identifier")
         if set(payload) - {"team", "player"}:
             raise ValueError("Unsupported BUZZ fields")
-    elif event_type == "READING_DONE":
+    elif event_type in ("READING_DONE", "READING_FAILED"):
+        # A failed read reports the same read identifier, so it can only end that read.
         if set(payload) - {"reading_id"}:
             raise ValueError("Unsupported reading completion fields")
         if "reading_id" in payload:

@@ -53,6 +53,12 @@ class FrontendSecurityTests(unittest.TestCase):
         self.assertIn("if (generation !== readingGeneration) return;", source)
         self.assertIn("function cancelSpeech()", source)
         self.assertIn("function sendReadingDone(readingId)", source)
+        # A station whose browser cannot speak must not claim the read happened: it
+        # retries once and then reports the failure with the read's id.
+        self.assertIn("function sendReadingFailed(readingId)", source)
+        self.assertIn("sendEvent('READING_FAILED', { reading_id: readingId || currentReadingId });", source)
+        self.assertIn("scheduleUtterance(text, readingId, generation, 1);", source)
+        self.assertIn("}, attempt === 0 ? 50 : 350);", source)
         # The buzz path stops the read through cancelSpeech (handlers detached) rather
         # than cancelling the speech engine directly, which left a completion behind.
         self.assertNotIn("if (isReading) {\n                synth.cancel();", source)

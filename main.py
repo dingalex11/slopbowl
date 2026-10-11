@@ -22,6 +22,11 @@ from services.camera_service import VisionService
 
 MANUAL_START_EVENTS = ("MANUAL_START_TOSSUP", "MANUAL_REREAD_TOSSUP", "MANUAL_START_BONUS")
 
+# Reports a reading station sends about a read it was asked to speak. READING_FAILED is
+# not a finished read: the browser could not speak the question at all.
+READING_REPORTS = ("READING_DONE", "READING_FAILED")
+READ_FAILED_WARNING = "⚠️ This station could not read the question aloud — check its speech settings."
+
 # Seconds a player gets to speak once the mic opens: the tossup answer window and
 # the bonus captain's answer window both use this.
 ANSWER_WINDOW_SECONDS = 4.0
@@ -326,7 +331,7 @@ class ScienceBowlModerator:
                 return Event(type="FORCE_RESET_STATE")
 
     def _drop_stale_reading_completions(self):
-        """Discard read completions left over from an earlier speech.
+        """Discard read reports left over from an earlier speech.
 
         A stopped utterance reports completion just like a finished one (the browser
         fires 'error: interrupted' on cancel), so a surplus reply can be sitting in the
@@ -340,7 +345,7 @@ class ScienceBowlModerator:
             except asyncio.QueueEmpty:
                 break
             evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
-            if evt_type != "READING_DONE":
+            if evt_type not in READING_REPORTS:
                 kept.append(event)
         for event in kept:
             self.inbound_queue.put_nowait(event)
@@ -360,15 +365,26 @@ class ScienceBowlModerator:
         while True:
             reply = await self.inbound_queue.get()
             evt_type = reply.type.name if hasattr(reply.type, 'name') else str(reply.type)
-            if evt_type == "READING_DONE" and (not self.online_mode or reply.payload.get("reading_id") == self.current_reading_id):
+            if self._reading_result(reply) is not None:
                 self.current_reading_id = None
                 break
             elif evt_type in ADMIN_EVENTS:
                 if evt_type not in ["PING", "PAUSE_MATCH"]:
                     await self.process_admin_event(reply)
+            elif evt_type in READING_REPORTS:
+                continue  # A report for an earlier read: it is not this one.
             else:
                 self.inbound_queue.put_nowait(reply)
                 await asyncio.sleep(0.05)
+
+    def _reading_result(self, event) -> str | None:
+        """Classify a read report as 'done'/'failed', or None when it is not this read."""
+        evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
+        if evt_type not in READING_REPORTS:
+            return None
+        if self.online_mode and event.payload.get("reading_id") != self.current_reading_id:
+            return None
+        return "failed" if evt_type == "READING_FAILED" else "done"
 
     def _new_reading_id(self, moderator_only=False):
         if not self.online_mode:
@@ -428,6 +444,7 @@ class ScienceBowlModerator:
         is_interrupt = False
         buzz_time = 0.0
         buzzpoint_word = "Full Read"
+        read_failed = False
         
         start_time = asyncio.get_running_loop().time()
 
@@ -443,9 +460,11 @@ class ScienceBowlModerator:
             if evt_type in ("FORCE_RESET_STATE", "CHALLENGE"):
                 await self._set_online_buzz_window(False)
                 return None, False, False, evt_type, 0.0, ""
-                
-            elif evt_type == "READING_DONE" and (not self.online_mode or event.payload.get("reading_id") == self.current_reading_id):
+
+            reading_result = self._reading_result(event)
+            if reading_result is not None:
                 self.current_reading_id = None
+                read_failed = reading_result == "failed"
                 break
             elif evt_type == "BUZZ":
                 team = event.payload.get('team', 'Unknown')
@@ -461,6 +480,10 @@ class ScienceBowlModerator:
 
         if not buzz_event:
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ 5 Seconds to Buzz..."}})
+            if read_failed:
+                # The buzz window still opens so the match continues, but the moderator
+                # must know why no question was heard.
+                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": READ_FAILED_WARNING}})
             start_time = asyncio.get_running_loop().time() 
             try:
                 while True:
@@ -544,13 +567,15 @@ class ScienceBowlModerator:
             while True:
                 reply = await self.inbound_queue.get()
                 evt_type = reply.type.name if hasattr(reply.type, 'name') else str(reply.type)
-                
-                if evt_type == "READING_DONE" and (not self.online_mode or reply.payload.get("reading_id") == self.current_reading_id):
+
+                if self._reading_result(reply) is not None:
                     self.current_reading_id = None
                     break
                 elif evt_type in ADMIN_EVENTS:
                     if evt_type not in ["PING", "PAUSE_MATCH"]:
                         await self.process_admin_event(reply)
+                elif evt_type in READING_REPORTS:
+                    continue  # A report for an earlier read: it is not this one.
                 else:
                     self.inbound_queue.put_nowait(reply)
                     await asyncio.sleep(0.05)
