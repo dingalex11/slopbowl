@@ -92,6 +92,7 @@ document.addEventListener('click', () => {
 // --- MAIN WEBSOCKET CONNECTION ---
 // Update the signature to accept apiKey
 function connectWebSocket(roomId, apiKey = null) {
+    window._lastApiKey = apiKey || null;
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws/${encodeURIComponent(roomId)}`);
     ws = socket;
@@ -373,6 +374,7 @@ function connectWebSocket(roomId, apiKey = null) {
                 isReadingOnline = true;
                 onlineReadCompletions = new Set();
             }
+            advancePlayerToBuzzer();
             speakText(payload.text);
         }
         else if (data.type === 'OPEN_BUZZ') {
@@ -380,6 +382,7 @@ function connectWebSocket(roomId, apiKey = null) {
             currentOnlineBuzzTeam = payload.team || null;
             onlineCaptainOnly = Boolean(payload.captain_only);
             updateOnlineBuzzButton();
+            advancePlayerToBuzzer();
         }
         else if (data.type === 'CLOSE_BUZZ') {
             onlineBuzzOpen = false;
@@ -468,7 +471,13 @@ function connectWebSocket(roomId, apiKey = null) {
         socket.close();
     };
 
-    socket.onclose = (event) => { 
+    socket.onclose = (event) => {
+        // Deliberate close after a profile/team refresh: the caller opens a new
+        // socket itself, so skip status resets and reconnect logic.
+        if (window._profileRefresh === socket) {
+            window._profileRefresh = null;
+            return;
+        }
         const statusEl = document.getElementById('header-status');
         currentUserRole = null;
         if (window.ws === socket) window.ws = null;
@@ -542,9 +551,16 @@ function updateOnlineBuzzButton() {
     });
 }
 
+// Players waiting on the pre-match screen move to their buzzer as soon as the
+// room opens the buzz window or starts reading.
+function advancePlayerToBuzzer() {
+    if (currentUserRole !== 'player' || typeof navigateTo !== 'function') return;
+    const preMatch = document.getElementById('slide-7');
+    if (preMatch && !preMatch.classList.contains('hidden')) navigateTo(8);
+}
+
 function renderOnlineRoster(players) {
     const holders = document.querySelectorAll('.js-online-roster');
-    if (!holders.length) return;
     holders.forEach((holder) => {
         holder.replaceChildren();
         players.forEach((player) => {
@@ -554,6 +570,28 @@ function renderOnlineRoster(players) {
             holder.appendChild(item);
         });
     });
+
+    // Moderator lobby team panels
+    const listA = document.getElementById('lobby-team-a-list');
+    const listB = document.getElementById('lobby-team-b-list');
+    if (listA || listB) {
+        if (listA) listA.replaceChildren();
+        if (listB) listB.replaceChildren();
+        players.forEach((player) => {
+            const item = document.createElement('div');
+            item.className = 'flex items-center justify-between bg-panel border border-borderDark rounded px-2 py-1';
+            const nameEl = document.createElement('span');
+            nameEl.textContent = player.name;
+            item.appendChild(nameEl);
+            if (player.captain) {
+                const cpt = document.createElement('span');
+                cpt.className = 'text-[9px] font-bold text-neonCyan';
+                cpt.textContent = 'CPT';
+                item.appendChild(cpt);
+            }
+            (player.team === 'Team B' ? listB : listA)?.appendChild(item);
+        });
+    }
 }
 
 function speakText(text) {

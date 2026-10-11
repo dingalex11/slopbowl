@@ -78,6 +78,58 @@ function setStage(stage) {
 const bankFileInput = document.getElementById('bank-file-input');
 const bankFileName = document.getElementById('bank-file-name');
 
+// --- PRE-MATCH SETTINGS PACKET UPLOAD (real .json / .txt) ---
+const settingsPacketInput = document.getElementById('settings-packet-input');
+if (settingsPacketInput) {
+    settingsPacketInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) handleSettingsPacket(file);
+    });
+}
+
+const settingsPacketDrop = document.getElementById('settings-packet-drop');
+if (settingsPacketDrop) {
+    settingsPacketDrop.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        settingsPacketDrop.classList.add('border-neonAmber');
+    });
+    settingsPacketDrop.addEventListener('dragleave', () => {
+        settingsPacketDrop.classList.remove('border-neonAmber');
+    });
+    settingsPacketDrop.addEventListener('drop', (e) => {
+        e.preventDefault();
+        settingsPacketDrop.classList.remove('border-neonAmber');
+        if (e.dataTransfer.files.length) handleSettingsPacket(e.dataTransfer.files[0]);
+    });
+}
+
+async function handleSettingsPacket(file) {
+    const status = document.getElementById('settings-packet-status');
+    try {
+        let bankJson;
+        if (file.name.toLowerCase().endsWith('.json')) {
+            bankJson = JSON.parse(await file.text());
+        } else if (file.name.toLowerCase().endsWith('.txt')) {
+            bankJson = parseScienceBowlText(await file.text());
+        } else {
+            throw new Error('Choose a .json or .txt question package.');
+        }
+        if (!Array.isArray(bankJson) || !bankJson.length || bankJson.length > 500 || !bankJson[0].tossup_text) {
+            throw new Error('Invalid package: expected 1-500 question sets with tossup text.');
+        }
+        sendEvent('LOAD_BANK', { bank: bankJson });
+        if (status) {
+            status.innerText = `${file.name} parsed — ${bankJson.length} question sets ready`;
+            status.className = 'mt-4 text-center text-xs font-mono font-bold text-neonGreen min-h-5';
+        }
+    } catch (error) {
+        if (status) {
+            status.innerText = `Error: ${error.message}`;
+            status.className = 'mt-4 text-center text-xs font-mono font-bold text-neonPink min-h-5';
+        }
+    }
+}
+
 if (bankFileInput) {
     bankFileInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
@@ -112,7 +164,7 @@ if (bankFileInput) {
 }
 
 // --- ROOM CONNECTION ---
-async function connectToRoom(roomId, apiKey = null, expectedRole = 'owner') {
+async function connectToRoom(roomId, apiKey = null, expectedRole = 'owner', entrySlide = null) {
     const existingRoom = window.activeRoomId;
     if (existingRoom && existingRoom === roomId) return;
     window.activeRoomId = roomId;
@@ -120,19 +172,20 @@ async function connectToRoom(roomId, apiKey = null, expectedRole = 'owner') {
     window.history.pushState({ room: roomId }, "", `?room=${roomId}`);
     if (typeof setupComplete !== 'undefined') setupComplete = true;
 
-    // Role-based entry view: moderators get the HUD, players get the pre-match lobby.
-    navigateTo(expectedRole === 'player' ? 7 : 5);
+    // Role-based entry view: moderators land on the pre-match settings page,
+    // players land on the pre-match lobby to pick their team.
+    navigateTo(entrySlide ?? (expectedRole === 'player' ? 7 : 5));
     connectWebSocket(roomId, apiKey);
 }
 
-function onlineLobbyValues() {
-    const roomId = document.getElementById('room-id-input')?.value.trim().toLowerCase() || '';
-    const name = document.getElementById('online-player-name')?.value.trim() || '';
-    const team = document.getElementById('online-team-choice')?.value;
-    const captain = Boolean(document.getElementById('online-captain-claim')?.checked);
+function validateRoomIdentity(roomId, name) {
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(roomId)) throw new Error('Enter a valid room code.');
     if (!name || name.length > 64 || /[\u0000-\u001f]/.test(name)) throw new Error('Enter a name between 1 and 64 characters.');
-    return { roomId, name, team, captain };
+}
+
+function clearLobbyStatus() {
+    const status = document.getElementById('online-lobby-status');
+    if (status) status.innerText = '';
 }
 
 async function joinOnlineRoom() {
@@ -143,10 +196,13 @@ async function joinOnlineRoom() {
             openModal('auth-modal');
             throw new Error('Sign in before joining an online match.');
         }
-        const { roomId, name, team, captain } = onlineLobbyValues();
-        const profile = await window.joinOnlineRoomApi(roomId, name, team, captain);
+        const roomId = document.getElementById('room-id-input')?.value.trim().toLowerCase() || '';
+        const name = document.getElementById('online-player-name')?.value.trim() || '';
+        validateRoomIdentity(roomId, name);
+        // Team is picked on the pre-match screen; join with a default first.
+        const profile = await window.joinOnlineRoomApi(roomId, name, 'Team A', false);
         window.onlineProfile = profile;
-        await connectToRoom(roomId, await window.getUserApiKey?.(), 'player');
+        await connectToRoom(roomId, await window.getUserApiKey?.(), 'player', 7);
     } catch (error) {
         if (status) status.innerText = error.message;
     }
@@ -160,13 +216,91 @@ async function createOnlineRoom() {
             openModal('auth-modal');
             throw new Error('Sign in before creating an online match.');
         }
-        const { roomId, name, team, captain } = onlineLobbyValues();
-        // The moderator joins the selected team on creation so they can buzz too.
-        const profile = await window.createOnlineRoomApi(roomId, name, team, captain);
+        const roomId = document.getElementById('create-room-code')?.value.trim().toLowerCase() || '';
+        const name = document.getElementById('create-player-name')?.value.trim() || '';
+        validateRoomIdentity(roomId, name);
+        // The moderator joins with a default team and picks their real team/captain
+        // seat in the pre-match lobby.
+        const profile = await window.createOnlineRoomApi(roomId, name, 'Team A', false);
         window.onlineProfile = profile;
-        await connectToRoom(roomId, await window.getUserApiKey?.(), 'owner');
+        await connectToRoom(roomId, await window.getUserApiKey?.(), 'owner', 10);
     } catch (error) {
         if (status) status.innerText = error.message;
+    }
+}
+
+// --- PRE-MATCH SETTINGS -> LOBBY -> MATCH ---
+function proceedToLobby() {
+    navigateTo(9);
+}
+
+function startMatchFromLobby() {
+    // Start and open HUD: the clock runs immediately, no BEGIN MATCH overlay.
+    beginMatch();
+    const overlay = document.getElementById('match-start-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    navigateTo(5);
+}
+
+// --- TEAM / CAPTAIN CLAIMING (real re-join + reconnect) ---
+async function rejoinRoom(team, captain) {
+    const roomId = window.activeRoomId || currentRoomId;
+    if (!roomId) {
+        showToast('Join a room first');
+        return;
+    }
+    const name = window.onlineProfile?.name || document.getElementById('online-player-name')?.value.trim() || document.getElementById('create-player-name')?.value.trim() || 'Player';
+    try {
+        const profile = await window.joinOnlineRoomApi(roomId, name, team, Boolean(captain));
+        window.onlineProfile = profile;
+        refreshRoomConnection();
+        showToast(`Seat updated: ${team}${captain ? ' (Captain)' : ''}`);
+    } catch (error) {
+        showToast(error.message || 'Unable to update seat');
+    }
+}
+
+function switchTeam(team) {
+    const keepCaptain = Boolean(window.onlineProfile?.captain) && window.onlineProfile?.team === team;
+    rejoinRoom(team, keepCaptain);
+}
+
+function claimCaptain(team) {
+    rejoinRoom(team || window.onlineProfile?.team || 'Team A', true);
+}
+
+function refreshRoomConnection() {
+    const roomId = window.activeRoomId || currentRoomId;
+    if (!roomId) return;
+    const oldSocket = window.ws;
+    if (oldSocket) {
+        window._profileRefresh = oldSocket;
+        try { oldSocket.close(4000, 'profile-refresh'); } catch (e) { /* already closing */ }
+    }
+    connectWebSocket(roomId, window._lastApiKey || null);
+}
+
+// --- LOBBY SHORTCUTS ---
+async function copyRoomCode() {
+    const code = window.activeRoomId || currentRoomId || '';
+    if (!code) return;
+    try {
+        await navigator.clipboard.writeText(code);
+        showToast(`Room code "${code}" copied`);
+    } catch (e) {
+        showToast(`Room code: ${code}`);
+    }
+}
+
+async function copyInviteLink() {
+    const code = window.activeRoomId || currentRoomId || '';
+    if (!code) return;
+    const link = `${location.origin}${location.pathname}?room=${code}`;
+    try {
+        await navigator.clipboard.writeText(link);
+        showToast('Invite link copied');
+    } catch (e) {
+        showToast(link);
     }
 }
 
