@@ -13,10 +13,10 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from core.config import APP_ENV, INBOUND_QUEUE_SIZE, MAX_ROOMS, MAX_WEBSOCKET_MESSAGE_BYTES, OUTBOUND_QUEUE_SIZE, PROJECT_ROOT, ROOM_IDLE_TTL_SECONDS
+from core.config import APP_ENV, INBOUND_QUEUE_SIZE, MAX_ROOMS, MAX_WEBSOCKET_MESSAGE_BYTES, OUTBOUND_QUEUE_SIZE, PROJECT_ROOT, ROOM_IDLE_TTL_SECONDS, ROOM_REAP_INTERVAL_SECONDS
 from core.events import Event
 from core.validation import validate_client_event, validate_room_id
-from services.auth_service import get_room_info, get_room_participant, join_online_room, verify_id_token
+from services.auth_service import create_online_room, delete_room, get_room_info, get_room_participant, join_online_room, verify_id_token
 
 logger = logging.getLogger(__name__)
 app = FastAPI()
@@ -89,16 +89,15 @@ class RoomManager:
         self.room_modes: Dict[str, str] = {}
         self.active_connections: Dict[str, List[RoomConnection]] = {}
         self.room_tasks: Dict[str, List[asyncio.Task]] = {}
-        self.cleanup_tasks: Dict[str, asyncio.Task] = {}
+        self.last_activity: Dict[str, float] = {}
+        self.reaper_task: asyncio.Task | None = None
         self.lock = asyncio.Lock()
         self.buzz_locks: Dict[str, asyncio.Lock] = {}
 
     async def connect(self, websocket: WebSocket, room_id: str, user_id: str, role: str, seat: str | None = None, *, mode: str = "in_person", team: str | None = None, player_name: str | None = None, captain: bool = False):
         async with self.lock:
             self.buzz_locks.setdefault(room_id, asyncio.Lock())
-            cleanup = self.cleanup_tasks.pop(room_id, None)
-            if cleanup:
-                cleanup.cancel()
+            self.touch(room_id)
             moderator = self.rooms.get(room_id)
             if moderator is None:
                 if len(self.rooms) >= MAX_ROOMS:
@@ -122,6 +121,7 @@ class RoomManager:
             if mode == "online":
                 moderator.online_participants = {item.user_id: item for item in self.active_connections[room_id] if item.role in {"owner", "player"} and item.team}
 
+        self._ensure_reaper()
         await websocket.send_json({"type": "CONNECTED", "payload": {"role": role, "seat": seat, "mode": mode, "team": team, "name": player_name, "captain": captain}})
         if role == "owner":
             # Re-arm the moderator's last known control so a reconnect (team change,
@@ -159,33 +159,53 @@ class RoomManager:
                 if moderator and self.room_modes.get(room_id) == "online":
                     moderator.online_participants = {item.user_id: item for item in connections if item.role in {"owner", "player"} and item.team}
                     roster_changed = True
-                if not connections or not any(item.role == "owner" for item in connections):
-                    cleanup = self.cleanup_tasks.pop(room_id, None)
-                    if cleanup:
-                        cleanup.cancel()
-                    self.cleanup_tasks[room_id] = asyncio.create_task(self._expire_room(room_id), name=f"room-expiry:{room_id}")
         if roster_changed:
             await self.broadcast_to_room(room_id, {"type": "ROOM_ROSTER", "payload": {"players": self._online_roster(room_id)}})
 
+    def touch(self, room_id: str):
+        """Record player activity so the idle reaper leaves live rooms alone."""
+        self.last_activity[room_id] = time.monotonic()
+
+    def _ensure_reaper(self):
+        if self.reaper_task is None or self.reaper_task.done():
+            self.reaper_task = asyncio.create_task(self._reap_idle_rooms(), name="room-reaper")
+            self.reaper_task.add_done_callback(self._log_task_failure)
+
+    async def _reap_idle_rooms(self):
+        while True:
+            await asyncio.sleep(ROOM_REAP_INTERVAL_SECONDS)
+            await self.reap_idle_rooms()
+
+    async def reap_idle_rooms(self):
+        """Close every room that has seen no player action for the idle TTL."""
+        now = time.monotonic()
+        async with self.lock:
+            idle = [
+                room_id
+                for room_id, seen in self.last_activity.items()
+                if room_id in self.rooms and now - seen > ROOM_IDLE_TTL_SECONDS
+            ]
+        for room_id in idle:
+            await self._expire_room(room_id)
+
     async def _expire_room(self, room_id: str):
+        async with self.lock:
+            connections = self.active_connections.pop(room_id, [])
+            self.rooms.pop(room_id, None)
+            self.room_modes.pop(room_id, None)
+            self.last_activity.pop(room_id, None)
+            self.buzz_locks.pop(room_id, None)
+            tasks = self.room_tasks.pop(room_id, [])
+        await asyncio.gather(*(connection.websocket.close(code=4410, reason="Room closed after inactivity") for connection in connections), return_exceptions=True)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        # A closed local room must not leave its Firestore document behind: that is
+        # what kept codes "already taken" forever and stopped rooms from closing.
         try:
-            await asyncio.sleep(ROOM_IDLE_TTL_SECONDS)
-            async with self.lock:
-                connections = self.active_connections.get(room_id, [])
-                if any(connection.role == "owner" for connection in connections):
-                    return
-                self.active_connections.pop(room_id, None)
-                self.rooms.pop(room_id, None)
-                self.room_modes.pop(room_id, None)
-                self.buzz_locks.pop(room_id, None)
-                tasks = self.room_tasks.pop(room_id, [])
-                self.cleanup_tasks.pop(room_id, None)
-            await asyncio.gather(*(connection.websocket.close(code=4410, reason="Room owner disconnected") for connection in connections), return_exceptions=True)
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except asyncio.CancelledError:
-            raise
+            await asyncio.to_thread(delete_room, room_id)
+        except Exception as exc:
+            logger.warning("Unable to delete room %s from the room service: %s", room_id, exc)
 
     async def broadcast_to_room(self, room_id: str, message: dict):
         async with self.lock:
@@ -314,8 +334,35 @@ async def _authenticated_user(request: Request):
         raise HTTPException(status_code=503, detail="Authentication service unavailable") from exc
 
 
+@app.post("/api/rooms")
+async def create_generated_online_room(request: Request):
+    """Allocate a fresh room code so creating a match cannot collide with a taken one."""
+    user = await _authenticated_user(request)
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("Invalid room setup")
+        claims = getattr(user, "claims", {}) or {}
+        room = await asyncio.to_thread(
+            create_online_room,
+            user.uid,
+            data.get("name") or claims.get("name") or "Moderator",
+            data.get("team", "Team A"),
+            data.get("captain", False),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to create an online room: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning("Unable to create an online room: %s", exc)
+        raise HTTPException(status_code=503, detail="Room service unavailable") from exc
+    return {"mode": "online", **room}
+
+
 @app.post("/api/rooms/{room_id}/online")
-async def create_online_room(room_id: str, request: Request):
+async def create_online_room_endpoint(room_id: str, request: Request):
     if not validate_room_id(room_id):
         raise HTTPException(status_code=400, detail="Invalid room code")
     user = await _authenticated_user(request)
@@ -447,6 +494,9 @@ async def room_websocket_endpoint(websocket: WebSocket, room_id: str):
             except (json.JSONDecodeError, AttributeError, ValueError) as exc:
                 await websocket.send_json({"type": "ERROR", "payload": {"message": str(exc)}})
                 continue
+            if event_type != "PING":
+                # Heartbeats are not action: a forgotten open tab must still time out.
+                manager.touch(room_id)
             if not connection.allow_message(event_type):
                 await websocket.close(code=4429, reason="Rate limit exceeded")
                 break

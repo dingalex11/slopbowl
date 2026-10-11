@@ -1,3 +1,5 @@
+import secrets
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -93,6 +95,57 @@ def get_room_participants(room_id: str) -> dict[str, dict[str, str | bool]]:
             if team in {"Team A", "Team B"} and isinstance(name, str) and name.strip() and len(name) <= 64 and isinstance(captain, bool):
                 participants[snapshot.id] = {"team": team, "name": name.strip(), "captain": captain}
         return participants
+    except (FirebaseError, ValueError) as exc:
+        raise RuntimeError("Room authorization service is unavailable") from exc
+
+
+# Lowercase and free of look-alikes (no i/l/o/0/1) so codes survive being read aloud.
+ROOM_CODE_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
+ROOM_CODE_LENGTH = 6
+_ALREADY_EXISTS_NAMES = {"AlreadyExists", "AlreadyExistsError", "Conflict", "ConflictError"}
+
+
+def generate_room_code() -> str:
+    return "".join(secrets.choice(ROOM_CODE_ALPHABET) for _ in range(ROOM_CODE_LENGTH))
+
+
+def _is_room_code_taken(exc: Exception) -> bool:
+    """Firestore reports a duplicate document as AlreadyExists/Conflict (HTTP 409)."""
+    if type(exc).__name__ in _ALREADY_EXISTS_NAMES:
+        return True
+    code = getattr(exc, "code", None)
+    return (getattr(code, "name", None) or code) in {"ALREADY_EXISTS", 409}
+
+
+def create_online_room(owner_uid: str, name: str, team: str, captain: bool, *, attempts: int = 5) -> dict[str, str | bool]:
+    """Create a fresh online room under a generated code, retrying on collisions."""
+    if not isinstance(owner_uid, str) or not owner_uid:
+        raise ValueError("Room owner must be a signed-in user")
+    client = firestore.client(_firebase_app())
+    last_error: Exception | None = None
+    for _ in range(attempts):
+        room_id = generate_room_code()
+        room_ref = client.collection("rooms").document(room_id)
+        try:
+            room_ref.create({"ownerUid": owner_uid, "createdAt": time.time(), "mode": "online"})
+        except Exception as exc:
+            if _is_room_code_taken(exc):
+                last_error = exc
+                continue
+            raise RuntimeError("Room authorization service is unavailable") from exc
+        profile = join_online_room(room_id, owner_uid, name, team, captain)
+        return {"room_id": room_id, **profile}
+    raise RuntimeError("Could not allocate a free room code — try again") from last_error
+
+
+def delete_room(room_id: str) -> None:
+    """Remove a closed room and its participants so the code can be reused."""
+    try:
+        client = firestore.client(_firebase_app())
+        room_ref = client.collection("rooms").document(room_id)
+        for participant in room_ref.collection("participants").stream():
+            participant.reference.delete()
+        room_ref.delete()
     except (FirebaseError, ValueError) as exc:
         raise RuntimeError("Room authorization service is unavailable") from exc
 

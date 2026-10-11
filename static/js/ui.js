@@ -170,6 +170,7 @@ async function connectToRoom(roomId, apiKey = null, expectedRole = 'owner', entr
     if (existingRoom && existingRoom === roomId) return;
     window.activeRoomId = roomId;
     currentRoomId = roomId;
+    updateRoomCodeDisplay();
     window.history.pushState({ room: roomId }, "", `?room=${roomId}`);
     if (typeof setupComplete !== 'undefined') setupComplete = true;
 
@@ -179,9 +180,13 @@ async function connectToRoom(roomId, apiKey = null, expectedRole = 'owner', entr
     connectWebSocket(roomId, apiKey);
 }
 
+function validatePlayerName(name) {
+    if (!name || name.length > 64 || /[\u0000-\u001f]/.test(name)) throw new Error('Enter a name between 1 and 64 characters.');
+}
+
 function validateRoomIdentity(roomId, name) {
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(roomId)) throw new Error('Enter a valid room code.');
-    if (!name || name.length > 64 || /[\u0000-\u001f]/.test(name)) throw new Error('Enter a name between 1 and 64 characters.');
+    validatePlayerName(name);
 }
 
 function clearLobbyStatus() {
@@ -217,13 +222,16 @@ async function createOnlineRoom() {
             openModal('auth-modal');
             throw new Error('Sign in before creating an online match.');
         }
-        const roomId = document.getElementById('create-room-code')?.value.trim().toLowerCase() || '';
         const name = document.getElementById('create-player-name')?.value.trim() || '';
-        validateRoomIdentity(roomId, name);
+        validatePlayerName(name);
+        if (status) status.innerText = 'Allocating a fresh room code...';
+        // The server picks the code, so creating a match cannot collide with a taken one.
+        const profile = await window.createOnlineRoomApi(name, 'Team A', false);
+        window.onlineProfile = profile;
+        const roomId = profile?.room_id;
+        if (!roomId) throw new Error('The room service did not return a room code.');
         // The moderator joins with a default team and picks their real team/captain
         // seat in the pre-match lobby.
-        const profile = await window.createOnlineRoomApi(roomId, name, 'Team A', false);
-        window.onlineProfile = profile;
         await connectToRoom(roomId, await window.getUserApiKey?.(), 'owner', 10);
     } catch (error) {
         if (status) status.innerText = error.message;
@@ -232,6 +240,7 @@ async function createOnlineRoom() {
 
 // --- PRE-MATCH SETTINGS -> LOBBY -> MATCH ---
 function proceedToLobby() {
+    updateRoomCodeDisplay();
     navigateTo(9);
 }
 
@@ -282,6 +291,12 @@ function refreshRoomConnection() {
 }
 
 // --- LOBBY SHORTCUTS ---
+function updateRoomCodeDisplay() {
+    const code = (window.activeRoomId || currentRoomId || '').toUpperCase();
+    const lobbyCode = document.getElementById('mod-lobby-room-code');
+    if (lobbyCode) lobbyCode.innerText = code || '—';
+}
+
 async function copyRoomCode() {
     const code = window.activeRoomId || currentRoomId || '';
     if (!code) return;

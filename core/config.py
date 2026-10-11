@@ -9,7 +9,9 @@ load_dotenv(PROJECT_ROOT / ".env")
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "slopbowl-fe316")
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 MAX_ROOMS = int(os.getenv("MAX_ROOMS", "100"))
-ROOM_IDLE_TTL_SECONDS = int(os.getenv("ROOM_IDLE_TTL_SECONDS", "300"))
+# Rooms close after this much time with no player action (10 minutes by default).
+ROOM_IDLE_TTL_SECONDS = int(os.getenv("ROOM_IDLE_TTL_SECONDS", "600"))
+ROOM_REAP_INTERVAL_SECONDS = int(os.getenv("ROOM_REAP_INTERVAL_SECONDS", "30"))
 INBOUND_QUEUE_SIZE = int(os.getenv("INBOUND_QUEUE_SIZE", "256"))
 OUTBOUND_QUEUE_SIZE = int(os.getenv("OUTBOUND_QUEUE_SIZE", "512"))
 MAX_WEBSOCKET_MESSAGE_BYTES = 1024 * 1024

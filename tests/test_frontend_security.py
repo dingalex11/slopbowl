@@ -53,7 +53,7 @@ class FrontendSecurityTests(unittest.TestCase):
         self.assertNotIn("window.joinOnlineRoom = async", auth_source)
         # Joining uses a default team and captain; players and the moderator claim their
         # real seat on the pre-match and lobby screens.
-        self.assertIn("window.createOnlineRoomApi(roomId, name, 'Team A', false)", ui_source)
+        self.assertIn("window.createOnlineRoomApi(name, 'Team A', false)", ui_source)
         self.assertIn("window.joinOnlineRoomApi(roomId, name, 'Team A', false)", ui_source)
 
 

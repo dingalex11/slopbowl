@@ -508,7 +508,7 @@ function connectWebSocket(roomId, apiKey = null) {
         if (window.ws === socket) window.ws = null;
         if ([4400, 4401, 4403, 4404, 4409, 4410, 4429, 4503].includes(event.code)) {
             if (statusEl) {
-                const messages = {4400: 'INVALID ROOM CODE', 4401: 'SIGN IN TO CONNECT', 4403: 'ROOM ACCESS DENIED', 4404: 'ROOM NOT AVAILABLE', 4409: 'MESSAGE TOO LARGE', 4410: 'MODERATOR STATION DISCONNECTED', 4429: 'ROOM BUSY - RETRY MANUALLY', 4503: 'ROOM SERVICE UNAVAILABLE'};
+                const messages = {4400: 'INVALID ROOM CODE', 4401: 'SIGN IN TO CONNECT', 4403: 'ROOM ACCESS DENIED', 4404: 'ROOM NOT AVAILABLE', 4409: 'MESSAGE TOO LARGE', 4410: 'ROOM CLOSED - NO ACTIVITY', 4429: 'ROOM BUSY - RETRY MANUALLY', 4503: 'ROOM SERVICE UNAVAILABLE'};
                 statusEl.innerText = messages[event.code] || 'CONNECTION CLOSED';
             }
             if (window.activeRoomId === roomId) window.activeRoomId = null;

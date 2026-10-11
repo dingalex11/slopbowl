@@ -180,11 +180,12 @@ window.joinOnlineRoomApi = async (roomId, name, team, captain) => {
     return result;
 };
 
-window.createOnlineRoomApi = async (roomId, name, team, captain) => {
+window.createOnlineRoomApi = async (name, team, captain) => {
     const user = auth.currentUser;
     if (!user) throw new Error("Sign in before creating an online match.");
     const token = await user.getIdToken();
-    const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/online`, {
+    // The server allocates the room code, so a match can never collide with a taken one.
+    const response = await fetch("/api/rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify({ name, team, captain: Boolean(captain) })

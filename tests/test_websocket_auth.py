@@ -1,4 +1,5 @@
 import asyncio
+import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -82,9 +83,13 @@ class WebSocketAuthorizationTests(unittest.TestCase):
         self.assertIn("Science Bowl", page.text)
         self.assertEqual(client_script.status_code, 200)
         self.assertIn("CONNECTING TO MATCH", client_script.text)
-        self.assertIn("btn-online-buzz", page.text)
+        # The online buzzer control is bound by class since the MASSIVE FIX rename.
+        self.assertIn("js-online-buzz", page.text)
+        # The create-match card no longer asks for a hand-typed room code.
+        self.assertNotIn("create-room-code", page.text)
         self.assertIn("online-player-name", page.text)
-        self.assertIn("online-captain-claim", page.text)
+        # The captain-claim control is bound by claimCaptain since the MASSIVE FIX rename.
+        self.assertIn('onclick="claimCaptain(', page.text)
         self.assertIn('id="online-roster"', page.text)
 
     def test_match_controls_and_camera_frames_are_only_sent_to_moderator_station(self):
@@ -152,10 +157,6 @@ class WebSocketAuthorizationTests(unittest.TestCase):
             self.assertEqual(manager.rooms["roster-room"].online_participants, {"owner": owner})
             self.assertEqual(owner_socket.messages[-1]["type"], "ROOM_ROSTER")
             self.assertEqual(owner_socket.messages[-1]["payload"]["players"], [{"name": "Host", "team": "Team A", "captain": True}])
-            cleanup = manager.cleanup_tasks.pop("roster-room", None)
-            if cleanup:
-                cleanup.cancel()
-                await asyncio.gather(cleanup, return_exceptions=True)
 
         asyncio.run(verify_roster())
 
@@ -177,21 +178,127 @@ class WebSocketAuthorizationTests(unittest.TestCase):
         self.assertFalse(connection.allow_message("PING"))
         self.assertTrue(connection.allow_message("SAVE_ROSTER"))
 
-    def test_room_expires_and_closes_viewers_after_moderator_disconnect(self):
+    def test_room_expiry_closes_viewers_removes_the_room_and_frees_the_code(self):
         async def verify_expiry():
             manager = ui_service.RoomManager()
             socket = FakeSocket()
             connection = ui_service.RoomConnection(socket, "viewer", "viewer")
             manager.active_connections["round-one"] = [connection]
-            marker = object()
-            manager.rooms["round-one"] = marker
+            manager.rooms["round-one"] = object()
             manager.room_tasks["round-one"] = []
-            with patch.object(ui_service, "ROOM_IDLE_TTL_SECONDS", 0):
+            manager.last_activity["round-one"] = time.monotonic()
+            with patch.object(ui_service, "delete_room") as delete:
                 await manager._expire_room("round-one")
             self.assertNotIn("round-one", manager.rooms)
+            self.assertNotIn("round-one", manager.last_activity)
             self.assertEqual(socket.closed, True)
+            delete.assert_called_once_with("round-one")
 
         asyncio.run(verify_expiry())
+
+    def test_idle_room_is_reaped_after_no_player_action(self):
+        async def verify_reaping():
+            manager = ui_service.RoomManager()
+            socket = FakeSocket()
+            connection = ui_service.RoomConnection(socket, "player", "player")
+            manager.rooms["idle-room"] = FakeModerator()
+            manager.room_modes["idle-room"] = "online"
+            manager.active_connections["idle-room"] = [connection]
+            manager.last_activity["idle-room"] = time.monotonic() - 30
+            manager.rooms["busy-room"] = FakeModerator()
+            manager.last_activity["busy-room"] = time.monotonic()
+            with patch.object(ui_service, "ROOM_IDLE_TTL_SECONDS", 10), patch.object(ui_service, "delete_room") as delete:
+                await manager.reap_idle_rooms()
+            self.assertNotIn("idle-room", manager.rooms)
+            self.assertIn("busy-room", manager.rooms)
+            self.assertEqual(socket.closed, True)
+            delete.assert_called_once_with("idle-room")
+
+        asyncio.run(verify_reaping())
+
+    def test_reaper_task_closes_idle_rooms(self):
+        async def verify_loop():
+            manager = ui_service.RoomManager()
+            manager.rooms["idle-room"] = FakeModerator()
+            manager.last_activity["idle-room"] = time.monotonic() - 30
+            with patch.object(ui_service, "ROOM_IDLE_TTL_SECONDS", 10), patch.object(
+                ui_service, "ROOM_REAP_INTERVAL_SECONDS", 0.01
+            ), patch.object(ui_service, "delete_room"):
+                manager._ensure_reaper()
+                try:
+                    for _ in range(50):
+                        if "idle-room" not in manager.rooms:
+                            break
+                        await asyncio.sleep(0.01)
+                    self.assertNotIn("idle-room", manager.rooms)
+                finally:
+                    manager.reaper_task.cancel()
+                    await asyncio.gather(manager.reaper_task, return_exceptions=True)
+
+        asyncio.run(verify_loop())
+
+    def test_generated_room_codes_are_valid_and_readable(self):
+        from core.validation import ROOM_ID_PATTERN
+        codes = {auth_service.generate_room_code() for _ in range(50)}
+        for code in codes:
+            self.assertRegex(code, ROOM_ID_PATTERN)
+            self.assertEqual(len(code), auth_service.ROOM_CODE_LENGTH)
+            self.assertTrue(set(code) <= set(auth_service.ROOM_CODE_ALPHABET))
+        self.assertGreater(len(codes), 1)
+
+    def test_room_creation_retries_past_a_taken_code(self):
+        codes = iter(["taken1", "fresh1"])
+        attempts = []
+
+        class AlreadyExists(Exception):
+            pass
+
+        class Document:
+            def __init__(self, room_id):
+                self.room_id = room_id
+
+            def create(self, data):
+                attempts.append(self.room_id)
+                if self.room_id == "taken1":
+                    raise AlreadyExists()
+
+        class Collection:
+            def __init__(self):
+                self.documents = {}
+
+            def document(self, room_id):
+                return self.documents.setdefault(room_id, Document(room_id))
+
+        class Client:
+            def collection(self, name):
+                return Collection()
+
+        with patch.object(auth_service, "_firebase_app", return_value=object()), patch.object(
+            auth_service.firestore, "client", return_value=Client()
+        ), patch.object(auth_service, "generate_room_code", side_effect=lambda: next(codes)), patch.object(
+            auth_service, "join_online_room", return_value={"name": "Mod", "team": "Team A", "captain": False}
+        ):
+            room = auth_service.create_online_room("owner", "Mod", "Team A", False)
+
+        self.assertEqual(room["room_id"], "fresh1")
+        self.assertEqual(attempts, ["taken1", "fresh1"])
+
+    def test_room_creation_endpoint_returns_a_generated_code(self):
+        profile = {"room_id": "kx7m2p", "name": "Mod", "team": "Team A", "captain": False}
+        with patch.object(ui_service, "_authenticated_user", new=AsyncMock(return_value=FakeUser("owner"))), patch.object(
+            ui_service, "create_online_room", return_value=profile
+        ):
+            response = TestClient(ui_service.app).post("/api/rooms", json={"name": "Mod", "team": "Team A", "captain": False})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["room_id"], "kx7m2p")
+        self.assertEqual(response.json()["mode"], "online")
+
+    def test_room_creation_endpoint_reports_an_unavailable_room_service(self):
+        with patch.object(ui_service, "_authenticated_user", new=AsyncMock(return_value=FakeUser("owner"))), patch.object(
+            ui_service, "create_online_room", side_effect=RuntimeError("Room authorization service is unavailable")
+        ):
+            response = TestClient(ui_service.app).post("/api/rooms", json={"name": "Mod"})
+        self.assertEqual(response.status_code, 503)
 
     def test_online_player_can_only_submit_answer_audio_in_own_answer_window(self):
         moderator = FakeModerator()
