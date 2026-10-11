@@ -358,6 +358,7 @@ class WebSocketAuthorizationTests(unittest.TestCase):
                 "player": ui_service.RoomConnection(FakeSocket(), "player", "player", team="Team A", player_name="Ada"),
             }
             reading_id = moderator._new_reading_id()
+            moderator.read_earliest_end = 0.0  # a read old enough that a report is believable
             profile = {"name": "Host", "team": "Team A", "captain": False}
 
             async def fake_connect(websocket, room_id, user_id, role, seat=None, **kwargs):
@@ -386,6 +387,48 @@ class WebSocketAuthorizationTests(unittest.TestCase):
         drive("owner", "READING_FAILED", True, False)
         drive("owner", "READING_DONE", True, False)
         drive("player", "READING_FAILED", False, True)
+
+    def test_a_read_report_that_is_too_fast_is_dropped_at_the_gate(self):
+        """A report sent the instant a read starts cannot mark the read finished.
+
+        Dropping it at the gate also leaves the report slot free, so the station's real
+        completion still ends the read when the question has actually been spoken.
+        """
+        from main import ScienceBowlModerator
+
+        moderator = ScienceBowlModerator(use_audio=True, initial_bank=[])
+        moderator.online_mode = True
+        moderator.online_participants = {
+            "owner": ui_service.RoomConnection(FakeSocket(), "owner", "owner", team="Team A", player_name="Host"),
+        }
+        reading_id = moderator._new_reading_id()
+        moderator._set_read_window("A question long enough to need speaking aloud.")
+        profile = {"name": "Host", "team": "Team A", "captain": False}
+
+        async def fake_connect(websocket, room_id, user_id, role, seat=None, **kwargs):
+            await websocket.send_json({"type": "CONNECTED", "payload": {"role": role, "mode": "online", **profile}})
+            return moderator, ui_service.RoomConnection(websocket, user_id, role, team="Team A", player_name="Host")
+
+        with patch.object(ui_service, "verify_id_token", return_value=FakeUser("owner")), patch.object(
+            ui_service, "get_room_info", return_value={"owner_uid": "owner", "mode": "online"}
+        ), patch.object(ui_service, "get_room_participant", return_value=profile), patch.object(
+            ui_service.manager, "connect", side_effect=fake_connect
+        ), patch.object(ui_service.manager, "disconnect", new=AsyncMock()):
+            client = TestClient(ui_service.app)
+            with client.websocket_connect("/ws/fast-room", headers={"origin": "http://testserver"}) as websocket:
+                websocket.send_json({"type": "AUTH_INIT", "payload": {"id_token": "signed-token"}})
+                self.assertEqual(websocket.receive_json()["type"], "CONNECTED")
+
+                websocket.send_json({"type": "READING_DONE", "payload": {"reading_id": reading_id}})
+                self.assertTrue(moderator.inbound_queue.empty(), "an impossible report ended the read")
+                self.assertEqual(moderator.reading_completions, set(), "the phantom consumed the report slot")
+
+                # Once the question has had time to be spoken, the real report gets through.
+                moderator.read_earliest_end = 0.0
+                websocket.send_json({"type": "READING_DONE", "payload": {"reading_id": reading_id}})
+            event = moderator.inbound_queue.get_nowait()
+            self.assertEqual(event.type, "READING_DONE")
+            self.assertEqual(event.payload, {"reading_id": reading_id})
 
     def test_authenticated_player_buzz_uses_joined_identity_and_captain_claim(self):
         async def verify_buzz(profile, should_accept):

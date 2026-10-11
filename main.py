@@ -26,6 +26,29 @@ MANUAL_START_EVENTS = ("MANUAL_START_TOSSUP", "MANUAL_REREAD_TOSSUP", "MANUAL_ST
 # not a finished read: the browser could not speak the question at all.
 READING_REPORTS = ("READING_DONE", "READING_FAILED")
 READ_FAILED_WARNING = "⚠️ This station could not read the question aloud — check its speech settings."
+READ_TIMEOUT_WARNING = "⚠️ The read never reported finishing — the buzz window is open."
+
+# Conservative spoken pace used to sanity-check read reports: real speech is slower, so a
+# report that arrives faster than this cannot describe a question that was spoken.
+READ_CHARS_PER_SECOND = 18.0
+MIN_READ_SECONDS = 1.0
+# A "finished" report inside the first share of the estimated read time is not believed.
+# A station on older code reports a read as finished the moment it starts, which used to
+# open the buzz window while the question was still being read out.
+READ_EARLY_REPORT_FRACTION = 0.4
+READ_WATCHDOG_FACTOR = 1.8
+READ_WATCHDOG_MIN_SECONDS = 6.0
+# When the only report about a read was impossible (an older station claiming it finished
+# at once), nothing else is coming: the window opens once the question has had its say.
+READ_ASSUMED_END_FACTOR = 1.15
+
+
+def read_clock() -> float:
+    """Monotonic seconds for read timing, usable with or without a running event loop."""
+    try:
+        return asyncio.get_running_loop().time()
+    except RuntimeError:
+        return time.monotonic()
 
 # Seconds a player gets to speak once the mic opens: the tossup answer window and
 # the bonus captain's answer window both use this.
@@ -73,6 +96,10 @@ class ScienceBowlModerator:
         self.online_participants = {}
         self.answering_user_id = None
         self.current_reading_id = None
+        self.read_earliest_end = 0.0
+        self.read_deadline = 0.0
+        self.read_assumed_end = 0.0
+        self.read_report_doubted = False
         self.reading_expected_users = set()
         self.reading_completions = set()
         self.online_buzz_open = False
@@ -360,12 +387,24 @@ class ScienceBowlModerator:
         payload = {"text": text, "moderator_only": moderator_only}
         if reading_id:
             payload["reading_id"] = reading_id
+        self._set_read_window(text)
         await self.outbound_queue.put({"type": "START_READING", "payload": payload})
         
         while True:
-            reply = await self.inbound_queue.get()
+            try:
+                reply = await asyncio.wait_for(self.inbound_queue.get(), timeout=self._read_wait_slice())
+            except asyncio.TimeoutError:
+                if not self._read_wait_expired():
+                    continue  # Still within the read's time: wake again shortly.
+                print("[DEBUG]: Read watchdog expired; continuing without a report.")
+                self.current_reading_id = None
+                break
             evt_type = reply.type.name if hasattr(reply.type, 'name') else str(reply.type)
-            if self._reading_result(reply) is not None:
+            report = self._reading_result(reply)
+            if report is not None:
+                if report == "done" and self._report_is_early():
+                    # Faster than the text can be spoken, so it is not this read finishing.
+                    continue
                 self.current_reading_id = None
                 break
             elif evt_type in ADMIN_EVENTS:
@@ -376,6 +415,49 @@ class ScienceBowlModerator:
             else:
                 self.inbound_queue.put_nowait(reply)
                 await asyncio.sleep(0.05)
+
+    def _set_read_window(self, text: str, *, immediate: bool = False) -> None:
+        """Record when a report about this read can be believed, and when to give up.
+
+        The reading station is normally the only thing that knows speaking stopped, but an
+        older station reports the read as finished the instant it starts. The earliest
+        believable end is therefore derived from the text length, and a watchdog keeps the
+        match moving when no report arrives at all.
+        """
+        now = read_clock()
+        self.read_report_doubted = False
+        if immediate:
+            self.read_earliest_end = now
+            self.read_assumed_end = now
+            self.read_deadline = now + READ_WATCHDOG_MIN_SECONDS
+            return
+        estimate = max(MIN_READ_SECONDS, len(text or "") / READ_CHARS_PER_SECOND)
+        self.read_earliest_end = now + estimate * READ_EARLY_REPORT_FRACTION
+        self.read_assumed_end = now + estimate * READ_ASSUMED_END_FACTOR
+        self.read_deadline = now + estimate * READ_WATCHDOG_FACTOR + READ_WATCHDOG_MIN_SECONDS
+
+    def note_impossible_read_report(self) -> None:
+        """Remember that a station claimed a read finished before it could be spoken."""
+        self.read_report_doubted = True
+
+    def _read_wait_target(self) -> float:
+        """When the read must be over, report or not, and how long one wait may block."""
+        target = self.read_assumed_end if self.read_report_doubted else self.read_deadline
+        return min(target, self.read_deadline)
+
+    def _read_wait_expired(self) -> bool:
+        return read_clock() >= self._read_wait_target()
+
+    def _read_wait_slice(self) -> float:
+        """Wait in short slices, so an impossible report raised mid-wait is noticed at once."""
+        return max(0.05, min(0.5, self._read_wait_target() - read_clock()))
+
+    def _report_is_early(self) -> bool:
+        return read_clock() < self.read_earliest_end
+
+    def read_report_is_believable(self) -> bool:
+        """False while a report that arrives now cannot describe a spoken question."""
+        return not self._report_is_early()
 
     def _reading_result(self, event) -> str | None:
         """Classify a read report as 'done'/'failed', or None when it is not this read."""
@@ -432,24 +514,34 @@ class ScienceBowlModerator:
                 reading_payload = {"text": text_to_read}
                 if reading_id:
                     reading_payload["reading_id"] = reading_id
+                self._set_read_window(text_to_read)
                 await self.outbound_queue.put({"type": "START_READING", "payload": reading_payload})
             else:
                 print("[DEBUG]: Audio skipped (disabled or text was empty). Jumping to Buzz phase.")
+                self._set_read_window("", immediate=True)
                 self.inbound_queue.put_nowait(Event(type=EventType.READING_DONE, payload={}))
         else:
             # Instantly bypass the reading loop and jump straight to the 5-second buzz countdown
+            self._set_read_window("", immediate=True)
             self.inbound_queue.put_nowait(Event(type=EventType.READING_DONE, payload={}))
         
         buzz_event = None
         is_interrupt = False
         buzz_time = 0.0
         buzzpoint_word = "Full Read"
-        read_failed = False
+        read_warning = None
         
         start_time = asyncio.get_running_loop().time()
 
         while True:
-            event = await self.inbound_queue.get()
+            try:
+                event = await asyncio.wait_for(self.inbound_queue.get(), timeout=self._read_wait_slice())
+            except asyncio.TimeoutError:
+                if not self._read_wait_expired():
+                    continue  # Still within the read's time: wake again shortly.
+                print("[DEBUG]: Read watchdog expired; opening the buzz window.")
+                read_warning = READ_TIMEOUT_WARNING
+                break
             evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
             
             if evt_type in ADMIN_EVENTS:
@@ -463,8 +555,14 @@ class ScienceBowlModerator:
 
             reading_result = self._reading_result(event)
             if reading_result is not None:
+                if reading_result == "done" and self._report_is_early():
+                    # The question cannot have been spoken this fast: keep waiting for the
+                    # read that is really playing instead of opening the buzz window.
+                    self.note_impossible_read_report()
+                    continue
                 self.current_reading_id = None
-                read_failed = reading_result == "failed"
+                if reading_result == "failed":
+                    read_warning = READ_FAILED_WARNING
                 break
             elif evt_type == "BUZZ":
                 team = event.payload.get('team', 'Unknown')
@@ -480,10 +578,10 @@ class ScienceBowlModerator:
 
         if not buzz_event:
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ 5 Seconds to Buzz..."}})
-            if read_failed:
+            if read_warning:
                 # The buzz window still opens so the match continues, but the moderator
                 # must know why no question was heard.
-                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": READ_FAILED_WARNING}})
+                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": read_warning}})
             start_time = asyncio.get_running_loop().time() 
             try:
                 while True:
@@ -561,14 +659,25 @@ class ScienceBowlModerator:
             reading_payload = {"text": phrase}
             if reading_id:
                 reading_payload["reading_id"] = reading_id
+            self._set_read_window(phrase)
             await self.outbound_queue.put({"type": "START_READING", "payload": reading_payload})
 
             
             while True:
-                reply = await self.inbound_queue.get()
+                try:
+                    reply = await asyncio.wait_for(self.inbound_queue.get(), timeout=self._read_wait_slice())
+                except asyncio.TimeoutError:
+                    if not self._read_wait_expired():
+                        continue  # Still within the read's time: wake again shortly.
+                    print("[DEBUG]: Read watchdog expired; continuing without a report.")
+                    self.current_reading_id = None
+                    break
                 evt_type = reply.type.name if hasattr(reply.type, 'name') else str(reply.type)
 
-                if self._reading_result(reply) is not None:
+                report = self._reading_result(reply)
+                if report is not None:
+                    if report == "done" and self._report_is_early():
+                        continue  # Not this read finishing: it cannot have been spoken yet.
                     self.current_reading_id = None
                     break
                 elif evt_type in ADMIN_EVENTS:

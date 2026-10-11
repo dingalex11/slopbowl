@@ -531,6 +531,13 @@ async def room_websocket_endpoint(websocket: WebSocket, room_id: str):
                     continue
                 if user.uid not in moderator.online_participants or user.uid in moderator.reading_completions:
                     continue
+                if event_type == "READING_DONE" and not moderator.read_report_is_believable():
+                    # Too fast to be the question being spoken (a station on older code
+                    # reports it the moment the read starts). Dropped before it can mark the
+                    # read finished, so the real report still lands.
+                    logger.info("Ignored an impossibly fast read report for %s from %s", expected, user.uid)
+                    moderator.note_impossible_read_report()
+                    continue
                 moderator.reading_completions.add(user.uid)
                 if moderator.reading_expected_users.issubset(moderator.reading_completions):
                     # Names the station that ended the read, so a read that ends too early
