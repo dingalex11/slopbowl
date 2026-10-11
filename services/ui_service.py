@@ -123,6 +123,10 @@ class RoomManager:
                 moderator.online_participants = {item.user_id: item for item in self.active_connections[room_id] if item.role in {"owner", "player"} and item.team}
 
         await websocket.send_json({"type": "CONNECTED", "payload": {"role": role, "seat": seat, "mode": mode, "team": team, "name": player_name, "captain": captain}})
+        if role == "owner":
+            # Re-arm the moderator's last known control so a reconnect (team change,
+            # dropped socket) never leaves the HUD without a usable start button.
+            await websocket.send_json({"type": "UI_STATE", "payload": dict(getattr(moderator, "ui_state", {"show": "NONE", "overrides": False}))})
         if mode == "online":
             if moderator.online_buzz_open:
                 await websocket.send_json({"type": "OPEN_BUZZ", "payload": {"team": moderator.online_buzz_team, "captain_only": moderator.online_buzz_captain_only}})
@@ -297,11 +301,24 @@ def _bearer_token(request: Request) -> str:
     return token
 
 
+async def _authenticated_user(request: Request):
+    """Resolve the signed-in Firebase user, mapping auth failures to honest HTTP codes."""
+    token = _bearer_token(request)
+    try:
+        return await asyncio.to_thread(verify_id_token, token)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Sign in required") from exc
+    except Exception as exc:
+        # A missing/invalid service account must not look like a broken client request.
+        logger.warning("Unable to verify Firebase identity: %s", exc)
+        raise HTTPException(status_code=503, detail="Authentication service unavailable") from exc
+
+
 @app.post("/api/rooms/{room_id}/online")
 async def create_online_room(room_id: str, request: Request):
     if not validate_room_id(room_id):
         raise HTTPException(status_code=400, detail="Invalid room code")
-    user = await asyncio.to_thread(verify_id_token, _bearer_token(request))
+    user = await _authenticated_user(request)
     try:
         data = await request.json()
         if not isinstance(data, dict):
@@ -326,7 +343,7 @@ async def create_online_room(room_id: str, request: Request):
 async def join_online_room_api(room_id: str, request: Request):
     if not validate_room_id(room_id):
         raise HTTPException(status_code=400, detail="Invalid room code")
-    user = await asyncio.to_thread(verify_id_token, _bearer_token(request))
+    user = await _authenticated_user(request)
     try:
         data = await request.json()
         if not isinstance(data, dict):
@@ -500,6 +517,14 @@ async def room_websocket_endpoint(websocket: WebSocket, room_id: str):
         logger.info("Rejected WebSocket authorization for %s", room_id)
         try:
             await websocket.close(code=4401, reason="Authentication failed")
+        except RuntimeError:
+            pass
+    except Exception as exc:
+        # Unexpected authorization failures (for example a missing service account) must
+        # still reach the client as a labelled close instead of a generic 1011 drop.
+        logger.warning("Unexpected WebSocket authorization failure for %s: %s", room_id, exc)
+        try:
+            await websocket.close(code=4503, reason="Authorization service unavailable")
         except RuntimeError:
             pass
     finally:

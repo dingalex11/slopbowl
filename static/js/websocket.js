@@ -173,6 +173,19 @@ function connectWebSocket(roomId, apiKey = null) {
                 if (label) label.innerText = "TOSSUP (5s BUZZ)";
                 startActionTimer(5.0, null);
             }
+
+            // A rejected packet must reach the page that uploaded it.
+            const settingsStatus = document.getElementById('settings-packet-status');
+            if (settingsStatus && /^❌/.test(payload.text || '')) {
+                settingsStatus.innerText = payload.text;
+                settingsStatus.className = 'mt-4 text-center text-xs font-mono font-bold text-neonPink min-h-5';
+            }
+        }
+        else if (data.type === 'PREMATCH_READY') {
+            announcePacketLoaded(payload);
+        }
+        else if (data.type === 'ERROR') {
+            showEventFeedback(payload.message || 'The room rejected that action.');
         }
         // ... [Existing websocket.js handlers like NEW_LOG_ENTRY] ...
         
@@ -516,14 +529,51 @@ function connectWebSocket(roomId, apiKey = null) {
     };
 }
 
+function isRoomConnected() {
+    return !!(ws && ws.readyState === WebSocket.OPEN);
+}
+
+// An open buzz window with no team set is open to both teams; the server arbitrates
+// the same way, so a null window team must not lock every buzzer out.
+function buzzWindowAllowsMe() {
+    if (!onlineBuzzOpen) return false;
+    if (currentOnlineBuzzTeam && currentTeam !== currentOnlineBuzzTeam) return false;
+    return true;
+}
+
+// A dropped action looks like a dead button: always say what happened.
+function showEventFeedback(message) {
+    const statusEl = document.getElementById('header-status');
+    if (statusEl) statusEl.innerText = message.toUpperCase();
+    if (typeof showToast === 'function') showToast(message);
+}
+
+// Server acknowledgement that a question packet was accepted and validated. The
+// pre-match page must never announce this before the server confirms it.
+function announcePacketLoaded(payload) {
+    const count = Number(payload.count) || 0;
+    const category = payload.first_category ? String(payload.first_category) : 'GENERAL';
+    const status = document.getElementById('settings-packet-status');
+    if (status) {
+        status.innerText = `${count} question ${count === 1 ? 'set' : 'sets'} ready — first category ${category}`;
+        status.className = 'mt-4 text-center text-xs font-mono font-bold text-neonGreen min-h-5';
+    }
+    const inPersonName = document.getElementById('bank-file-name');
+    if (inPersonName) {
+        inPersonName.innerText = `${count} question${count === 1 ? '' : 's'} loaded — server confirmed`;
+        inPersonName.className = 'text-xs text-neonGreen font-mono font-bold';
+    }
+}
+
 function sendEvent(eventType, payload = {}) {
     if (ws && ws.readyState === WebSocket.OPEN) {
         const playerEvents = currentRoomMode === 'online' && ['PING', 'BUZZ', 'ANSWER_AUDIO', 'READING_DONE'].includes(eventType);
         if (currentUserRole !== 'owner' && !playerEvents) {
             console.warn(`Room permission required for ${eventType}.`);
+            showEventFeedback('Moderator controls are locked in this room.');
             return;
         }
-        if (currentRoomMode === 'online' && eventType === 'BUZZ' && (!onlineBuzzOpen || currentTeam !== currentOnlineBuzzTeam || (onlineCaptainOnly && !isOnlineCaptain))) return;
+        if (currentRoomMode === 'online' && eventType === 'BUZZ' && (!buzzWindowAllowsMe() || (onlineCaptainOnly && !isOnlineCaptain))) return;
         if (currentRoomMode === 'online' && eventType === 'READING_DONE') {
             if (!currentReadingId || onlineReadCompletions.has(currentReadingId)) return;
             onlineReadCompletions.add(currentReadingId);
@@ -532,6 +582,9 @@ function sendEvent(eventType, payload = {}) {
         ws.send(JSON.stringify({ type: eventType, payload: payload }));
     } else {
         console.warn(`Cannot send event ${eventType}: WebSocket is not open.`);
+        showEventFeedback(window.activeRoomId || currentRoomId
+            ? 'Not connected to the match room — reconnecting. If this persists, sign in again.'
+            : 'Not connected to a match. Create or join a room from Online play first.');
     }
 }
 
@@ -539,14 +592,19 @@ function sendEvent(eventType, payload = {}) {
 function updateOnlineBuzzButton() {
     const buttons = document.querySelectorAll('.js-online-buzz');
     if (!buttons.length) return;
-    const canBuzz = onlineBuzzOpen && currentTeam === currentOnlineBuzzTeam && (!onlineCaptainOnly || isOnlineCaptain);
+    const windowOpenToMe = buzzWindowAllowsMe();
+    const canBuzz = windowOpenToMe && (!onlineCaptainOnly || isOnlineCaptain);
     buttons.forEach((button) => {
         button.disabled = currentRoomMode !== 'online' || !canBuzz;
         if (button.classList.contains('buzz-btn')) {
             // Giant player buzzer keeps its label short.
             button.textContent = canBuzz ? 'BUZZ' : (onlineBuzzOpen ? 'STANDBY' : 'BUZZ CLOSED');
+        } else if (onlineBuzzOpen && !windowOpenToMe) {
+            button.textContent = 'OTHER TEAM BUZZING';
+        } else if (onlineBuzzOpen && onlineCaptainOnly && !isOnlineCaptain) {
+            button.textContent = 'CAPTAIN BUZZES BONUS';
         } else {
-            button.textContent = onlineBuzzOpen && currentTeam !== currentOnlineBuzzTeam ? 'OTHER TEAM BUZZING' : (onlineBuzzOpen && onlineCaptainOnly && !isOnlineCaptain ? 'CAPTAIN BUZZES BONUS' : 'MY BUZZER');
+            button.textContent = 'MY BUZZER';
         }
     });
 }

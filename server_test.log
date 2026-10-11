@@ -2,3 +2,23 @@ INFO:     Started server process [83772]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:55750 (Press CTRL+C to quit)
+==================================================
+🚀 [SYSTEM LIVE]: Multi-Room Server booting on port 0
+==================================================
+INFO:     127.0.0.1:54037 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55445 - "GET /static/js/ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55447 - "GET /legacy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59369 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59369 - "GET /static/css/style.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59369 - "GET /static/js/slopbowl_ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59369 - "GET /static/js/ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59369 - "GET /static/js/websocket.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59369 - "GET /static/js/camera.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59369 - "GET /static/js/pdf_parser.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59369 - "GET /static/js/analytics.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59369 - "GET /static/js/auth.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54991 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56435 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56437 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56437 - "GET /static/js/ui.js HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56437 - "GET /static/js/websocket.js HTTP/1.1" 304 Not Modified

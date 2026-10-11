@@ -20,6 +20,9 @@ from services.judge_service import JudgeService
 from services.ui_service import HTMLGUIService
 from services.camera_service import VisionService 
 
+MANUAL_START_EVENTS = ("MANUAL_START_TOSSUP", "MANUAL_REREAD_TOSSUP", "MANUAL_START_BONUS")
+
+
 class ScienceBowlModerator:
     def __init__(self, use_audio=True, use_camera=False, initial_bank=None, inbound_queue_size=INBOUND_QUEUE_SIZE, outbound_queue_size=OUTBOUND_QUEUE_SIZE):
         self.inbound_queue = asyncio.Queue(maxsize=inbound_queue_size)
@@ -59,6 +62,7 @@ class ScienceBowlModerator:
         self.online_buzz_team = None
         self.online_buzz_captain_only = False
         self.answer_audio_open = False
+        self.ui_state = {"show": "NONE", "overrides": False}
 
     async def _set_online_buzz_window(self, opened: bool, *, team=None, captain_only=False):
         if not self.online_mode:
@@ -68,6 +72,21 @@ class ScienceBowlModerator:
         self.online_buzz_captain_only = bool(captain_only and opened)
         kind = "OPEN_BUZZ" if opened else "CLOSE_BUZZ"
         await self.outbound_queue.put({"type": kind, "payload": {"team": self.online_buzz_team, "captain_only": self.online_buzz_captain_only}})
+
+    async def _set_ui_state(self, show: str, overrides: bool = False):
+        """Broadcast which moderator control is armed, and remember it.
+
+        Keeping the last state lets a moderator who reconnects (team change, dropped
+        socket) be re-armed instead of facing a HUD with no usable start control.
+        """
+        self.ui_state = {"show": show, "overrides": bool(overrides)}
+        await self.outbound_queue.put({"type": "UI_STATE", "payload": dict(self.ui_state)})
+
+    def _idle_start_message(self) -> str:
+        """Explain what a Start Tossup click is missing while the loop has nothing to read."""
+        if not self.question_bank:
+            return "⚠️ No question packet loaded — upload one in Pre Match Settings."
+        return "🏁 Every question in this packet is complete — load a new packet to play on."
 
     @staticmethod
     def _safe_csv_value(value):
@@ -140,7 +159,7 @@ class ScienceBowlModerator:
             await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": 0, "score_b": 0}})
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"✅ Loaded {len(self.question_bank)} new questions."}})
             await self.outbound_queue.put({"type": "PREMATCH_READY", "payload": {"count": len(self.question_bank), "first_category": self.question_bank[0].get("category", "GENERAL")}})
-            await self.outbound_queue.put({"type": "UI_STATE", "payload": {"show": "NONE"}})
+            await self._set_ui_state("NONE")
             
             await self.inbound_queue.put(Event(type=EventType.STATE_CHANGED, payload={}))
             
@@ -580,9 +599,18 @@ class ScienceBowlModerator:
 
             while True:
                 if not self.question_bank or self.current_q_idx >= len(self.question_bank):
+                    if self.ui_state.get("show") != "NONE":
+                        # Nothing can be started with an empty packet: hide the start controls.
+                        await self._set_ui_state("NONE")
                     # NEW: Process the queue so LOAD_BANK and SAVE_ROSTER don't get stuck forever
                     while not self.inbound_queue.empty():
                         evt = self.inbound_queue.get_nowait()
+                        evt_type = evt.type.name if hasattr(evt.type, 'name') else str(evt.type)
+                        # A manual start that arrives with nothing to read would otherwise
+                        # vanish without a trace: tell the moderator what is missing.
+                        if evt_type in MANUAL_START_EVENTS:
+                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": self._idle_start_message()}})
+                            continue
                         await self.process_admin_event(evt)
                     
                     await asyncio.sleep(1)
@@ -599,8 +627,8 @@ class ScienceBowlModerator:
                     "visual": q_data.get('tossup_visual', False)
                 }})
                 
-                # Keep tossups locked until the moderator begins the prematch.
-                await self.outbound_queue.put({"type": "UI_STATE", "payload": {"show": "TOSSUP"}})
+                # Arm the moderator's start control only once a question is actually loaded.
+                await self._set_ui_state("TOSSUP")
                 
                 action = await self.wait_for_moderator_action(["MANUAL_START_TOSSUP"])
                 
@@ -614,7 +642,7 @@ class ScienceBowlModerator:
                     continue
 
                 # HIDE BUTTONS WHILE READING/EVALUATING
-                await self.outbound_queue.put({"type": "UI_STATE", "payload": {"show": "NONE"}})
+                await self._set_ui_state("NONE")
 
                 payload, correct, is_interrupt, interrupt_action, buzz_time, buzz_text = await self._handle_tossup_attempt(q_data)
                 
@@ -654,7 +682,7 @@ class ScienceBowlModerator:
                         await asyncio.sleep(1)
                         
                         # --- PAUSE FOR RE-READ OR OVERRIDE ---
-                        await self.outbound_queue.put({"type": "UI_STATE", "payload": {"show": "REREAD", "overrides": True}})
+                        await self._set_ui_state("REREAD", overrides=True)
                         action = await self.wait_for_moderator_action(["MANUAL_REREAD_TOSSUP", "FORCE_JUDGMENT"])
                         action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
                         
@@ -678,7 +706,7 @@ class ScienceBowlModerator:
                             continue
                         
                         if not skip_rebound:
-                            await self.outbound_queue.put({"type": "UI_STATE", "payload": {"show": "NONE"}})
+                            await self._set_ui_state("NONE")
                             payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_tossup_attempt(q_data, allowed_team=other_team)
                         
                     else:
@@ -743,7 +771,7 @@ class ScienceBowlModerator:
                     }})
                     
                     # TELL UI TO ONLY SHOW BONUS BUTTON
-                    await self.outbound_queue.put({"type": "UI_STATE", "payload": {"show": "BONUS"}})
+                    await self._set_ui_state("BONUS")
                     
                     action = await self.wait_for_moderator_action(["MANUAL_START_BONUS"])
                     action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
@@ -756,7 +784,7 @@ class ScienceBowlModerator:
                         continue
 
                     # HIDE BUTTONS WHILE READING/EVALUATING
-                    await self.outbound_queue.put({"type": "UI_STATE", "payload": {"show": "NONE"}})
+                    await self._set_ui_state("NONE")
 
                     await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "🔊 Reading Bonus..."}})
                     

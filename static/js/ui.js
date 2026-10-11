@@ -117,10 +117,15 @@ async function handleSettingsPacket(file) {
         if (!Array.isArray(bankJson) || !bankJson.length || bankJson.length > 500 || !bankJson[0].tossup_text) {
             throw new Error('Invalid package: expected 1-500 question sets with tossup text.');
         }
+        // The room must accept the packet before this page may call it ready: a local
+        // "ready" message without a live socket would be a lie.
+        if (typeof isRoomConnected !== 'function' || !isRoomConnected()) {
+            throw new Error('Not connected to the match room — the packet was not sent. Reopen the room and try again.');
+        }
         sendEvent('LOAD_BANK', { bank: bankJson });
         if (status) {
-            status.innerText = `${file.name} parsed — ${bankJson.length} question sets ready`;
-            status.className = 'mt-4 text-center text-xs font-mono font-bold text-neonGreen min-h-5';
+            status.innerText = `Sending ${file.name} to the room — waiting for confirmation...`;
+            status.className = 'mt-4 text-center text-xs font-mono font-bold text-neonAmber min-h-5';
         }
     } catch (error) {
         if (status) {
@@ -149,10 +154,13 @@ if (bankFileInput) {
             if (!Array.isArray(bankJson) || bankJson.length === 0 || bankJson.length > 500 || !bankJson[0].tossup_text) {
                 throw new Error("Invalid format. Choose 1-500 questions with tossup text.");
             }
+            if (typeof isRoomConnected !== 'function' || !isRoomConnected()) {
+                throw new Error("Not connected to the match room — the packet was not sent.");
+            }
             sendEvent('LOAD_BANK', { bank: bankJson });
             if (bankFileName) {
-                bankFileName.innerText = `Loaded ${file.name} (${bankJson.length} questions). Game reset!`;
-                bankFileName.className = "text-xs text-neonGreen font-mono font-bold";
+                bankFileName.innerText = `Sending ${file.name} (${bankJson.length} questions) — waiting for confirmation...`;
+                bankFileName.className = "text-xs text-neonAmber font-mono font-bold animate-pulse";
             }
         } catch (err) {
             if (bankFileName) {

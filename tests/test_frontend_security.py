@@ -30,7 +30,11 @@ class FrontendSecurityTests(unittest.TestCase):
 
     def test_online_controls_are_bound_to_server_phase_team_and_captain(self):
         source = (ROOT / "static/js/websocket.js").read_text(encoding="utf-8")
-        self.assertIn("currentTeam === currentOnlineBuzzTeam", source)
+        # Buzz eligibility must come from the server's window: closed windows and the
+        # other team are excluded, while an open window (no team set) admits both teams.
+        self.assertIn("function buzzWindowAllowsMe()", source)
+        self.assertIn("if (!onlineBuzzOpen) return false;", source)
+        self.assertIn("if (currentOnlineBuzzTeam && currentTeam !== currentOnlineBuzzTeam) return false;", source)
         self.assertIn("onlineCaptainOnly && !isOnlineCaptain", source)
         self.assertIn("renderOnlineRoster", source)
         self.assertIn("ROOM_ROSTER", source)
@@ -47,8 +51,10 @@ class FrontendSecurityTests(unittest.TestCase):
         self.assertIn("window.joinOnlineRoomApi = async", auth_source)
         self.assertNotIn("window.createOnlineRoom = async", auth_source)
         self.assertNotIn("window.joinOnlineRoom = async", auth_source)
-        self.assertIn("window.createOnlineRoomApi(roomId, name, team, captain)", ui_source)
-        self.assertIn("window.joinOnlineRoomApi(roomId, name, team, captain)", ui_source)
+        # Joining uses a default team and captain; players and the moderator claim their
+        # real seat on the pre-match and lobby screens.
+        self.assertIn("window.createOnlineRoomApi(roomId, name, 'Team A', false)", ui_source)
+        self.assertIn("window.joinOnlineRoomApi(roomId, name, 'Team A', false)", ui_source)
 
 
 if __name__ == "__main__":
