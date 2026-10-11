@@ -1,657 +1,1014 @@
 <!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Science Bowl Match Engine</title>
-    
-    <!-- PDF.js for Client-Side PDF Parsing -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-    <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
-    </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SLOPBOWL | Academic Competition Platform & Moderation Engine</title>
 
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        isodark: '#121214',
-                        isopanel: '#1c1c20',
-                        isocard: '#25252a',
-                        isoborder: '#2e2e38',
-                        teamA: { DEFAULT: '#2dd4bf', dark: '#115e59', glow: 'rgba(45, 212, 191, 0.15)' },
-                        teamB: { DEFAULT: '#fbbf24', dark: '#78350f', glow: 'rgba(251, 191, 36, 0.15)' }
-                    },
-                    fontFamily: {
-                        mono: ['JetBrains Mono', 'Fira Code', 'Monaco', 'monospace'],
-                        sans: ['Inter', 'system-ui', 'sans-serif']
-                    }
-                }
-            }
+  <!-- PDF.js for Client-Side PDF Parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+  </script>
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts: Space Grotesk, JetBrains Mono, Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            oled: '#000000',
+            panel: '#05080e',
+            panelHover: '#0b111e',
+            surface: '#0f172a',
+            borderDark: '#162238',
+            neonCyan: '#00f3ff',
+            neonAmber: '#ffaa00',
+            neonGreen: '#00ff66',
+            neonPink: '#ff0055',
+            neonPurple: '#b026ff',
+            isodark: '#121214',
+            isopanel: '#1c1c20',
+            isocard: '#25252a',
+            isoborder: '#2e2e38',
+            teamA: { DEFAULT: '#2dd4bf', dark: '#115e59', glow: 'rgba(45, 212, 191, 0.15)' },
+            teamB: { DEFAULT: '#fbbf24', dark: '#78350f', glow: 'rgba(251, 191, 36, 0.15)' }
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+            display: ['"Space Grotesk"', 'sans-serif']
+          },
+          boxShadow: {
+            'neon-cyan': '0 0 16px rgba(0, 243, 255, 0.45)',
+            'neon-cyan-lg': '0 0 30px rgba(0, 243, 255, 0.65)',
+            'neon-amber': '0 0 16px rgba(255, 170, 0, 0.45)',
+            'neon-green': '0 0 16px rgba(0, 255, 102, 0.45)',
+            'neon-pink': '0 0 16px rgba(255, 0, 85, 0.45)',
+            'inner-glow': 'inset 0 0 15px rgba(0, 243, 255, 0.2)'
+          }
         }
-    </script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
-    
-    <link rel="stylesheet" href="/static/css/style.css">
+      }
+    }
+  </script>
+
+  <style>
+    :root {
+      --glow-scale: 1;
+    }
+    body {
+      background-color: #000000;
+      color: #f1f5f9;
+      font-family: 'Inter', sans-serif;
+      overflow-x: hidden;
+      user-select: none;
+    }
+    .cyber-grid {
+      background-image: radial-gradient(rgba(0, 243, 255, 0.09) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    .hud-scanline {
+      background: linear-gradient(rgba(0, 0, 0, 0) 50%, rgba(0, 0, 0, 0.45) 50%);
+      background-size: 100% 3px;
+    }
+    .digital-lcd {
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 0.08em;
+      text-shadow: 0 0 12px currentColor;
+    }
+    .neon-border-cyan {
+      border: 1px solid rgba(0, 243, 255, 0.4);
+      box-shadow: 0 0 14px rgba(0, 243, 255, 0.25);
+    }
+    .neon-border-amber {
+      border: 1px solid rgba(255, 170, 0, 0.4);
+      box-shadow: 0 0 14px rgba(255, 170, 0, 0.25);
+    }
+    .neon-border-green {
+      border: 1px solid rgba(0, 255, 102, 0.4);
+      box-shadow: 0 0 14px rgba(0, 255, 102, 0.25);
+    }
+    .neon-border-pink {
+      border: 1px solid rgba(255, 0, 85, 0.4);
+      box-shadow: 0 0 14px rgba(255, 0, 85, 0.25);
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #000000;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #162238;
+      border-radius: 9999px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #00f3ff;
+    }
+    @keyframes buzzRipple {
+      0% { box-shadow: 0 0 0 0 rgba(0, 243, 255, 0.8); }
+      70% { box-shadow: 0 0 0 25px rgba(0, 243, 255, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(0, 243, 255, 0); }
+    }
+    .buzz-active-anim {
+      animation: buzzRipple 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+  </style>
+
+  <link rel="stylesheet" href="/static/css/style.css">
 </head>
-<body class="min-h-screen flex flex-col justify-between select-none">
 
-<!-- TOP NAV (System Status Moved Out) -->
-    <header class="bg-isopanel border-b border-isoborder px-4 py-2.5 flex items-center justify-between sticky top-0 z-50 shadow-2xl">
-        <div class="flex items-center space-x-4 md:space-x-6">
-            <div class="flex items-center space-x-2">
-                <span class="font-black text-xl tracking-wider text-white">SCIENCE BOWL</span>
-                <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950 text-teamA border border-cyan-800 font-mono hidden sm:inline-block">ENGINE</span>
-            </div>
+<body class="min-h-screen cyber-grid flex flex-col justify-between selection:bg-neonCyan selection:text-black">
 
-            <nav class="flex space-x-1 bg-isodark p-1 rounded-lg border border-isoborder text-xs font-semibold">
-                <button id="tab-btn-match" onclick="switchTab('match')" class="tab-btn active px-3 py-1.5 rounded transition flex items-center space-x-2">
-                    <svg class="w-3.5 h-3.5 text-teamA" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    <span>MATCH</span>
-                </button>
-                <button id="tab-btn-setup" onclick="switchTab('setup')" class="tab-btn px-3 py-1.5 rounded transition text-slate-400 hover:text-white flex items-center space-x-2">
-                    <svg class="w-3.5 h-3.5 text-fuchsia-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                    <span>SETUP</span>
-                </button>
-            </nav>
+  <!-- Top Sticky Navigation Bar -->
+  <header class="sticky top-0 z-40 bg-black/90 backdrop-blur-xl border-b border-borderDark px-4 lg:px-8 py-3 flex items-center justify-between shadow-2xl">
+    <div class="flex items-center space-x-3 cursor-pointer group" onclick="navigateTo(1); playSound('click');">
+      <div class="w-10 h-10 rounded-xl bg-black border border-neonCyan flex items-center justify-center text-neonCyan font-black text-xl shadow-neon-cyan group-hover:scale-105 group-active:scale-95 transition-all">
+        &#9889;
+      </div>
+      <div>
+        <div class="flex items-center space-x-2">
+          <span class="text-xl font-display font-black tracking-wider text-white uppercase group-hover:text-neonCyan transition">Slopbowl</span>
+          <span class="px-2 py-0.5 text-[9px] font-mono font-bold bg-black text-neonCyan border border-neonCyan/70 rounded-full tracking-widest uppercase">
+            V3.4 ONLINE
+          </span>
         </div>
-
-        <div class="flex items-center space-x-6 md:space-x-8">
-            <div class="flex items-center space-x-3 border-l-4 border-teamA pl-3 py-1">
-                <span id="header-team-a-name" class="text-xs md:text-sm font-bold text-teamA tracking-wider">TEAM A</span>
-                <span id="score-header-a" class="text-4xl md:text-5xl font-black text-white font-mono tracking-tight drop-shadow-md">0</span>
-            </div>
-
-            <div class="flex items-center space-x-3 border-r-4 border-teamB pr-3 text-right py-1">
-                <span id="score-header-b" class="text-4xl md:text-5xl font-black text-teamB font-mono tracking-tight drop-shadow-md">0</span>
-                <span id="header-team-b-name" class="text-xs md:text-sm font-bold text-teamB tracking-wider">TEAM B</span>
-            </div>
-        </div>
-        
-        <!-- Right Side: Auth & System Utilities -->
-        <div class="flex items-center space-x-3">
-            <!-- Authenticated User Section (Hidden by default) -->
-            <div id="auth-user-section" class="hidden flex items-center space-x-3 border-r border-isoborder pr-3">
-                <span id="auth-user-email" class="text-xs text-slate-300 font-mono"></span>
-                <button onclick="document.getElementById('settings-modal').classList.remove('hidden')" class="text-slate-400 hover:text-white transition" title="User Settings">⚙️</button>
-                <button id="btn-sign-out" class="bg-zinc-800 hover:bg-zinc-700 text-slate-300 px-3 py-1 rounded text-xs transition">Sign Out</button>
-            </div>
-            
-            <!-- Unauthenticated Login Button -->
-            <button id="btn-show-login" onclick="document.getElementById('auth-modal').classList.remove('hidden')" class="bg-teamA hover:bg-teal-300 text-isodark px-4 py-1.5 rounded text-xs font-bold transition shadow-lg uppercase tracking-wider">
-                Sign In
-            </button>
-
-            <!-- Existing System Buttons -->
-            <button onclick="sendEvent('EXPORT_CSV')" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-1.5 rounded text-xs uppercase tracking-wider transition active:scale-95 shadow-lg">
-                EXPORT LOG
-            </button>
-            <button onclick="sendEvent('FORCE_RESET_STATE')" class="bg-red-600 hover:bg-red-500 text-white font-bold px-4 py-1.5 rounded text-xs uppercase tracking-wider transition active:scale-95 shadow-lg">
-                OVERRIDE & RESET
-            </button>
-        </div>
-    </header>
-
-    <main class="flex-1 p-4 max-w-[1400px] w-full mx-auto flex flex-col gap-4">
-        <!-- LOBBY VIEW -->
-        <div id="view-lobby" class="flex flex-col items-center justify-center py-16 px-6 text-center max-w-xl mx-auto space-y-8 bg-isopanel border border-isoborder rounded-2xl shadow-2xl my-auto">
-            <div class="space-y-3">
-                <h1 class="text-4xl md:text-5xl font-black text-white tracking-tight font-mono">
-                    ENTER <span class="text-teamA">ROOM CODE</span>
-                </h1>
-                <p class="text-zinc-400 text-xs md:text-sm font-sans max-w-md mx-auto leading-relaxed">
-                    Create a new room or join an existing match instance.
-                </p>
-            </div>
-
-            <div class="w-full max-w-sm space-y-3">
-                <input type="text" id="room-id-input" placeholder="Room code (e.g. semifinals-a)" class="w-full bg-isodark border border-isoborder rounded-xl px-4 py-3 text-lg text-white font-mono text-center uppercase focus:outline-none focus:border-teamA transition-colors">
-                <input type="text" id="online-player-name" maxlength="64" placeholder="Your name" class="w-full bg-isodark border border-isoborder rounded-xl px-4 py-3 text-white font-mono focus:outline-none focus:border-teamA">
-                <select id="online-team-choice" class="w-full bg-isodark border border-isoborder rounded-xl px-4 py-3 text-white font-mono">
-                    <option value="Team A">Join Team A</option>
-                    <option value="Team B">Join Team B</option>
-                </select>
-                <label class="flex items-center justify-center gap-2 text-sm text-slate-300 font-mono">
-                    <input type="checkbox" id="online-captain-claim" class="accent-teal-400">
-                    Claim captain (one per team)
-                </label>
-                <button onclick="createOnlineRoom()" class="w-full px-8 py-3 bg-teamA hover:bg-teal-300 text-isodark font-black font-mono text-sm uppercase tracking-wider rounded-xl shadow-lg transition">
-                    CREATE ONLINE MATCH
-                </button>
-                <button onclick="joinOnlineRoom()" class="w-full px-8 py-3 bg-blue-700 hover:bg-blue-600 text-white font-black font-mono text-sm uppercase tracking-wider rounded-xl shadow-lg transition">
-                    JOIN ONLINE MATCH
-                </button>
-                <button onclick="joinRoom()" class="w-full px-4 py-2 text-xs text-slate-400 hover:text-white font-mono uppercase tracking-wider">
-                    In-person moderator station
-                </button>
-                <p id="online-lobby-status" class="min-h-5 text-xs text-amber-400 font-mono"></p>
-            </div>
-        </div>
-
-<!-- MATCH VIEW -->
-        <div id="view-match" class="hidden flex-col gap-4 relative">
-            
-            <!-- MATCH START OVERLAY -->
-            <div id="match-start-overlay" class="absolute inset-0 z-40 bg-isodark/90 backdrop-blur-sm flex flex-col items-center justify-center rounded-xl border border-isoborder shadow-2xl">
-                <button onclick="beginMatch()" class="px-12 py-6 bg-teamA hover:bg-teal-300 text-isodark font-black font-mono text-3xl uppercase tracking-wider rounded-2xl shadow-[0_0_40px_rgba(45,212,191,0.4)] transition transform hover:scale-105 active:scale-95">
-                    BEGIN MATCH
-                </button>
-                <span class="text-slate-400 font-mono mt-5 text-sm uppercase tracking-widest">Starts the match timer</span>
-            </div>
-<!-- REPLACED PANEL: PROTECTED WRAPPER FOR CENTERED + 20% UPSCALED ELEMENTS -->
-            <div id="stage-card-panel" class="bg-isopanel border border-teamA/30 rounded-xl p-6 shadow-md transition-all duration-300">
-
-                <!-- INNER WRAPPER (Protects the vertical stack from Javascript class overrides) -->
-                <div class="flex flex-col gap-6 w-full">
-                    
-                    <!-- TOP META BAR: CATEGORY, QUESTION TYPE, SYSTEM STATUS -->
-                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-isoborder pb-3">
-                        <div class="flex items-center space-x-2">
-                            <span id="stage-cat-badge" class="px-2.5 py-0.5 rounded bg-teal-950/60 text-teamA border border-teal-800/50 text-xs font-bold uppercase">--</span>
-                            <span id="stage-type-badge" class="px-2.5 py-0.5 rounded bg-amber-950/60 text-teamB border border-amber-800/50 text-xs font-bold uppercase">LIVE QUESTION</span>
-                        </div>
-
-                        <!-- SYSTEM STATUS -->
-                        <div class="bg-isodark px-3 py-1 rounded-lg border border-isoborder flex items-center space-x-2 shadow-inner">
-                            <span class="w-2 h-2 rounded-full bg-teamA animate-pulse"></span>
-                            <span class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">STATUS:</span>
-                            <span id="header-status" class="text-xs text-slate-200 font-mono font-bold">READY</span>
-                        </div>
-                    </div>
-
-                    <!-- MAIN CONTENT AREA -->
-                    <div class="flex-1 flex flex-col">
-                        <div class="text-[10px] font-mono font-bold text-zinc-400 tracking-widest uppercase mb-4 flex items-center space-x-2">
-                            <span>CURRENT STAGE</span>
-                            <span id="stage-live-dot" class="w-2 h-2 rounded-full bg-teamA opacity-80"></span>
-                        </div>
-                        
-                        <!-- TIMER & MEDIA ROW (Centered horizontally) -->
-                        <div class="flex flex-row items-stretch justify-center gap-8 mb-2">
-                            
-                            <!-- STRETCHED ACTION CLOCK (Upscaled) -->
-                            <div id="action-timer-box" class="w-full max-w-[768px] min-h-[288px] bg-isodark p-8 rounded-3xl border border-teamA/40 flex flex-col items-center justify-center text-center shadow-inner relative overflow-hidden">
-                                <div class="flex items-center justify-between w-full absolute top-8 px-10">
-                                    <span id="action-timer-label" class="text-base font-bold text-teamA tracking-widest uppercase">ACTION CLOCK</span>
-                                    <span id="action-timer-warning" class="hidden text-sm font-bold text-red-400 bg-red-950/80 border border-red-800 px-3 py-1 rounded animate-pulse">
-                                        ⚠️ 5s
-                                    </span>
-                                </div>
-                                
-                                <!-- Enlarged Text for Upscaled Box -->
-                                <div id="action-timer-display" class="text-9xl font-black font-mono text-white tracking-tighter drop-shadow-lg my-auto">
-                                    --
-                                </div>
-
-                                <!-- VISUAL COUNTDOWN PROGRESS BAR -->
-                                <div class="w-5/6 mx-auto bg-zinc-800 h-4 rounded-full overflow-hidden absolute bottom-10 border border-zinc-700">
-                                    <div id="action-timer-bar" class="bg-teamA h-full w-full transition-all duration-100"></div>
-                                </div>
-                            </div>
-
-                            <!-- RIGHT MEDIA STACK (Upscaled) -->
-                            <div class="flex flex-col gap-5 w-72 shrink-0">
-                                
-                                <!-- VISION FEED -->
-                                <div class="bg-isodark p-3 rounded-xl border border-isoborder flex flex-col items-center justify-center shadow-inner">
-                                    <span class="text-[10px] font-bold text-zinc-400 tracking-widest uppercase mb-2">VISION FEED</span>
-                                    <div class="relative w-full aspect-video bg-zinc-950 rounded-lg border border-zinc-800 overflow-hidden">
-                                        <video id="match-video-stream" class="absolute top-0 left-0 w-full h-full object-cover" autoplay playsinline muted></video>
-                                        <canvas id="match-calib-canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
-                                    </div>
-                                </div>
-
-                                <!-- MATCH TIMER -->
-                                <div class="bg-isodark p-4 rounded-xl border border-isoborder flex flex-col items-center justify-center text-center shadow-inner flex-1">
-                                    <span id="timer-stage-label" class="text-[10px] font-bold text-zinc-400 tracking-widest uppercase mb-2">MATCH CLOCK</span>
-                                    <div id="main-timer-display" class="text-5xl font-black font-mono tracking-tight text-teamA">
-                                        08:00
-                                    </div>
-                                </div>
-
-                            </div>
-                        </div>
-
-                        <!-- HIDDEN QUESTION ELEMENTS (Kept to prevent JS errors) -->
-                        <h1 id="stage-title-text" class="hidden"></h1>
-                        <p id="stage-subtitle-text" class="hidden"></p>
-                    </div>
-
-                    <!-- BOTTOM STATUS BADGES -->
-                    <div class="flex flex-wrap items-center gap-2 pt-3 font-mono text-xs border-t border-isoborder/50 mt-1">
-                        <div class="px-3 py-1 rounded bg-isodark border border-isoborder flex items-center space-x-2">
-                            <span id="buzz-team-indicator" class="w-2.5 h-2.5 rounded-full bg-zinc-600"></span>
-                            <span id="buzz-player-name" class="text-zinc-300 font-bold">FLOOR: CLEAR</span>
-                        </div>
-                        <span id="interrupt-badge" class="px-3 py-1 rounded bg-isodark border border-isoborder text-zinc-500 font-bold">
-                            INTERRUPT: --
-                        </span>
-                        <span id="outcome-badge" class="px-3 py-1 rounded bg-isodark border border-isoborder text-zinc-500 font-bold">
-                            OUTCOME: PENDING
-                        </span>
-                    </div>
-                </div>
-            </div>
-            <!-- MODERATOR CONTROL BAR -->
-            <div class="bg-isopanel border border-isoborder rounded-xl p-4 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
-                
-                <!-- Primary Flow Controls -->
-                <div class="flex-1 flex space-x-3 w-full">
-                    <button id="btn-start-tossup" onclick="sendEvent('MANUAL_START_TOSSUP')" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg font-bold transition text-sm flex items-center justify-center shadow-lg">
-                        ▶ START TOSSUP
-                    </button>
-                    <button id="btn-reread-tossup" onclick="sendEvent('MANUAL_REREAD_TOSSUP')" class="hidden flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg font-bold transition text-sm flex items-center justify-center shadow-lg">
-                        ▶ RE-READ TOSSUP
-                    </button>
-                    <button id="btn-start-bonus" onclick="sendEvent('MANUAL_START_BONUS')" class="hidden flex-1 bg-yellow-600 hover:bg-yellow-500 text-white py-3 rounded-lg font-bold transition text-sm flex items-center justify-center shadow-lg">
-                        ▶ START BONUS
-                    </button>
-
-                    <!-- AI Judgment Overrides -->
-                    <div id="override-controls" class="hidden flex space-x-2 border-l border-isoborder pl-3">
-                        <button onclick="sendEvent('FORCE_JUDGMENT', {correct: true})" class="w-12 bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500 text-emerald-400 hover:text-white rounded-lg font-bold text-xl transition shadow-lg">✓</button>
-                        <button onclick="sendEvent('FORCE_JUDGMENT', {correct: false})" class="w-12 bg-red-600/20 hover:bg-red-600 border border-red-500 text-red-400 hover:text-white rounded-lg font-bold text-xl transition shadow-lg">✗</button>
-                    </div>
-                    
-                    <button id="btn-pause-match" onclick="togglePause()" class="w-24 md:w-32 bg-zinc-700 hover:bg-zinc-600 text-white py-3 rounded-lg font-bold transition text-sm flex items-center justify-center shadow-lg">
-                        ⏸ PAUSE
-                    </button>
-                </div>
-                <div id="online-roster" class="w-full flex flex-wrap justify-center md:justify-start gap-2 min-h-6"></div>
-                <!-- Physical backup buzzes stay available only in in-person rooms. -->
-                <div id="manual-buzz-controls" class="w-full md:w-auto flex space-x-3 border-t md:border-t-0 md:border-l border-isoborder pt-3 md:pt-0 md:pl-4 hidden">
-                    <button onclick="sendEvent('BUZZ', {team: 'Team A', player: 'Manual-A'})" class="moderator-only-control flex-1 md:w-32 bg-teamA/10 hover:bg-teamA border border-teamA text-teamA hover:text-isodark py-2 rounded font-bold transition text-xs shadow-lg uppercase">
-                        Manual Buzz A
-                    </button>
-                    <button onclick="sendEvent('BUZZ', {team: 'Team B', player: 'Manual-B'})" class="moderator-only-control flex-1 md:w-32 bg-teamB/10 hover:bg-teamB border border-teamB text-teamB hover:text-isodark py-2 rounded font-bold transition text-xs shadow-lg uppercase">
-                        Manual Buzz B
-                    </button>
-                </div>
-                <div id="online-buzz-controls" class="hidden w-full md:w-auto border-t md:border-t-0 md:border-l border-isoborder pt-3 md:pt-0 md:pl-4">
-                    <button id="btn-online-buzz" onclick="sendEvent('BUZZ', {})" disabled class="w-full md:w-56 bg-rose-700 disabled:bg-zinc-700 disabled:text-zinc-400 hover:bg-rose-600 text-white py-3 rounded-lg font-black font-mono text-lg tracking-wider shadow-lg disabled:cursor-not-allowed">
-                        BUZZ
-                    </button>
-                </div>
-                    <div class="flex space-x-3 mt-2 md:mt-0">
-                        <button onclick="triggerChallenge()" class="flex-1 md:w-full bg-amber-600/20 hover:bg-amber-600 border border-amber-500 text-amber-400 hover:text-white py-2 rounded font-bold transition text-xs shadow-lg uppercase tracking-wider">
-                        ⚠️ Challenge (Pause & Skip)
-                    </button>
-                </div>
-            </div>
-
-            <!-- SCORESHEET -->
-            <div class="bg-isopanel border border-isoborder rounded-xl p-4 shadow-xl">
-                <div class="text-xs font-bold text-slate-400 tracking-wider uppercase mb-3 flex justify-between items-center px-1">
-                    <span>MATCH EVENT SCORE SHEET</span>
-                    <span class="text-[10px] font-mono text-slate-500">PACKET LOG</span>
-                </div>
-
-                <div class="flex flex-wrap items-center justify-between gap-3 py-2 px-3 mb-3 bg-isodark/80 rounded-lg border border-isoborder/80 text-xs font-mono">
-                    <div class="flex flex-wrap items-center gap-1.5">
-                        <span id="scoresheet-team-a-label" class="text-teamA font-bold text-[11px] uppercase mr-1">TEAM A:</span>
-                        <span id="match-roster-A-1" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P1: Player 1</span>
-                        <span id="match-roster-A-C" class="px-2 py-0.5 rounded bg-teamA/20 border border-teamA/60 text-teamA font-bold text-[10px]">C: Captain</span>
-                        <span id="match-roster-A-3" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P3: Player 3</span>
-                        <span id="match-roster-A-4" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P4: Player 4</span>
-                        <span id="match-roster-A-5" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P5: Player 5</span>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-1.5 justify-end">
-                        <span id="scoresheet-team-b-label" class="text-teamB font-bold text-[11px] uppercase mr-1">TEAM B:</span>
-                        <span id="match-roster-B-1" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P1: Player 1</span>
-                        <span id="match-roster-B-C" class="px-2 py-0.5 rounded bg-teamB/20 border border-teamB/60 text-teamB font-bold text-[10px]">C: Captain</span>
-                        <span id="match-roster-B-3" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P3: Player 3</span>
-                        <span id="match-roster-B-4" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P4: Player 4</span>
-                        <span id="match-roster-B-5" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P5: Player 5</span>
-                    </div>
-                </div>
-
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left font-mono text-xs">
-                        <thead>
-                            <tr class="border-b border-isoborder text-[10px] text-slate-500">
-                                <th class="py-1 px-4 text-center">TOSS-UP</th>
-                                <th class="py-1 px-4 text-center">BONUS</th>
-                                <th class="py-1 px-2 text-center">CAT / SCORE</th>
-                                <th class="py-1 px-4 text-center">TOSS-UP</th>
-                                <th class="py-1 px-4 text-center">BONUS</th>
-                            </tr>
-                        </thead>
-                        <tbody id="scoresheet-body" class="divide-y divide-isoborder/50">
-                            <tr>
-                                <td class="py-3 px-4 text-center"></td>
-                                <td class="py-3 px-4 text-center"></td>
-                                <td class="py-3 px-2 text-center bg-isodark border-x border-isoborder text-slate-500 font-bold text-[10px] uppercase tracking-widest">
-                                    Match data will populate here...
-                                </td>
-                                <td class="py-3 px-4 text-center"></td>
-                                <td class="py-3 px-4 text-center"></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-        </div> <!-- MATCH VIEW END -->
-
-        <!-- SETUP VIEW -->
-        <div id="view-setup" class="hidden flex-col gap-5">
-            <div class="grid grid-cols-12 gap-5">
-
-                <div class="col-span-12 bg-isopanel border border-isoborder rounded-xl p-5 shadow-xl flex flex-col justify-between">
-                    <div class="flex items-center justify-between pb-3 mb-4 border-b border-isoborder">
-                        <div class="flex items-center space-x-2">
-                            <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                            <h2 class="font-bold text-sm tracking-wide text-slate-100 uppercase">Question Bank Selection</h2>
-                        </div>
-                        <span class="text-xs font-mono bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded">DATA SOURCE</span>
-                    </div>
-                    
-                    <div class="flex items-center space-x-4">
-                        <input type="file" id="bank-file-input" accept=".json" class="hidden">
-                        <button onclick="document.getElementById('bank-file-input').click()" class="bg-isodark hover:bg-zinc-800 border border-isoborder hover:border-amber-500 text-slate-200 px-4 py-2 rounded text-xs uppercase font-bold transition">
-                            Browse JSON File
-                        </button>
-                        <span id="bank-file-name" class="text-xs text-rose-400 font-mono font-bold animate-pulse">⚠️ No packet loaded. Please browse for a JSON file.</span>
-                    </div>
-                        <div id="cloud-packet-section" class="hidden items-center space-x-4 border-t border-isoborder pt-3">
-                            <select id="cloud-packet-select" class="bg-isodark border border-isoborder rounded px-3 py-2 text-xs text-slate-200 font-mono w-64 focus:outline-none focus:border-amber-500">
-                                <option value="">Loading cloud packets...</option>
-                            </select>
-                            <button id="btn-load-cloud-packet" class="bg-amber-600/20 hover:bg-amber-600 border border-amber-500 text-amber-400 hover:text-white px-4 py-1.5 rounded text-xs uppercase font-bold transition shadow-lg tracking-wider">
-                                ☁️ Load Cloud Packet
-                            </button>
-                        </div>
-                </div>
-
-                <div class="col-span-12 lg:col-span-7 bg-isopanel border border-isoborder rounded-xl p-5 shadow-xl flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between pb-3 mb-4 border-b border-isoborder">
-                            <div class="flex items-center space-x-2">
-                                <span class="w-2.5 h-2.5 rounded-full bg-fuchsia-400"></span>
-                                <h2 class="font-bold text-sm tracking-wide text-slate-100 uppercase">Team & Player Roster Setup</h2>
-                            </div>
-                            <span class="text-xs font-mono bg-fuchsia-950 text-fuchsia-300 border border-fuchsia-800 px-2 py-0.5 rounded">MATCH CONFIG</span>
-                        </div>
-
-                        <div class="grid grid-cols-2 gap-6">
-                            
-                            <div class="space-y-2">
-                                <label class="text-[10px] font-mono text-slate-400 uppercase block mb-1">Team A Name & Roster</label>
-                                <input type="text" id="input-team-a-name" value="Team A" class="w-full bg-teal-950/40 border border-teamA/50 rounded px-2.5 py-1.5 text-sm text-teamA font-bold font-mono mb-2">
-                                <input type="text" id="roster-A-1" value="Player 1" class="w-full bg-isocard border border-isoborder rounded px-2.5 py-1 text-xs text-slate-300 font-mono">
-                                <input type="text" id="roster-A-C" value="Captain" class="w-full bg-cyan-950/80 border border-teamA rounded px-2.5 py-1 text-xs text-teamA font-bold font-mono">
-                                <input type="text" id="roster-A-3" value="Player 3" class="w-full bg-isocard border border-isoborder rounded px-2.5 py-1 text-xs text-slate-300 font-mono">
-                                <input type="text" id="roster-A-4" value="Player 4" class="w-full bg-isocard border border-isoborder rounded px-2.5 py-1 text-xs text-slate-300 font-mono">
-                                <input type="text" id="roster-A-5" value="Player 5" class="w-full bg-isocard border border-isoborder rounded px-2.5 py-1 text-xs text-slate-300 font-mono">
-                            </div>
-
-                            <div class="space-y-2">
-                                <label class="text-[10px] font-mono text-slate-400 uppercase block mb-1">Team B Name & Roster</label>
-                                <input type="text" id="input-team-b-name" value="Team B" class="w-full bg-fuchsia-950/40 border border-teamB/50 rounded px-2.5 py-1.5 text-sm text-teamB font-bold font-mono mb-2">
-                                <input type="text" id="roster-B-1" value="Player 1" class="w-full bg-isocard border border-isoborder rounded px-2.5 py-1 text-xs text-slate-300 font-mono">
-                                <input type="text" id="roster-B-C" value="Captain" class="w-full bg-fuchsia-950/80 border border-teamB rounded px-2.5 py-1 text-xs text-teamB font-bold font-mono">
-                                <input type="text" id="roster-B-3" value="Player 3" class="w-full bg-isocard border border-isoborder rounded px-2.5 py-1 text-xs text-slate-300 font-mono">
-                                <input type="text" id="roster-B-4" value="Player 4" class="w-full bg-isocard border border-isoborder rounded px-2.5 py-1 text-xs text-slate-300 font-mono">
-                                <input type="text" id="roster-B-5" value="Player 5" class="w-full bg-isocard border border-isoborder rounded px-2.5 py-1 text-xs text-slate-300 font-mono">
-                            </div>
-                        </div>
-                    </div> 
-
-                    <div class="pt-4 border-t border-isoborder mt-4 flex items-center justify-between">
-                        <span class="text-xs text-slate-400 font-mono">Roster changes apply live across the match HUD and score sheet.</span>
-                        <button onclick="confirmSetup()" class="bg-cyan-600 hover:bg-cyan-500 text-white px-5 py-2 rounded font-bold text-xs uppercase tracking-wider transition">
-                            SAVE & GO TO MATCH VIEW
-                        </button>
-                    </div>
-                </div>
-
-                <div class="col-span-12 lg:col-span-5 bg-isopanel border border-isoborder rounded-xl p-5 shadow-xl flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between pb-3 mb-4 border-b border-isoborder">
-                            <div class="flex items-center space-x-2">
-                                <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                                <h2 class="font-bold text-sm tracking-wide text-slate-100 uppercase">Vision Detection Engine</h2>
-                            </div>
-                            <span class="text-xs font-mono bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded">LUMA MODE</span>
-                        </div>
-
-                        <div class="space-y-4">
-                            <!-- RESTORED: Camera Selection Dropdown -->
-                            <div>
-                                <label class="text-[10px] font-mono text-slate-400 uppercase block mb-1">Video Source Device</label>
-                                <select id="camera-select" onchange="changeCameraDevice(this.value)" class="w-full bg-isodark border border-isoborder rounded px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-cyan-500">
-                                    <option value="">Loading Cameras...</option>
-                                </select>
-                            </div>
-
-                            <!-- Manual ROI Drawing Panel -->
-                            <div id="vision-panel-manual" class="bg-isodark p-3 rounded-lg border border-isoborder space-y-3">
-                                <div class="flex items-center justify-between">
-                                    <span id="calib-instruction" class="text-[10px] font-mono font-bold text-teamB uppercase block">Manual ROI Bounding Box Canvas</span>
-                                    <span class="text-[9px] font-mono text-zinc-500">Drag to box buzzers</span>
-                                </div>
-
-                                <div id="manual-roi-canvas" class="relative w-full aspect-video bg-zinc-950 rounded border border-zinc-800 overflow-hidden cursor-crosshair">
-                                    <!-- RESTORED: Video tag for native browser capture -->
-                                    <video id="video-stream" class="absolute top-0 left-0 w-full h-full object-cover" autoplay playsinline muted></video>
-                                    <canvas id="calib-canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
-                                    <div id="calib-overlay-text" class="absolute inset-0 bg-zinc-900/60 flex flex-col items-center justify-center text-center p-2 pointer-events-none z-10">
-                                        <span class="text-white font-bold mb-2">Click "Start Camera Feed" to begin mapping</span>
-                                    </div>
-                                </div>
-
-                                <div class="flex items-center justify-between gap-2">
-                                    <button onclick="startCalibration()" class="flex-1 py-1.5 bg-isocard hover:bg-zinc-800 border border-zinc-700 text-cyan-300 rounded font-mono text-xs transition">
-                                        1. Start Camera Feed
-                                    </button>
-                                    <button onclick="resetCalibration()" class="py-1.5 px-3 bg-isocard hover:bg-zinc-800 border border-zinc-700 text-rose-400 rounded font-mono text-xs transition">
-                                        Reset
-                                    </button>
-                                    <button onclick="saveCalibration()" class="flex-1 py-1.5 bg-emerald-950/50 hover:bg-emerald-900/50 border border-emerald-600/50 text-emerald-400 rounded font-mono text-xs transition">
-                                        2. Save to Engine
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="bg-isodark p-3 rounded-lg border border-isoborder flex items-center justify-between">
-                                <span class="text-xs font-mono text-slate-300">Ambient Lighting Re-zero</span>
-                                <button onclick="sendEvent('CALIBRATE_BASELINE')" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-xs px-3 py-1.5 rounded font-mono font-bold transition">
-                                    CALIBRATE BASELINE
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-        </div>
-
-        <!-- TOOLS VIEW (PDF PARSER MODULE) -->
-        <div id="view-tools" class="hidden flex-col gap-5">
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center bg-isopanel border border-isoborder p-5 rounded-xl shadow-xl gap-4">
-                <div>
-                     <h2 class="font-bold text-sm tracking-wide text-slate-100 uppercase flex items-center gap-2">
-                        <span>PDF Parser Module</span>
-                        <span class="bg-cyan-950 text-teamA border border-cyan-800 px-2 py-0.5 rounded text-[10px]">LOCAL ENGINE</span>
-                     </h2>
-                     <span id="pdf-status-text" class="text-xs text-slate-400 font-mono mt-1 block uppercase">SYSTEM READY // WAITING FOR PDF FILE</span>
-                </div>
-                <div class="flex items-center gap-3">
-                     <span id="pdf-count-badge" class="hidden bg-slate-800 text-slate-300 border border-slate-600 px-2 py-1 rounded text-xs font-mono font-bold">0 SETS EXTRACTED</span>
-                     <button id="btn-copy-json" disabled onclick="copyJSON()" class="bg-isodark border border-isoborder text-slate-300 px-4 py-2 rounded text-xs uppercase font-bold disabled:opacity-50 transition hover:border-cyan-500">Copy to Clipboard</button>
-                     <button id="btn-download-json" disabled onclick="downloadJSON()" class="bg-teamA hover:bg-teal-300 text-isodark px-4 py-2 rounded text-xs uppercase font-bold disabled:opacity-50 transition">Download JSON</button>
-                     <!-- NEW: Cloud Save Button -->
-                     <button id="btn-save-cloud" disabled class="hidden bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded text-xs uppercase font-bold disabled:opacity-50 transition shadow-lg">Save to Cloud</button>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                <div class="col-span-1 bg-isopanel border border-isoborder p-5 rounded-xl shadow-xl flex flex-col">
-                    <h3 class="text-xs font-bold text-slate-400 tracking-widest uppercase mb-4 border-b border-isoborder pb-2">Input Source</h3>
-                    
-                    <div id="pdf-drop-zone" onclick="document.getElementById('pdf-file-input').click()" class="flex-1 border-2 border-dashed border-isoborder rounded-lg flex flex-col items-center justify-center p-8 text-center cursor-pointer hover:border-teamA hover:bg-isocard transition-all relative overflow-hidden min-h-[250px]">
-                        <span class="text-4xl mb-3 text-cyan-500"></span>
-                        <b class="text-slate-200 font-mono text-sm uppercase">Click or Drag PDF Here</b>
-                        <span class="text-xs text-slate-500 mt-2 font-mono">Supports official NSB formatting</span>
-                        <div id="pdf-loader" class="hidden absolute w-10 h-10 border-4 border-slate-600 border-t-teamA rounded-full animate-spin"></div>
-                    </div>
-                    <input type="file" id="pdf-file-input" accept="application/pdf" class="hidden">
-                </div>
-
-                <div class="col-span-1 lg:col-span-2 bg-isopanel border border-isoborder p-5 rounded-xl shadow-xl flex flex-col">
-                    <div class="flex justify-between items-center mb-4 border-b border-isoborder pb-2">
-                        <h3 class="text-xs font-bold text-slate-400 tracking-widest uppercase">Output Payload [JSON]</h3>
-                    </div>
-                    <pre id="pdf-output-json" class="flex-1 bg-black border border-isoborder rounded-lg p-4 overflow-auto text-amber-500 text-xs font-mono max-h-[500px] whitespace-pre-wrap break-words leading-relaxed shadow-inner">// Parsed data will stream here...</pre>
-                </div>
-            </div>
-        </div>
-
-        <!-- ANALYTICS VIEW (CSV DASHBOARD) -->
-        <div id="view-analytics" class="hidden flex-col gap-5">
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center bg-isopanel border border-isoborder p-5 rounded-xl shadow-xl gap-4">
-                <div>
-                     <h2 class="font-bold text-sm tracking-wide text-slate-100 uppercase flex items-center gap-2">
-                        <span>Analytics Dashboard</span>
-                        <span class="bg-purple-950 text-purple-300 border border-purple-800 px-2 py-0.5 rounded text-[10px]">DATA ENGINE</span>
-                     </h2>
-                     <span id="csv-status-text" class="text-xs text-slate-400 font-mono mt-1 block uppercase">SYSTEM READY // WAITING FOR MATCH CSV</span>
-                </div>
-                <div class="flex items-center gap-3">
-                     <span id="csv-count-badge" class="hidden bg-slate-800 text-slate-300 border border-slate-600 px-2 py-1 rounded text-xs font-mono font-bold">0 GAMES PROCESSED</span>
-                     <button onclick="resetAnalytics()" class="bg-isodark border border-isoborder text-slate-300 px-4 py-2 rounded text-xs uppercase font-bold transition hover:border-red-500 hover:text-red-400">Clear Data</button>
-                </div>
-            </div>
-
-            <div class="col-span-1 bg-isopanel border border-isoborder p-5 rounded-xl shadow-xl flex flex-col">
-                    <h3 class="text-xs font-bold text-slate-400 tracking-widest uppercase mb-4 border-b border-isoborder pb-2">Input Logs</h3>
-                    <div id="csv-drop-zone" onclick="document.getElementById('csv-file-input').click()" class="flex-1 border-2 border-dashed border-isoborder rounded-lg flex flex-col items-center justify-center p-6 text-center cursor-pointer hover:border-purple-400 hover:bg-isocard transition-all relative overflow-hidden min-h-[200px]">
-                        <span class="text-4xl mb-3 text-purple-500">📥</span>
-                        <b class="text-slate-200 font-mono text-xs uppercase">Drop Match CSVs</b>
-                        <span class="text-[10px] text-slate-500 mt-2 font-mono">Select multiple to combine</span>
-                    </div>
-                    <input type="file" id="csv-file-input" accept=".csv" multiple class="hidden">
-                    
-                    <!-- NEW: Cloud Match History Button -->
-                    <button id="btn-cloud-analytics" class="hidden mt-4 bg-purple-600/20 hover:bg-purple-600 border border-purple-500 text-purple-400 hover:text-white px-4 py-3 rounded text-xs uppercase font-bold transition shadow-lg tracking-wider w-full">
-                        ☁️ Load Cloud Match History
-                    </button>
-                </div>
-
-                <div class="col-span-1 lg:col-span-3 flex flex-col gap-5">
-                    <div class="bg-isopanel border border-isoborder p-5 rounded-xl shadow-xl overflow-x-auto">
-                        <h3 class="text-xs font-bold text-slate-400 tracking-widest uppercase mb-3 flex items-center gap-2">
-                            <span class="w-2 h-2 rounded-full bg-teamB"></span> Team Performance
-                        </h3>
-                        <table class="w-full text-left font-mono text-xs whitespace-nowrap">
-                            <thead>
-                                <tr class="border-b border-isoborder text-[10px] text-slate-500">
-                                    <th class="py-2 px-3">TEAM</th>
-                                    <th class="py-2 px-3">GMS</th>
-                                    <th class="py-2 px-3">PTS</th>
-                                    <th class="py-2 px-3">PPG</th>
-                                    <th class="py-2 px-3 text-purple-300">PPB</th>
-                                    <th class="py-2 px-3 text-teamA">TOSS CORR</th>
-                                    <th class="py-2 px-3 text-red-400">NEGS</th>
-                                </tr>
-                            </thead>
-                            <tbody id="team-stats-body" class="divide-y divide-isoborder/50 text-slate-300">
-                                <tr><td colspan="7" class="py-4 text-center text-slate-600">Awaiting data...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="bg-isopanel border border-isoborder p-5 rounded-xl shadow-xl overflow-x-auto">
-                        <h3 class="text-xs font-bold text-slate-400 tracking-widest uppercase mb-3 flex items-center gap-2">
-                            <span class="w-2 h-2 rounded-full bg-teamA"></span> Individual Analytics
-                        </h3>
-                        <table class="w-full text-left font-mono text-xs whitespace-nowrap">
-                            <thead>
-                                <tr class="border-b border-isoborder text-[10px] text-slate-500">
-                                    <th class="py-2 px-3">PLAYER</th>
-                                    <th class="py-2 px-3">PTS</th>
-                                    <th class="py-2 px-3">PPG</th>
-                                    <th class="py-2 px-3 text-amber-300">PPA</th>
-                                    <th class="py-2 px-3 text-teamA">INT ACC %</th>
-                                    <th class="py-2 px-3 text-red-400">INT RATE %</th>
-                                    <th class="py-2 px-3 text-cyan-400">AVG SPD (s)</th>
-                                </tr>
-                            </thead>
-                            <tbody id="player-stats-body" class="divide-y divide-isoborder/50 text-slate-300">
-                                <tr><td colspan="7" class="py-4 text-center text-slate-600">Awaiting data...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-    </main>
-
-    <!-- UTILITIES FOOTER -->
-    <footer class="bg-isopanel border-t border-isoborder px-4 py-3 flex items-center justify-center space-x-6 text-xs font-semibold z-50">
-        <span class="text-slate-500 font-mono tracking-widest uppercase text-[10px]">BACKEND UTILITIES</span>
-        
-        <button id="tab-btn-tools" onclick="switchTab('tools')" class="tab-btn px-4 py-2 rounded-lg transition text-slate-400 hover:text-white flex items-center space-x-2 bg-isodark border border-isoborder hover:border-blue-500/50 shadow-sm">
-            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path></svg>
-            <span>PDF PARSER</span>
-        </button>
-        
-        <button id="tab-btn-analytics" onclick="switchTab('analytics')" class="tab-btn px-4 py-2 rounded-lg transition text-slate-400 hover:text-white flex items-center space-x-2 bg-isodark border border-isoborder hover:border-purple-500/50 shadow-sm">
-            <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-            <span>DATA ANALYTICS</span>
-        </button>
-    </footer>
-    <!-- AUTHENTICATION MODAL -->
-    <div id="auth-modal" class="hidden fixed inset-0 z-[100] bg-black/80 flex items-center justify-center backdrop-blur-sm">
-        <div class="bg-isopanel border border-isoborder p-6 rounded-xl w-96 shadow-2xl space-y-4">
-            <h2 class="text-xl font-black text-white tracking-wide">ACCOUNT <span class="text-teamA">LOGIN</span></h2>
-            <div id="auth-error" class="hidden text-xs text-red-400 bg-red-950/50 border border-red-900 p-2 rounded font-mono"></div>
-            
-            <input type="email" id="auth-email" placeholder="Email Address" class="w-full bg-isodark border border-isoborder rounded px-3 py-2 text-white font-mono text-sm focus:border-teamA outline-none transition">
-            <input type="password" id="auth-password" placeholder="Password" class="w-full bg-isodark border border-isoborder rounded px-3 py-2 text-white font-mono text-sm focus:border-teamA outline-none transition">
-            
-            <div class="flex gap-3 pt-2">
-                <button id="btn-sign-in" class="flex-1 bg-teamA hover:bg-teal-300 text-isodark py-2 rounded font-bold uppercase tracking-wider text-xs transition">Sign In</button>
-                <button id="btn-sign-up" class="flex-1 bg-zinc-700 hover:bg-zinc-600 text-white py-2 rounded font-bold uppercase tracking-wider text-xs transition">Sign Up</button>
-            </div>
-            <button onclick="document.getElementById('auth-modal').classList.add('hidden')" class="w-full text-slate-500 text-xs mt-2 hover:text-slate-300 transition">Cancel</button>
-        </div>
+        <p class="text-[10px] text-slate-400 font-mono hidden sm:block">Collegiate Quiz &amp; Science Bowl Competition Engine</p>
+      </div>
     </div>
 
-    <!-- SETTINGS / API KEY MODAL -->
-    <div id="settings-modal" class="hidden fixed inset-0 z-[100] bg-black/80 flex items-center justify-center backdrop-blur-sm">
-        <div class="bg-isopanel border border-isoborder p-6 rounded-xl w-[450px] shadow-2xl space-y-4">
-            <h2 class="text-xl font-black text-white tracking-wide">USER <span class="text-teamA">SETTINGS</span></h2>
-            <p class="text-[11px] text-slate-400 font-mono leading-relaxed">Enter your Groq API Key for this browser session. It is sent to the match owner backend over the authenticated secure WebSocket and is not saved in your cloud profile.</p>
-            
-            <div id="settings-status" class="hidden text-xs p-2 rounded font-mono"></div>
-            
-            <input type="password" id="settings-api-key" placeholder="gsk_..." class="w-full bg-isodark border border-isoborder rounded px-3 py-2 text-teamA font-mono text-sm focus:border-teamA outline-none transition">
-            
-            <button id="btn-save-settings" class="w-full bg-teamA hover:bg-teal-300 text-isodark py-2 rounded font-bold uppercase tracking-wider text-xs transition">Save Settings</button>
-            <button onclick="document.getElementById('settings-modal').classList.add('hidden')" class="w-full text-slate-500 text-xs mt-2 hover:text-slate-300 transition">Close</button>
-        </div>
+    <!-- Live Score + Connection Status Pill -->
+    <div class="hidden md:flex items-center space-x-3 bg-panel px-3.5 py-1.5 rounded-full border border-borderDark text-xs font-mono">
+      <span class="relative flex h-2 w-2">
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-neonGreen opacity-75"></span>
+        <span class="relative inline-flex rounded-full h-2 w-2 bg-neonGreen"></span>
+      </span>
+      <span id="header-team-a-name" class="text-teamA font-bold tracking-wide">TEAM A</span>
+      <span id="score-header-a" class="text-neonCyan font-black text-sm digital-lcd">0</span>
+      <span class="text-slate-600">|</span>
+      <span id="score-header-b" class="text-neonAmber font-black text-sm digital-lcd">0</span>
+      <span id="header-team-b-name" class="text-teamB font-bold tracking-wide">TEAM B</span>
     </div>
 
-<script src="/static/js/ui.js"></script>
-    <script src="/static/js/websocket.js"></script>
-    <script src="/static/js/camera.js"></script>
-    <script src="/static/js/pdf_parser.js"></script>
-    <script src="/static/js/analytics.js"></script>
-    <script>
-        window.FIREBASE_CONFIG = {
-            apiKey: "__FIREBASE_API_KEY__",
-            authDomain: "__FIREBASE_AUTH_DOMAIN__",
-            projectId: "__FIREBASE_PROJECT_ID__",
-            storageBucket: "__FIREBASE_STORAGE_BUCKET__",
-            messagingSenderId: "__FIREBASE_MESSAGING_SENDER_ID__",
-            appId: "__FIREBASE_APP_ID__"
-        };
-    </script>
-    <script type="module" src="/static/js/auth.js"></script>
+    <!-- Right Header Action Buttons -->
+    <div class="flex items-center space-x-2 sm:space-x-2.5">
+      <button onclick="openWipModal(); playSound('click');" class="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-mono font-black text-black bg-neonGreen hover:bg-emerald-400 active:scale-95 rounded-lg shadow-neon-green transition">
+        <span>&#9889; SOLO</span>
+      </button>
+
+      <button onclick="openModal('converterModal'); playSound('click');" class="moderator-nav-control flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-neonCyan bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
+        <svg class="w-3.5 h-3.5 text-neonCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+        <span>Converter</span>
+      </button>
+
+      <button onclick="openModal('analyticsModal'); playSound('click');" class="flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-neonAmber bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
+        <svg class="w-3.5 h-3.5 text-neonAmber" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+        <span>Stats</span>
+      </button>
+
+      <button onclick="navigateTo(2); playSound('click');" class="flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-white bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
+        <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+        <span class="hidden sm:inline">Settings</span>
+      </button>
+
+      <!-- Unauthenticated: sign in -->
+      <button id="btn-show-login" onclick="openModal('auth-modal'); playSound('click');" class="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-mono font-black text-neonCyan bg-black border border-neonCyan/80 hover:bg-neonCyan/10 active:scale-95 rounded-lg shadow-neon-cyan transition">
+        <span id="userAuthTag">SIGN IN</span>
+      </button>
+
+      <!-- Authenticated user section -->
+      <div id="auth-user-section" class="hidden items-center space-x-2 bg-panel border border-borderDark rounded-lg px-2.5 py-1">
+        <span id="auth-user-email" class="text-[10px] text-slate-300 font-mono"></span>
+        <button id="btn-sign-out" class="bg-black border border-borderDark hover:border-neonPink text-slate-300 hover:text-neonPink px-2.5 py-1 rounded-md text-[10px] font-mono uppercase tracking-wider transition">Sign Out</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Bottom Nav Dock -->
+  <nav class="fixed bottom-0 left-0 right-0 z-40 bg-black/90 backdrop-blur-xl border-t border-borderDark px-4 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-center gap-2 overflow-x-auto custom-scrollbar">
+      <button id="nav-btn-1" data-slide="1" data-roles="all" onclick="navigateTo(1)" class="nav-dock-btn flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-neonCyan text-black shadow-neon-cyan">
+        <span>&#8962;</span><span>HOME</span>
+      </button>
+      <button id="nav-btn-3" data-slide="3" data-roles="all" onclick="navigateTo(3)" class="nav-dock-btn flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonAmber">
+        <span>&#9741;</span><span>ONLINE</span>
+      </button>
+      <button id="nav-btn-4" data-slide="4" data-roles="moderator" onclick="navigateTo(4)" class="nav-dock-btn moderator-nav-control flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonCyan">
+        <span>&#127909;</span><span>IN-PERSON</span>
+      </button>
+      <button id="nav-btn-5" data-slide="5" data-roles="moderator" onclick="navigateTo(5)" class="nav-dock-btn moderator-nav-control flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonGreen">
+        <span>&#9889;</span><span>MOD HUD</span>
+      </button>
+      <button id="nav-btn-6" data-slide="6" data-roles="moderator" onclick="navigateTo(6)" class="nav-dock-btn moderator-nav-control flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonAmber">
+        <span>&#128196;</span><span>BANK</span>
+      </button>
+      <button id="nav-btn-7" data-slide="7" data-roles="player" onclick="navigateTo(7)" class="nav-dock-btn player-nav-control hidden items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonAmber">
+        <span>&#128101;</span><span>LOBBY</span>
+      </button>
+      <button id="nav-btn-8" data-slide="8" data-roles="player" onclick="navigateTo(8)" class="nav-dock-btn player-nav-control hidden items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonPink">
+        <span>&#9889;</span><span>BUZZER</span>
+      </button>
+    </div>
+  </nav>
+
+  <main class="flex-grow max-w-7xl mx-auto w-full p-4 md:p-6 lg:p-8 pb-24 flex flex-col justify-center">
+
+    <!-- ========================================== -->
+    <!-- SLIDE 1: HOME DASHBOARD                    -->
+    <!-- ========================================== -->
+    <section id="slide-1" class="slide-view flex flex-col items-center justify-center py-6 transition-all duration-300">
+      <div class="text-center max-w-2xl mx-auto mb-10">
+        <div class="inline-flex items-center space-x-2 px-3 py-1 bg-black border border-neonCyan/60 rounded-full text-neonCyan text-xs font-mono font-semibold mb-4 shadow-neon-cyan">
+          <span class="w-2 h-2 rounded-full bg-neonCyan animate-ping"></span>
+          <span>CV Computer Vision + Low-Latency Buzzer Lockout</span>
+        </div>
+        <h1 class="text-4xl md:text-6xl font-black font-display tracking-tight text-white mb-3">
+          SLOP<span class="text-transparent bg-clip-text bg-gradient-to-r from-neonCyan via-sky-300 to-neonAmber">BOWL</span>
+        </h1>
+        <p class="text-slate-400 text-sm md:text-base font-sans">
+          The ultimate collegiate competition suite. Moderate in-person bouts with optical webcam buzzing, connect across synchronized rooms, or hone your buzz speed solo.
+        </p>
+      </div>
+
+      <!-- Main Three Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl mb-10">
+        <!-- Card 1: Moderate in person -->
+        <div onclick="navigateTo(4); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonCyan rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-cyan hover:-translate-y-1 active:scale-95 relative overflow-hidden">
+          <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonCyan/10 rounded-full blur-xl group-hover:bg-neonCyan/20 transition"></div>
+          <div class="w-16 h-16 rounded-2xl bg-black border border-neonCyan/50 flex items-center justify-center text-neonCyan mb-5 group-hover:scale-110 transition shadow-inner">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonCyan transition font-display">Moderate in person</h3>
+          <p class="text-xs text-slate-400 leading-relaxed font-sans">
+            Webcam ROI buzzer detection, dual digital clocks, real-time interrupt scoring, and the automated audio question stream.
+          </p>
+          <div class="mt-6 flex items-center text-xs font-mono text-neonCyan group-hover:translate-x-1 transition font-bold">
+            Configure Match Station &rarr;
+          </div>
+        </div>
+
+        <!-- Card 2: Play / Host online -->
+        <div onclick="navigateTo(3); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonAmber rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-amber hover:-translate-y-1 active:scale-95 relative overflow-hidden">
+          <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonAmber/10 rounded-full blur-xl group-hover:bg-neonAmber/20 transition"></div>
+          <div class="w-16 h-16 rounded-2xl bg-black border border-neonAmber/50 flex items-center justify-center text-neonAmber mb-5 group-hover:scale-110 transition shadow-inner">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonAmber transition font-display">Play / Host online</h3>
+          <p class="text-xs text-slate-400 leading-relaxed font-sans">
+            Multiplayer rooms joined by room code, live scoreboard synchronization, team rosters, and buzzer lockout.
+          </p>
+          <div class="mt-6 flex items-center text-xs font-mono text-neonAmber group-hover:translate-x-1 transition font-bold">
+            Enter Match Hub &rarr;
+          </div>
+        </div>
+
+        <!-- Card 3: Singleplayer Practice (work in progress) -->
+        <div onclick="openWipModal(); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonGreen rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-green hover:-translate-y-1 active:scale-95 relative overflow-hidden">
+          <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonGreen/10 rounded-full blur-xl group-hover:bg-neonGreen/20 transition"></div>
+          <div class="w-16 h-16 rounded-2xl bg-black border border-neonGreen/50 flex items-center justify-center text-neonGreen mb-5 group-hover:scale-110 transition shadow-inner">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonGreen transition font-display">Singleplayer Practice</h3>
+          <p class="text-xs text-slate-400 leading-relaxed font-sans">
+            Solo buzz-speed training with audio prompts. Currently under construction.
+          </p>
+          <div class="mt-6 flex items-center text-xs font-mono text-neonGreen group-hover:translate-x-1 transition font-bold">
+            <span class="px-2 py-0.5 bg-neonGreen/10 border border-neonGreen/50 rounded-full mr-2">WORK IN PROGRESS</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 1 Footer Buttons -->
+      <div class="flex flex-wrap items-center justify-center gap-6 text-sm font-mono">
+        <button onclick="openModal('converterModal'); playSound('click');" class="moderator-nav-control flex items-center space-x-2 text-slate-300 hover:text-neonCyan transition py-2.5 px-5 rounded-xl bg-panel border border-borderDark hover:border-neonCyan active:scale-95 shadow-sm">
+          <svg class="w-4 h-4 text-neonCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+          <span>Packet converter</span>
+        </button>
+
+        <button onclick="openModal('analyticsModal'); playSound('click');" class="flex items-center space-x-2 text-slate-300 hover:text-neonAmber transition py-2.5 px-5 rounded-xl bg-panel border border-borderDark hover:border-neonAmber active:scale-95 shadow-sm">
+          <svg class="w-4 h-4 text-neonAmber" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+          <span>Match analytics</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 2: SETTINGS                          -->
+    <!-- ========================================== -->
+    <section id="slide-2" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-2xl mx-auto w-full">
+        <h2 class="text-2xl md:text-3xl font-black font-display text-white mb-2">Settings</h2>
+        <p class="text-xs text-slate-400 font-mono mb-6">REAL ENGINE CONFIGURATION ONLY.</p>
+
+        <!-- Judge API key -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-5 mb-5">
+          <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
+            <h3 class="text-sm font-bold text-white font-display">Groq Judge API Key</h3>
+            <span class="text-[9px] font-mono font-bold bg-black text-neonCyan border border-neonCyan/60 rounded-full px-2 py-0.5 tracking-widest">SESSION ONLY</span>
+          </div>
+          <p class="text-[11px] text-slate-400 font-mono leading-relaxed mb-3">Used for speech-to-text answer judging this browser session. It is sent to the match owner backend over the authenticated secure WebSocket and is not saved in your cloud profile.</p>
+          <div id="settings-status" class="hidden text-xs p-2 rounded font-mono mb-3"></div>
+          <input type="password" id="settings-api-key" placeholder="gsk_..." class="w-full bg-black border border-borderDark rounded-xl px-3 py-2.5 text-neonCyan font-mono text-sm focus:border-neonCyan outline-none transition">
+          <button id="btn-save-settings" class="w-full mt-3 py-2.5 bg-neonCyan hover:bg-cyan-300 text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-cyan">Save Settings</button>
+        </div>
+
+        <!-- Audio -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-5 mb-5">
+          <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
+            <h3 class="text-sm font-bold text-white font-display">Interface Audio</h3>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-slate-300 font-mono">Click / buzzer sound effects</span>
+            <button id="soundMuteBtn" onclick="toggleAudioMute()" class="px-4 py-1.5 bg-black border border-neonGreen text-neonGreen text-xs font-mono font-bold rounded-lg active:scale-95 transition">ON</button>
+          </div>
+        </div>
+
+        <!-- Account -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-5">
+          <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
+            <h3 class="text-sm font-bold text-white font-display">Account</h3>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span id="settings-account-email" class="text-xs text-slate-300 font-mono">Not signed in</span>
+            <button onclick="openModal('auth-modal'); playSound('click');" class="px-4 py-2 bg-black border border-neonCyan text-neonCyan text-xs font-mono font-bold rounded-lg active:scale-95 transition">Sign in</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 3: ONLINE PLAY (create / join)       -->
+    <!-- ========================================== -->
+    <section id="slide-3" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-xl mx-auto w-full">
+        <h2 class="text-3xl md:text-5xl font-black font-display text-white mb-2">Online play</h2>
+        <p class="text-xs text-slate-400 font-mono mb-6">CREATE A ROOM OR JOIN WITH A REAL ROOM CODE. MODERATORS PICK A TEAM SO THEY CAN BUZZ TOO.</p>
+
+        <div class="bg-panel border border-borderDark rounded-2xl p-6 space-y-3">
+          <div>
+            <label class="block text-[11px] font-mono text-slate-400 uppercase mb-1">Room code</label>
+            <input type="text" id="room-id-input" placeholder="e.g. semifinals-a" class="w-full bg-black border border-borderDark rounded-xl px-4 py-3 text-lg text-white font-mono uppercase focus:outline-none focus:border-neonCyan transition-colors">
+          </div>
+          <div>
+            <label class="block text-[11px] font-mono text-slate-400 uppercase mb-1">Your name</label>
+            <input type="text" id="online-player-name" maxlength="64" placeholder="Display name" class="w-full bg-black border border-borderDark rounded-xl px-4 py-3 text-white font-mono focus:outline-none focus:border-neonCyan">
+          </div>
+          <div>
+            <label class="block text-[11px] font-mono text-slate-400 uppercase mb-1">Team</label>
+            <select id="online-team-choice" class="w-full bg-black border border-borderDark rounded-xl px-4 py-3 text-white font-mono">
+              <option value="Team A">Join Team A</option>
+              <option value="Team B">Join Team B</option>
+            </select>
+          </div>
+          <label class="flex items-center gap-2 text-sm text-slate-300 font-mono">
+            <input type="checkbox" id="online-captain-claim" class="accent-neonCyan">
+            Claim captain (one per team)
+          </label>
+
+          <button onclick="createOnlineRoom(); playSound('click');" class="w-full py-3.5 bg-neonCyan hover:bg-cyan-300 text-black font-mono font-black text-sm uppercase tracking-wider rounded-xl shadow-neon-cyan transition active:scale-95">
+            Create online match (moderator)
+          </button>
+          <button onclick="joinOnlineRoom(); playSound('click');" class="w-full py-3.5 bg-black border border-neonAmber text-neonAmber hover:bg-neonAmber/10 font-mono font-black text-sm uppercase tracking-wider rounded-xl transition active:scale-95">
+            Join online match (player)
+          </button>
+          <button onclick="joinRoom(); playSound('click');" class="w-full py-2.5 text-xs text-slate-400 hover:text-white font-mono uppercase tracking-wider transition">
+            In-person moderator station
+          </button>
+          <p id="online-lobby-status" class="min-h-5 text-xs text-neonAmber font-mono"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 4: IN-PERSON MATCH SETUP             -->
+    <!-- ========================================== -->
+    <section id="slide-4" class="slide-view hidden py-2 transition-all duration-300">
+      <h2 class="text-2xl md:text-3xl font-black font-display text-white mb-4">In person match setup</h2>
+
+      <div class="grid grid-cols-12 gap-5">
+
+        <!-- Question bank (JSON) -->
+        <div class="col-span-12 bg-panel border border-borderDark rounded-2xl p-5">
+          <div class="flex items-center justify-between pb-3 mb-4 border-b border-borderDark">
+            <h3 class="font-bold text-sm tracking-wide text-white uppercase font-display">Question Bank Selection</h3>
+            <span class="text-xs font-mono bg-black text-neonAmber border border-neonAmber/60 px-2 py-0.5 rounded-full">DATA SOURCE</span>
+          </div>
+          <div class="flex flex-wrap items-center space-x-4">
+            <input type="file" id="bank-file-input" accept=".json" class="hidden">
+            <button onclick="document.getElementById('bank-file-input').click(); playSound('click');" class="bg-black hover:bg-panelHover border border-borderDark hover:border-neonAmber text-slate-200 px-4 py-2 rounded-xl text-xs uppercase font-bold font-mono transition">
+              Browse JSON File
+            </button>
+            <span id="bank-file-name" class="text-xs text-neonAmber font-mono font-bold animate-pulse">No packet loaded. Browse a JSON file or use the BANK tools.</span>
+          </div>
+        </div>
+
+        <!-- Rosters -->
+        <div class="col-span-12 lg:col-span-7 bg-panel border border-borderDark rounded-2xl p-5">
+          <div class="flex items-center justify-between pb-3 mb-4 border-b border-borderDark">
+            <h3 class="font-bold text-sm tracking-wide text-white uppercase font-display">Team &amp; Player Roster Setup</h3>
+            <span class="text-xs font-mono bg-black text-neonCyan border border-neonCyan/60 px-2 py-0.5 rounded-full">MATCH CONFIG</span>
+          </div>
+
+          <div class="grid grid-cols-2 gap-6">
+            <div class="space-y-2">
+              <label class="text-[10px] font-mono text-slate-400 uppercase block mb-1">Team A Name &amp; Roster</label>
+              <input type="text" id="input-team-a-name" value="Team A" class="w-full bg-black border border-teamA/50 rounded-xl px-2.5 py-1.5 text-sm text-teamA font-bold font-mono mb-2">
+              <input type="text" id="roster-A-1" value="Player 1" class="w-full bg-black border border-borderDark rounded-xl px-2.5 py-1 text-xs text-slate-300 font-mono">
+              <input type="text" id="roster-A-C" value="Captain" class="w-full bg-black border border-teamA rounded-xl px-2.5 py-1 text-xs text-teamA font-bold font-mono">
+              <input type="text" id="roster-A-3" value="Player 3" class="w-full bg-black border border-borderDark rounded-xl px-2.5 py-1 text-xs text-slate-300 font-mono">
+              <input type="text" id="roster-A-4" value="Player 4" class="w-full bg-black border border-borderDark rounded-xl px-2.5 py-1 text-xs text-slate-300 font-mono">
+              <input type="text" id="roster-A-5" value="Player 5" class="w-full bg-black border border-borderDark rounded-xl px-2.5 py-1 text-xs text-slate-300 font-mono">
+            </div>
+            <div class="space-y-2">
+              <label class="text-[10px] font-mono text-slate-400 uppercase block mb-1">Team B Name &amp; Roster</label>
+              <input type="text" id="input-team-b-name" value="Team B" class="w-full bg-black border border-teamB/50 rounded-xl px-2.5 py-1.5 text-sm text-teamB font-bold font-mono mb-2">
+              <input type="text" id="roster-B-1" value="Player 1" class="w-full bg-black border border-borderDark rounded-xl px-2.5 py-1 text-xs text-slate-300 font-mono">
+              <input type="text" id="roster-B-C" value="Captain" class="w-full bg-black border border-teamB rounded-xl px-2.5 py-1 text-xs text-teamB font-bold font-mono">
+              <input type="text" id="roster-B-3" value="Player 3" class="w-full bg-black border border-borderDark rounded-xl px-2.5 py-1 text-xs text-slate-300 font-mono">
+              <input type="text" id="roster-B-4" value="Player 4" class="w-full bg-black border border-borderDark rounded-xl px-2.5 py-1 text-xs text-slate-300 font-mono">
+              <input type="text" id="roster-B-5" value="Player 5" class="w-full bg-black border border-borderDark rounded-xl px-2.5 py-1 text-xs text-slate-300 font-mono">
+            </div>
+          </div>
+
+          <div class="pt-4 border-t border-borderDark mt-4 flex items-center justify-between">
+            <span class="text-xs text-slate-400 font-mono">Roster changes apply live across the match HUD and score sheet.</span>
+            <button onclick="confirmSetup(); playSound('click');" class="bg-neonCyan hover:bg-cyan-300 text-black px-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition shadow-neon-cyan">
+              Save &amp; go to match
+            </button>
+          </div>
+        </div>
+
+        <!-- Vision / camera calibration -->
+        <div class="col-span-12 lg:col-span-5 bg-panel border border-borderDark rounded-2xl p-5">
+          <div class="flex items-center justify-between pb-3 mb-4 border-b border-borderDark">
+            <h3 class="font-bold text-sm tracking-wide text-white uppercase font-display">Vision Detection Engine</h3>
+            <span class="text-xs font-mono bg-black text-neonCyan border border-neonCyan/60 px-2 py-0.5 rounded-full">ROI MODE</span>
+          </div>
+
+          <div class="space-y-4">
+            <div>
+              <label class="text-[10px] font-mono text-slate-400 uppercase block mb-1">Video Source Device</label>
+              <select id="camera-select" onchange="changeCameraDevice(this.value)" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-neonCyan">
+                <option value="">Loading Cameras...</option>
+              </select>
+            </div>
+
+            <div id="vision-panel-manual" class="bg-black p-3 rounded-xl border border-borderDark space-y-3">
+              <div class="flex items-center justify-between">
+                <span id="calib-instruction" class="text-[10px] font-mono font-bold text-neonCyan uppercase block">Manual ROI Bounding Box Canvas</span>
+                <span class="text-[9px] font-mono text-slate-500">Drag to box buzzers</span>
+              </div>
+
+              <div id="manual-roi-canvas" class="relative w-full aspect-video bg-black rounded-lg border border-borderDark overflow-hidden cursor-crosshair">
+                <video id="video-stream" class="absolute top-0 left-0 w-full h-full object-cover" autoplay playsinline muted></video>
+                <canvas id="calib-canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
+                <div id="calib-overlay-text" class="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-center p-2 pointer-events-none z-10">
+                  <span class="text-white font-bold mb-2">Click "1. Start Camera Feed" to begin mapping</span>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between gap-2">
+                <button onclick="startCalibration(); playSound('click');" class="flex-1 py-1.5 bg-black hover:bg-panelHover border border-borderDark text-neonCyan rounded-lg font-mono text-xs transition">
+                  1. Start Camera Feed
+                </button>
+                <button onclick="resetCalibration(); playSound('click');" class="py-1.5 px-3 bg-black hover:bg-panelHover border border-borderDark text-neonPink rounded-lg font-mono text-xs transition">
+                  Reset
+                </button>
+                <button onclick="saveCalibration(); playSound('click');" class="flex-1 py-1.5 bg-black hover:bg-panelHover border border-neonGreen text-neonGreen rounded-lg font-mono text-xs transition">
+                  2. Save to Engine
+                </button>
+              </div>
+            </div>
+
+            <div class="bg-black p-3 rounded-xl border border-borderDark flex items-center justify-between">
+              <span class="text-xs font-mono text-slate-300">Ambient Lighting Re-zero</span>
+              <button onclick="sendEvent('CALIBRATE_BASELINE'); playSound('click');" class="bg-black hover:bg-panelHover border border-borderDark text-neonCyan text-xs px-3 py-1.5 rounded-lg font-mono font-bold transition">
+                CALIBRATE BASELINE
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 5: MODERATION HUD (owner)            -->
+    <!-- ========================================== -->
+    <section id="slide-5" class="slide-view hidden py-2 transition-all duration-300">
+      <div class="relative">
+        <!-- MATCH START OVERLAY -->
+        <div id="match-start-overlay" class="absolute inset-0 z-40 bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center rounded-2xl border border-borderDark shadow-2xl">
+          <button onclick="beginMatch(); playSound('buzz');" class="px-12 py-6 bg-neonCyan hover:bg-cyan-300 text-black font-black font-mono text-3xl uppercase tracking-wider rounded-2xl shadow-neon-cyan-lg transition transform hover:scale-105 active:scale-95">
+            BEGIN MATCH
+          </button>
+          <span class="text-slate-400 font-mono mt-5 text-sm uppercase tracking-widest">Starts the match clock</span>
+        </div>
+
+        <!-- STAGE / PROMPTER PANEL -->
+        <div id="stage-card-panel" class="bg-panel border border-borderDark rounded-2xl p-6 shadow-md transition-all duration-300">
+          <div class="flex flex-col gap-6 w-full">
+
+            <!-- TOP META BAR -->
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-borderDark pb-3">
+              <div class="flex items-center space-x-2">
+                <span id="stage-cat-badge" class="px-2.5 py-0.5 rounded-full bg-black text-neonCyan border border-neonCyan/60 text-xs font-bold uppercase">--</span>
+                <span id="stage-type-badge" class="px-2.5 py-0.5 rounded-full bg-black text-neonAmber border border-neonAmber/60 text-xs font-bold uppercase">AUDIO-ONLY READOUT</span>
+              </div>
+
+              <div class="bg-black px-3 py-1 rounded-full border border-borderDark flex items-center space-x-2 shadow-inner">
+                <span class="w-2 h-2 rounded-full bg-neonGreen animate-pulse"></span>
+                <span class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">STATUS:</span>
+                <span id="header-status" class="text-xs text-neonCyan font-mono font-bold">READY</span>
+              </div>
+            </div>
+
+            <!-- MAIN CONTENT -->
+            <div class="flex-1 flex flex-col">
+              <div class="text-[10px] font-mono font-bold text-slate-400 tracking-widest uppercase mb-4 flex items-center space-x-2">
+                <span>CURRENT STAGE</span>
+                <span id="stage-live-dot" class="w-2 h-2 rounded-full bg-neonCyan opacity-80"></span>
+              </div>
+
+              <div class="flex flex-row items-stretch justify-center gap-8 mb-2">
+                <!-- ACTION CLOCK -->
+                <div id="action-timer-box" class="w-full max-w-[768px] min-h-[288px] bg-black p-8 rounded-3xl border border-neonCyan/40 flex flex-col items-center justify-center text-center shadow-inner relative overflow-hidden">
+                  <div class="flex items-center justify-between w-full absolute top-8 px-10">
+                    <span id="action-timer-label" class="text-base font-bold text-neonCyan tracking-widest uppercase">ACTION CLOCK</span>
+                    <span id="action-timer-warning" class="hidden text-sm font-bold text-neonPink bg-black border border-neonPink px-3 py-1 rounded-lg animate-pulse">
+                      &#9888;&#65039; 5s
+                    </span>
+                  </div>
+
+                  <div id="action-timer-display" class="text-9xl font-black font-mono text-white tracking-tighter drop-shadow-lg my-auto digital-lcd">
+                    --
+                  </div>
+
+                  <div class="w-5/6 mx-auto bg-slate-900 h-4 rounded-full overflow-hidden absolute bottom-10 border border-borderDark">
+                    <div id="action-timer-bar" class="bg-neonCyan h-full w-full transition-all duration-100"></div>
+                  </div>
+                </div>
+
+                <!-- RIGHT MEDIA STACK -->
+                <div class="flex flex-col gap-5 w-72 shrink-0">
+                  <!-- VISION FEED -->
+                  <div class="bg-black p-3 rounded-xl border border-borderDark flex flex-col items-center justify-center shadow-inner">
+                    <span class="text-[10px] font-bold text-slate-400 tracking-widest uppercase mb-2">VISION FEED</span>
+                    <div class="relative w-full aspect-video bg-black rounded-lg border border-borderDark overflow-hidden">
+                      <video id="match-video-stream" class="absolute top-0 left-0 w-full h-full object-cover" autoplay playsinline muted></video>
+                      <canvas id="match-calib-canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
+                    </div>
+                  </div>
+
+                  <!-- MATCH TIMER -->
+                  <div class="bg-black p-4 rounded-xl border border-borderDark flex flex-col items-center justify-center text-center shadow-inner flex-1">
+                    <span id="timer-stage-label" class="text-[10px] font-bold text-slate-400 tracking-widest uppercase mb-2">MATCH CLOCK</span>
+                    <div id="main-timer-display" class="text-5xl font-black font-mono tracking-tight text-neonCyan digital-lcd">
+                      08:00
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Question text is never displayed: audio-only readout (elements kept hidden for JS stability) -->
+              <h1 id="stage-title-text" class="hidden"></h1>
+              <p id="stage-subtitle-text" class="hidden"></p>
+            </div>
+
+            <!-- BOTTOM STATUS BADGES -->
+            <div class="flex flex-wrap items-center gap-2 pt-3 font-mono text-xs border-t border-borderDark mt-1">
+              <div class="px-3 py-1 rounded-full bg-black border border-borderDark flex items-center space-x-2">
+                <span id="buzz-team-indicator" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+                <span id="buzz-player-name" class="text-slate-300 font-bold">FLOOR: CLEAR</span>
+              </div>
+              <span id="interrupt-badge" class="px-3 py-1 rounded-full bg-black border border-borderDark text-slate-500 font-bold">
+                INTERRUPT: --
+              </span>
+              <span id="outcome-badge" class="px-3 py-1 rounded-full bg-black border border-borderDark text-slate-500 font-bold">
+                OUTCOME: PENDING
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODERATOR CONTROL BAR -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-4 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 mt-4">
+          <div class="flex-1 flex flex-wrap gap-3 w-full">
+            <button id="btn-start-tossup" onclick="sendEvent('MANUAL_START_TOSSUP')" class="flex-1 min-w-[140px] bg-neonCyan hover:bg-cyan-300 text-black py-3 rounded-xl font-black font-mono text-xs uppercase transition shadow-neon-cyan">
+              &#9654; Start Tossup
+            </button>
+            <button id="btn-reread-tossup" onclick="sendEvent('MANUAL_REREAD_TOSSUP')" class="hidden flex-1 min-w-[140px] bg-black border border-neonCyan text-neonCyan hover:bg-neonCyan/10 py-3 rounded-xl font-black font-mono text-xs uppercase transition">
+              &#9654; Re-read Tossup
+            </button>
+            <button id="btn-start-bonus" onclick="sendEvent('MANUAL_START_BONUS')" class="hidden flex-1 min-w-[140px] bg-neonAmber hover:bg-amber-400 text-black py-3 rounded-xl font-black font-mono text-xs uppercase transition shadow-neon-amber">
+              &#9654; Start Bonus
+            </button>
+
+            <!-- AI judgment overrides -->
+            <div id="override-controls" class="hidden flex space-x-2 border-l border-borderDark pl-3">
+              <button onclick="sendEvent('FORCE_JUDGMENT', {correct: true})" title="Force correct" class="w-12 bg-black hover:bg-neonGreen border border-neonGreen text-neonGreen hover:text-black rounded-xl font-bold text-xl transition">&#10003;</button>
+              <button onclick="sendEvent('FORCE_JUDGMENT', {correct: false})" title="Force incorrect" class="w-12 bg-black hover:bg-neonPink border border-neonPink text-neonPink hover:text-white rounded-xl font-bold text-xl transition">&#10007;</button>
+            </div>
+
+            <button id="btn-pause-match" onclick="togglePause()" class="w-24 md:w-32 bg-black border border-borderDark hover:border-neonAmber text-slate-300 py-3 rounded-xl font-bold transition text-xs">
+              &#9208; PAUSE
+            </button>
+          </div>
+
+          <!-- Moderator's own buzzer (moderator plays on the joined team) -->
+          <div class="w-full md:w-auto">
+            <button class="js-online-buzz w-full md:w-56 bg-neonPink disabled:bg-black disabled:text-slate-500 hover:bg-rose-600 text-white py-3 rounded-xl font-black font-mono text-lg tracking-wider shadow-neon-pink disabled:cursor-not-allowed disabled:border disabled:border-borderDark" onclick="sendEvent('BUZZ', {})" disabled>
+              MY BUZZER
+            </button>
+          </div>
+
+          <div id="online-roster" class="js-online-roster w-full flex flex-wrap justify-center md:justify-start gap-2 min-h-6"></div>
+
+          <!-- Physical backup buzzes stay available only in in-person rooms. -->
+          <div id="manual-buzz-controls" class="w-full md:w-auto flex space-x-3 border-t md:border-t-0 md:border-l border-borderDark pt-3 md:pt-0 md:pl-4 hidden">
+            <button onclick="sendEvent('BUZZ', {team: 'Team A', player: 'Manual-A'})" class="moderator-only-control flex-1 md:w-32 bg-black hover:bg-teamA border border-teamA text-teamA hover:text-black py-2 rounded-xl font-bold transition text-xs uppercase">
+              Manual Buzz A
+            </button>
+            <button onclick="sendEvent('BUZZ', {team: 'Team B', player: 'Manual-B'})" class="moderator-only-control flex-1 md:w-32 bg-black hover:bg-teamB border border-teamB text-teamB hover:text-black py-2 rounded-xl font-bold transition text-xs uppercase">
+              Manual Buzz B
+            </button>
+          </div>
+        </div>
+
+        <!-- SECONDARY CONTROL BAR -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-4 shadow-xl flex flex-wrap items-center gap-3 mt-4">
+          <button onclick="triggerChallenge(); playSound('click');" class="bg-black hover:bg-neonAmber/20 border border-neonAmber text-neonAmber py-2 px-4 rounded-xl font-bold transition text-xs uppercase tracking-wider">
+            &#9888;&#65039; Challenge (Pause &amp; Skip)
+          </button>
+          <button onclick="sendEvent('ADJUST_SCORE', {team: 'Team A', delta: 4})" class="bg-black border border-borderDark hover:border-neonGreen text-slate-300 hover:text-neonGreen py-2 px-4 rounded-xl font-bold transition text-xs uppercase tracking-wider">
+            +4 Team A
+          </button>
+          <button onclick="sendEvent('ADJUST_SCORE', {team: 'Team B', delta: 4})" class="bg-black border border-borderDark hover:border-neonGreen text-slate-300 hover:text-neonGreen py-2 px-4 rounded-xl font-bold transition text-xs uppercase tracking-wider">
+            +4 Team B
+          </button>
+          <button onclick="sendEvent('EXPORT_CSV')" class="bg-black border border-borderDark hover:border-neonCyan text-slate-300 hover:text-neonCyan py-2 px-4 rounded-xl font-bold transition text-xs uppercase tracking-wider">
+            Export Log
+          </button>
+          <button onclick="sendEvent('FORCE_RESET_STATE')" class="bg-black border border-neonPink text-neonPink hover:bg-neonPink hover:text-white py-2 px-4 rounded-xl font-bold transition text-xs uppercase tracking-wider">
+            Override &amp; Reset
+          </button>
+        </div>
+
+        <!-- SCORESHEET (same as the legacy engine scoresheet, editable cells) -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-4 shadow-xl mt-4">
+          <div class="text-xs font-bold text-slate-400 tracking-wider uppercase mb-3 flex justify-between items-center px-1">
+            <span>MATCH EVENT SCORE SHEET</span>
+            <span class="text-[10px] font-mono text-slate-500">DOUBLE-CLICK A CELL TO EDIT</span>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3 py-2 px-3 mb-3 bg-black rounded-xl border border-borderDark text-xs font-mono">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span id="scoresheet-team-a-label" class="text-teamA font-bold text-[11px] uppercase mr-1">TEAM A:</span>
+              <span id="match-roster-A-1" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P1: Player 1</span>
+              <span id="match-roster-A-C" class="px-2 py-0.5 rounded bg-teamA/20 border border-teamA/60 text-teamA font-bold text-[10px]">C: Captain</span>
+              <span id="match-roster-A-3" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P3: Player 3</span>
+              <span id="match-roster-A-4" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P4: Player 4</span>
+              <span id="match-roster-A-5" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P5: Player 5</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5 justify-end">
+              <span id="scoresheet-team-b-label" class="text-teamB font-bold text-[11px] uppercase mr-1">TEAM B:</span>
+              <span id="match-roster-B-1" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P1: Player 1</span>
+              <span id="match-roster-B-C" class="px-2 py-0.5 rounded bg-teamB/20 border border-teamB/60 text-teamB font-bold text-[10px]">C: Captain</span>
+              <span id="match-roster-B-3" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P3: Player 3</span>
+              <span id="match-roster-B-4" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P4: Player 4</span>
+              <span id="match-roster-B-5" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P5: Player 5</span>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left font-mono text-xs">
+              <thead>
+                <tr class="border-b border-borderDark text-[10px] text-slate-500">
+                  <th class="py-1 px-4 text-center">TOSS-UP</th>
+                  <th class="py-1 px-4 text-center">BONUS</th>
+                  <th class="py-1 px-2 text-center">CAT / SCORE</th>
+                  <th class="py-1 px-4 text-center">TOSS-UP</th>
+                  <th class="py-1 px-4 text-center">BONUS</th>
+                </tr>
+              </thead>
+              <tbody id="scoresheet-body" class="divide-y divide-borderDark">
+                <tr>
+                  <td class="py-3 px-4 text-center"></td>
+                  <td class="py-3 px-4 text-center"></td>
+                  <td class="py-3 px-2 text-center bg-black border-x border-borderDark text-slate-500 font-bold text-[10px] uppercase tracking-widest">
+                    Match data will populate here...
+                  </td>
+                  <td class="py-3 px-4 text-center"></td>
+                  <td class="py-3 px-4 text-center"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 6: BANK & PACKET TOOLS (moderator)   -->
+    <!-- ========================================== -->
+    <section id="slide-6" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center bg-panel border border-borderDark p-5 rounded-2xl shadow-xl gap-4">
+        <div>
+          <h2 class="font-bold text-sm tracking-wide text-white uppercase flex items-center gap-2 font-display">
+            <span>PDF Parser Module</span>
+            <span class="bg-black text-neonCyan border border-neonCyan/60 px-2 py-0.5 rounded-full text-[10px]">LOCAL ENGINE</span>
+          </h2>
+          <span id="pdf-status-text" class="text-xs text-slate-400 font-mono mt-1 block uppercase">SYSTEM READY // WAITING FOR PDF FILE</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <span id="pdf-count-badge" class="hidden bg-black text-slate-300 border border-borderDark px-2 py-1 rounded text-xs font-mono font-bold">0 SETS EXTRACTED</span>
+          <button id="btn-copy-json" disabled onclick="copyJSON()" class="bg-black border border-borderDark text-slate-300 px-4 py-2 rounded-xl text-xs uppercase font-bold disabled:opacity-50 transition hover:border-neonCyan">Copy to Clipboard</button>
+          <button id="btn-download-json" disabled onclick="downloadJSON()" class="bg-neonCyan hover:bg-cyan-300 text-black px-4 py-2 rounded-xl text-xs uppercase font-bold disabled:opacity-50 transition">Download JSON</button>
+          <button id="btn-save-cloud" disabled class="hidden bg-neonGreen text-black px-4 py-2 rounded-xl text-xs uppercase font-bold disabled:opacity-50 transition"></button>
+          <button onclick="openModal('converterModal'); playSound('click');" class="bg-black border border-neonGreen text-neonGreen px-4 py-2 rounded-xl text-xs uppercase font-bold transition hover:bg-neonGreen/10">
+            Raw Packet Converter
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mt-5">
+        <div class="col-span-1 bg-panel border border-borderDark p-5 rounded-2xl shadow-xl flex flex-col">
+          <h3 class="text-xs font-bold text-slate-400 tracking-widest uppercase mb-4 border-b border-borderDark pb-2">Input Source</h3>
+
+          <div id="pdf-drop-zone" onclick="document.getElementById('pdf-file-input').click()" class="flex-1 border-2 border-dashed border-borderDark rounded-xl flex flex-col items-center justify-center p-8 text-center cursor-pointer hover:border-neonCyan hover:bg-panelHover transition-all relative overflow-hidden min-h-[250px]">
+            <b class="text-slate-200 font-mono text-sm uppercase">Click or Drag PDF Here</b>
+            <span class="text-xs text-slate-500 mt-2 font-mono">Supports official NSB formatting</span>
+            <div id="pdf-loader" class="hidden absolute w-10 h-10 border-4 border-slate-600 border-t-neonCyan rounded-full animate-spin"></div>
+          </div>
+          <input type="file" id="pdf-file-input" accept="application/pdf" class="hidden">
+        </div>
+
+        <div class="col-span-1 lg:col-span-2 bg-panel border border-borderDark p-5 rounded-2xl shadow-xl flex flex-col">
+          <div class="flex justify-between items-center mb-4 border-b border-borderDark pb-2">
+            <h3 class="text-xs font-bold text-slate-400 tracking-widest uppercase">Output Payload [JSON]</h3>
+          </div>
+          <pre id="pdf-output-json" class="flex-1 bg-black border border-borderDark rounded-xl p-4 overflow-auto text-neonAmber text-xs font-mono max-h-[500px] whitespace-pre-wrap break-words leading-relaxed shadow-inner custom-scrollbar">// Parsed data will stream here...</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 7: PLAYER PRE-MATCH (online player)  -->
+    <!-- ========================================== -->
+    <section id="slide-7" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-xl mx-auto w-full">
+        <h2 class="text-3xl font-black font-display text-white mb-2">Online Pre Match</h2>
+        <p class="text-xs text-slate-400 font-mono mb-6">YOU ARE CONNECTED. WAIT FOR THE MODERATOR TO BEGIN. QUESTIONS ARE READ ALOUD VIA AUDIO — NO QUESTION TEXT IS SHOWN.</p>
+
+        <div class="bg-panel border border-borderDark rounded-2xl p-6 space-y-4">
+          <div class="flex items-center justify-between border-b border-borderDark pb-3">
+            <span class="text-[11px] font-mono text-slate-400 uppercase">Your seat</span>
+            <span id="player-seat-label" class="text-sm font-mono font-black text-neonCyan">—</span>
+          </div>
+          <div>
+            <span class="text-[11px] font-mono text-slate-400 uppercase block mb-2">Room roster</span>
+            <div class="js-online-roster flex flex-wrap gap-2 min-h-6"></div>
+          </div>
+          <div class="flex items-center space-x-2 bg-black border border-borderDark rounded-xl px-3 py-2">
+            <span class="w-2 h-2 rounded-full bg-neonGreen animate-ping"></span>
+            <span id="player-lobby-status" class="text-xs text-slate-300 font-mono">Connected. Waiting for the moderator...</span>
+          </div>
+          <button onclick="navigateTo(8); playSound('buzz');" class="w-full py-4 bg-neonPink hover:bg-rose-600 text-white font-black font-mono text-lg uppercase tracking-wider rounded-2xl shadow-neon-pink transition active:scale-95">
+            Go to buzzer &rarr;
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 8: PLAYER BUZZER VIEW (online)       -->
+    <!-- ========================================== -->
+    <section id="slide-8" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-2xl mx-auto w-full">
+        <div class="text-center mb-6">
+          <h2 class="text-3xl md:text-5xl font-black font-display text-white mb-2">Buzz Station</h2>
+          <p class="text-xs text-slate-400 font-mono">LISTEN FOR THE QUESTION AUDIO, THEN BUZZ AND SPEAK YOUR ANSWER.</p>
+        </div>
+
+        <!-- Stage / audio state strip -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-4 mb-5 flex items-center justify-between gap-3">
+          <div class="flex items-center space-x-2">
+            <span id="player-stage-dot" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+            <span id="player-stage-label" class="text-xs font-mono font-bold text-slate-300 uppercase">AWAITING QUESTION</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span class="text-[10px] font-mono text-slate-500 uppercase">MIC</span>
+            <span id="player-mic-label" class="text-xs font-mono font-bold text-neonCyan">STANDBY</span>
+          </div>
+        </div>
+
+        <!-- Giant buzzer -->
+        <button class="js-online-buzz buzz-btn w-full h-32 md:h-40 rounded-2xl bg-gradient-to-b from-slate-900 via-black to-slate-950 hover:border-neonCyan border-4 border-borderDark text-white hover:text-neonCyan font-display font-black text-4xl md:text-5xl tracking-wider transition-all duration-150 shadow-2xl flex items-center justify-center relative cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed" onclick="sendEvent('BUZZ', {}); playSound('buzz');" disabled>
+          BUZZ
+        </button>
+
+        <div class="mt-4 bg-black border border-borderDark rounded-2xl p-4 text-center">
+          <span class="text-[11px] font-mono text-slate-400 uppercase">Answer window opens automatically — speak clearly into your microphone.</span>
+        </div>
+
+        <div class="mt-4 grid grid-cols-2 gap-4">
+          <div class="bg-panel border border-borderDark rounded-2xl p-4 text-center">
+            <span class="text-[10px] text-slate-400 block font-mono uppercase">Your team</span>
+            <span id="player-team-label" class="text-lg font-black text-neonCyan font-mono">—</span>
+          </div>
+          <div class="bg-panel border border-borderDark rounded-2xl p-4 text-center">
+            <span class="text-[10px] text-slate-400 block font-mono uppercase">Room</span>
+            <span id="player-room-label" class="text-lg font-black text-neonAmber font-mono">—</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============ MODALS ============ -->
+
+  <!-- AUTH (Firebase email/password — real) -->
+  <div id="auth-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="bg-panel border border-neonCyan rounded-3xl max-w-sm w-full p-6 shadow-neon-cyan">
+      <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
+        <h3 class="text-base font-bold text-white font-display">Competitor Authorization</h3>
+        <button onclick="closeModal('auth-modal'); playSound('click');" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+      <div id="auth-error" class="hidden text-xs text-neonPink bg-black border border-neonPink p-2 rounded-lg font-mono mb-3"></div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-[11px] font-mono text-slate-400 uppercase mb-1">Email</label>
+          <input type="email" id="auth-email" placeholder="you@example.com" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2 text-sm text-neonCyan font-mono focus:outline-none focus:border-neonCyan">
+        </div>
+        <div>
+          <label class="block text-[11px] font-mono text-slate-400 uppercase mb-1">Password</label>
+          <input type="password" id="auth-password" placeholder="••••••••" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2 text-sm text-slate-300 font-mono focus:outline-none focus:border-neonCyan">
+        </div>
+        <div class="flex gap-3 pt-2">
+          <button id="btn-sign-in" class="flex-1 py-2.5 bg-neonCyan hover:bg-cyan-300 text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-cyan">Sign In</button>
+          <button id="btn-sign-up" class="flex-1 py-2.5 bg-black border border-borderDark text-slate-300 hover:text-white font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition">Sign Up</button>
+        </div>
+        <button onclick="closeModal('auth-modal'); playSound('click');" class="w-full py-2 bg-black border border-borderDark text-slate-400 text-xs font-mono rounded-xl active:scale-95">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PACKET CONVERTER (real: parses raw packet text into the question bank schema) -->
+  <div id="converterModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="bg-panel border border-neonCyan rounded-3xl max-w-2xl w-full p-6 shadow-neon-cyan">
+      <div class="flex items-center justify-between border-b border-borderDark pb-4 mb-4">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">&#128196;</span>
+          <h3 class="text-lg font-bold text-white font-display">Packet Converter &amp; JSON Validator</h3>
+        </div>
+        <button onclick="closeModal('converterModal'); playSound('click');" class="text-slate-400 hover:text-white p-1 text-xl">&times;</button>
+      </div>
+      <p class="text-xs text-slate-400 mb-3 font-mono">Paste raw packet text (e.g. DOCX / PDF export) to convert into Slopbowl competition schema.</p>
+      <textarea id="converterRawInput" rows="6" placeholder="TOSS-UP 1) PHYSICS Multiple Choice: What physical constant corresponds to approximately 6.626 x 10^-34 joule-seconds?&#10;W) Boltzmann constant&#10;X) Planck's constant&#10;ANSWER: X) PLANCK'S CONSTANT" class="w-full bg-black border border-borderDark rounded-xl p-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-neonCyan custom-scrollbar"></textarea>
+      <pre id="converterOutput" class="mt-3 bg-black border border-borderDark rounded-xl p-3 text-xs font-mono text-neonGreen max-h-48 overflow-auto whitespace-pre-wrap break-words custom-scrollbar">// Converted schema will appear here...</pre>
+
+      <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center space-x-2">
+          <button onclick="parseRawPacket(); playSound('click');" class="px-4 py-2 bg-neonCyan hover:bg-cyan-300 text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-cyan">
+            Parse &amp; Validate Schema
+          </button>
+          <button onclick="loadConvertedToMatch(); playSound('click');" class="px-3 py-2 bg-black border border-neonGreen text-neonGreen text-xs font-mono font-bold rounded-xl active:scale-95">
+            Load to Match
+          </button>
+        </div>
+        <button onclick="closeModal('converterModal'); playSound('click');" class="px-4 py-2 text-xs font-mono text-slate-400 hover:text-white">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MATCH ANALYTICS (real: backed by analytics.js CSV engine) -->
+  <div id="analyticsModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="bg-panel border border-neonAmber rounded-3xl max-w-3xl w-full p-6 shadow-neon-amber max-h-[90vh] overflow-y-auto custom-scrollbar">
+      <div class="flex items-center justify-between border-b border-borderDark pb-4 mb-4">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">&#128202;</span>
+          <h3 class="text-lg font-bold text-white font-display">Match Analytics &amp; Speed Telemetry</h3>
+        </div>
+        <button onclick="closeModal('analyticsModal'); playSound('click');" class="text-slate-400 hover:text-white p-1 text-xl">&times;</button>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <span id="csv-status-text" class="text-xs text-slate-400 font-mono uppercase">SYSTEM READY // WAITING FOR MATCH CSV</span>
+        <div class="flex items-center gap-2">
+          <span id="csv-count-badge" class="hidden bg-black text-slate-300 border border-borderDark px-2 py-1 rounded text-xs font-mono font-bold">0 GAMES PROCESSED</span>
+          <button onclick="resetAnalytics()" class="bg-black border border-borderDark text-slate-300 px-3 py-1.5 rounded-xl text-xs uppercase font-bold transition hover:border-neonPink hover:text-neonPink">Clear Data</button>
+        </div>
+      </div>
+
+      <div id="csv-drop-zone" onclick="document.getElementById('csv-file-input').click()" class="border-2 border-dashed border-borderDark rounded-xl flex flex-col items-center justify-center p-6 text-center cursor-pointer hover:border-neonAmber hover:bg-panelHover transition-all relative overflow-hidden min-h-[140px]">
+        <b class="text-slate-200 font-mono text-xs uppercase">Drop Match CSVs</b>
+        <span class="text-[10px] text-slate-500 mt-2 font-mono">Select multiple to combine</span>
+      </div>
+      <input type="file" id="csv-file-input" accept=".csv" multiple class="hidden">
+      <button id="btn-cloud-analytics" class="hidden"></button>
+
+      <div class="mt-4 bg-black rounded-xl p-3 border border-borderDark overflow-x-auto">
+        <h4 class="text-xs font-bold text-slate-400 tracking-widest uppercase mb-3">Team Performance</h4>
+        <table class="w-full text-left font-mono text-xs whitespace-nowrap">
+          <thead>
+            <tr class="border-b border-borderDark text-[10px] text-slate-500">
+              <th class="py-2 px-3">TEAM</th>
+              <th class="py-2 px-3">GMS</th>
+              <th class="py-2 px-3">PTS</th>
+              <th class="py-2 px-3">PPG</th>
+              <th class="py-2 px-3 text-neonAmber">PPB</th>
+              <th class="py-2 px-3 text-neonCyan">TOSS CORR</th>
+              <th class="py-2 px-3 text-neonPink">NEGS</th>
+            </tr>
+          </thead>
+          <tbody id="team-stats-body" class="divide-y divide-borderDark text-slate-300">
+            <tr><td colspan="7" class="py-4 text-center text-slate-600">Awaiting data...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-4 bg-black rounded-xl p-3 border border-borderDark overflow-x-auto">
+        <h4 class="text-xs font-bold text-slate-400 tracking-widest uppercase mb-3">Individual Analytics</h4>
+        <table class="w-full text-left font-mono text-xs whitespace-nowrap">
+          <thead>
+            <tr class="border-b border-borderDark text-[10px] text-slate-500">
+              <th class="py-2 px-3">PLAYER</th>
+              <th class="py-2 px-3">PTS</th>
+              <th class="py-2 px-3">PPG</th>
+              <th class="py-2 px-3 text-neonAmber">PPA</th>
+              <th class="py-2 px-3 text-neonCyan">INT ACC %</th>
+              <th class="py-2 px-3 text-neonPink">INT RATE %</th>
+              <th class="py-2 px-3 text-neonGreen">AVG SPD (s)</th>
+            </tr>
+          </thead>
+          <tbody id="player-stats-body" class="divide-y divide-borderDark text-slate-300">
+            <tr><td colspan="7" class="py-4 text-center text-slate-600">Awaiting data...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="flex items-center justify-end mt-4">
+        <button onclick="closeModal('analyticsModal'); playSound('click');" class="px-4 py-2 bg-black border border-borderDark text-xs font-mono text-slate-400 hover:text-white rounded-xl">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SOLO PRACTICE — WORK IN PROGRESS -->
+  <div id="wipModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="bg-panel border border-neonGreen rounded-3xl max-w-sm w-full p-6 shadow-neon-green text-center">
+      <div class="w-16 h-16 mx-auto rounded-2xl bg-black border border-neonGreen/60 flex items-center justify-center text-neonGreen text-3xl mb-4">
+        &#9889;
+      </div>
+      <h3 class="text-lg font-bold text-white font-display mb-2">Solo Practice</h3>
+      <span class="inline-block px-3 py-1 bg-neonGreen/10 border border-neonGreen/60 rounded-full text-neonGreen text-[10px] font-mono font-bold tracking-widest uppercase mb-4">WORK IN PROGRESS</span>
+      <p class="text-xs text-slate-400 font-mono leading-relaxed mb-5">The singleplayer isolation drill is still being built. It will let you train buzz speed solo with audio prompts — check back in a later release.</p>
+      <button onclick="closeModal('wipModal'); playSound('click');" class="w-full py-2.5 bg-black border border-borderDark text-slate-300 hover:text-white text-xs font-mono rounded-xl active:scale-95">
+        Close
+      </button>
+    </div>
+  </div>
+
+  <!-- Notification Toast Banner -->
+  <div id="toastAlertBanner" class="fixed top-16 right-4 z-50 bg-black border border-neonCyan text-neonCyan text-xs font-mono px-4 py-3 rounded-2xl shadow-neon-cyan hidden transition-all duration-300 flex items-center space-x-2">
+    <span class="w-2 h-2 rounded-full bg-neonCyan animate-ping"></span>
+    <span id="toastAlertText">System alert</span>
+  </div>
+
+  <!-- Compatibility stubs for legacy module wiring (hidden) -->
+  <div id="settings-modal" class="hidden"></div>
+  <div id="cloud-packet-section" class="hidden">
+    <select id="cloud-packet-select" class="hidden"></select>
+  </div>
+
+  <script src="/static/js/slopbowl_ui.js"></script>
+  <script src="/static/js/ui.js"></script>
+  <script src="/static/js/websocket.js"></script>
+  <script src="/static/js/camera.js"></script>
+  <script src="/static/js/pdf_parser.js"></script>
+  <script src="/static/js/analytics.js"></script>
+  <script>
+    window.FIREBASE_CONFIG = {
+      apiKey: "__FIREBASE_API_KEY__",
+      authDomain: "__FIREBASE_AUTH_DOMAIN__",
+      projectId: "__FIREBASE_PROJECT_ID__",
+      storageBucket: "__FIREBASE_STORAGE_BUCKET__",
+      messagingSenderId: "__FIREBASE_MESSAGING_SENDER_ID__",
+      appId: "__FIREBASE_APP_ID__"
+    };
+  </script>
+  <script type="module" src="/static/js/auth.js"></script>
 </body>
 </html>

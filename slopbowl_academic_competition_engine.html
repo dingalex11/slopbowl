@@ -1,0 +1,2881 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SLOPBOWL | Academic Competition Platform & Moderation Engine</title>
+  
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts: Space Grotesk, JetBrains Mono, Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            oled: '#000000',
+            panel: '#05080e',
+            panelHover: '#0b111e',
+            surface: '#0f172a',
+            borderDark: '#162238',
+            neonCyan: '#00f3ff',
+            neonAmber: '#ffaa00',
+            neonGreen: '#00ff66',
+            neonPink: '#ff0055',
+            neonPurple: '#b026ff'
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+            display: ['"Space Grotesk"', 'sans-serif']
+          },
+          boxShadow: {
+            'neon-cyan': '0 0 16px rgba(0, 243, 255, 0.45)',
+            'neon-cyan-lg': '0 0 30px rgba(0, 243, 255, 0.65)',
+            'neon-amber': '0 0 16px rgba(255, 170, 0, 0.45)',
+            'neon-green': '0 0 16px rgba(0, 255, 102, 0.45)',
+            'neon-pink': '0 0 16px rgba(255, 0, 85, 0.45)',
+            'inner-glow': 'inset 0 0 15px rgba(0, 243, 255, 0.2)'
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    :root {
+      --glow-scale: 1;
+    }
+    body {
+      background-color: #000000;
+      color: #f1f5f9;
+      font-family: 'Inter', sans-serif;
+      overflow-x: hidden;
+      user-select: none;
+    }
+    .cyber-grid {
+      background-image: radial-gradient(rgba(0, 243, 255, 0.09) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    .hud-scanline {
+      background: linear-gradient(rgba(0, 0, 0, 0) 50%, rgba(0, 0, 0, 0.45) 50%);
+      background-size: 100% 3px;
+    }
+    .digital-lcd {
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 0.08em;
+      text-shadow: 0 0 12px currentColor;
+    }
+    .neon-border-cyan {
+      border: 1px solid rgba(0, 243, 255, 0.4);
+      box-shadow: 0 0 14px rgba(0, 243, 255, 0.25);
+    }
+    .neon-border-amber {
+      border: 1px solid rgba(255, 170, 0, 0.4);
+      box-shadow: 0 0 14px rgba(255, 170, 0, 0.25);
+    }
+    .neon-border-green {
+      border: 1px solid rgba(0, 255, 102, 0.4);
+      box-shadow: 0 0 14px rgba(0, 255, 102, 0.25);
+    }
+    .neon-border-pink {
+      border: 1px solid rgba(255, 0, 85, 0.4);
+      box-shadow: 0 0 14px rgba(255, 0, 85, 0.25);
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #000000;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #162238;
+      border-radius: 9999px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #00f3ff;
+    }
+    @keyframes buzzRipple {
+      0% { box-shadow: 0 0 0 0 rgba(0, 243, 255, 0.8); }
+      70% { box-shadow: 0 0 0 25px rgba(0, 243, 255, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(0, 243, 255, 0); }
+    }
+    .buzz-active-anim {
+      animation: buzzRipple 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+  </style>
+</head>
+
+<body class="min-h-screen cyber-grid flex flex-col justify-between selection:bg-neonCyan selection:text-black">
+
+  <!-- Top Sticky Navigation Bar -->
+  <header class="sticky top-0 z-40 bg-black/90 backdrop-blur-xl border-b border-borderDark px-4 lg:px-8 py-3 flex items-center justify-between shadow-2xl">
+    <div class="flex items-center space-x-3 cursor-pointer group" onclick="navigateTo(1); playSound('click');">
+      <div class="w-10 h-10 rounded-xl bg-black border border-neonCyan flex items-center justify-center text-neonCyan font-black text-xl shadow-neon-cyan group-hover:scale-105 group-active:scale-95 transition-all">
+        ⚡
+      </div>
+      <div>
+        <div class="flex items-center space-x-2">
+          <span class="text-xl font-display font-black tracking-wider text-white uppercase group-hover:text-neonCyan transition">Slopbowl</span>
+          <span class="px-2 py-0.5 text-[9px] font-mono font-bold bg-black text-neonCyan border border-neonCyan/70 rounded-full tracking-widest uppercase">
+            V3.4 ONLINE
+          </span>
+        </div>
+        <p class="text-[10px] text-slate-400 font-mono hidden sm:block">Collegiate Quiz & Science Bowl Competition Engine</p>
+      </div>
+    </div>
+
+    <!-- Active Stage & Sync Status Pills -->
+    <div class="hidden md:flex items-center space-x-3 bg-panel px-3.5 py-1.5 rounded-full border border-borderDark text-xs font-mono">
+      <span class="relative flex h-2 w-2">
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-neonGreen opacity-75"></span>
+        <span class="relative inline-flex rounded-full h-2 w-2 bg-neonGreen"></span>
+      </span>
+      <span class="text-slate-400">ENGINE:</span>
+      <span id="headerSyncLabel" class="text-neonCyan font-bold tracking-wide cursor-pointer hover:underline" onclick="cycleEnginePreset()">NSB Championship #01</span>
+      <span class="text-slate-600">|</span>
+      <span class="text-neonGreen text-[11px] cursor-pointer hover:opacity-80" onclick="simulatePingRefresh()">53ms</span>
+    </div>
+
+    <!-- Right Header Action Buttons -->
+    <div class="flex items-center space-x-2 sm:space-x-2.5">
+      <button onclick="navigateTo(10); playSound('click');" class="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-mono font-black text-black bg-neonGreen hover:bg-emerald-400 active:scale-95 rounded-lg shadow-neon-green transition">
+        <span>⚡ SOLO SETUP</span>
+      </button>
+
+      <button onclick="openModal('converterModal'); playSound('click');" class="hidden lg:flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-neonCyan bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
+        <svg class="w-3.5 h-3.5 text-neonCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+        <span>Converter</span>
+      </button>
+
+      <button onclick="openModal('analyticsModal'); playSound('click');" class="hidden md:flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-neonCyan bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
+        <svg class="w-3.5 h-3.5 text-neonAmber" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+        <span>Stats</span>
+      </button>
+
+      <button onclick="navigateTo(2); playSound('click');" class="flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-white bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
+        <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path></svg>
+        <span class="hidden sm:inline">Settings</span>
+      </button>
+
+      <button onclick="openModal('signInModal'); playSound('click');" class="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-mono font-black text-neonCyan bg-black border border-neonCyan/80 hover:bg-neonCyan/10 active:scale-95 rounded-lg shadow-neon-cyan transition">
+        <span id="userAuthTag">SIGN IN</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="flex-grow max-w-7xl mx-auto w-full p-4 md:p-6 lg:p-8 flex flex-col justify-center">
+
+    <!-- ========================================== -->
+    <!-- SLIDE 1: HOME DASHBOARD                    -->
+    <!-- ========================================== -->
+    <section id="slide-1" class="slide-view flex flex-col items-center justify-center py-6 transition-all duration-300">
+      <div class="text-center max-w-2xl mx-auto mb-10">
+        <div onclick="showToast('⚡ Engine status: Zero hardware latency mode active.'); playSound('click');" class="inline-flex items-center space-x-2 px-3 py-1 bg-black border border-neonCyan/60 rounded-full text-neonCyan text-xs font-mono font-semibold mb-4 shadow-neon-cyan cursor-pointer hover:border-neonCyan transition">
+          <span class="w-2 h-2 rounded-full bg-neonCyan animate-ping"></span>
+          <span>CV Computer Vision + Low-Latency Buzzer Lockout</span>
+        </div>
+        <h1 class="text-4xl md:text-6xl font-black font-display tracking-tight text-white mb-3">
+          SLOP<span class="text-transparent bg-clip-text bg-gradient-to-r from-neonCyan via-sky-300 to-neonAmber">BOWL</span>
+        </h1>
+        <p class="text-slate-400 text-sm md:text-base font-sans">
+          The ultimate collegiate competition suite. Moderate in-person bouts with optical webcam tracking, connect across synchronized rooms, or hone your buzz speed solo.
+        </p>
+      </div>
+
+      <!-- Main Three Cards (Slide 1 Wireframe) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl mb-10">
+        <!-- Card 1: Moderate in person -->
+        <div onclick="navigateTo(4); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonCyan rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-cyan hover:-translate-y-1 active:scale-95 relative overflow-hidden">
+          <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonCyan/10 rounded-full blur-xl group-hover:bg-neonCyan/20 transition"></div>
+          <div class="w-16 h-16 rounded-2xl bg-black border border-neonCyan/50 flex items-center justify-center text-neonCyan mb-5 group-hover:scale-110 transition shadow-inner">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonCyan transition font-display">Moderate in person</h3>
+          <p class="text-xs text-slate-400 leading-relaxed font-sans">
+            Webcam ROI buzzer detection, dual digital clocks, real-time interrupt scoring, and automated question stream.
+          </p>
+          <div class="mt-6 flex items-center text-xs font-mono text-neonCyan group-hover:translate-x-1 transition font-bold">
+            Configure Match Station &rarr;
+          </div>
+        </div>
+
+        <!-- Card 2: Play / Host online -->
+        <div onclick="navigateTo(3); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonAmber rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-amber hover:-translate-y-1 active:scale-95 relative overflow-hidden">
+          <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonAmber/10 rounded-full blur-xl group-hover:bg-neonAmber/20 transition"></div>
+          <div class="w-16 h-16 rounded-2xl bg-black border border-neonAmber/50 flex items-center justify-center text-neonAmber mb-5 group-hover:scale-110 transition shadow-inner">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonAmber transition font-display">Play/Host online</h3>
+          <p class="text-xs text-slate-400 leading-relaxed font-sans">
+            Multiplayer rooms with sub-50ms lockout, spectator pods, 6-digit match codes, and live scoreboard synchronization.
+          </p>
+          <div class="mt-6 flex items-center text-xs font-mono text-neonAmber group-hover:translate-x-1 transition font-bold">
+            Enter Match Hub &rarr;
+          </div>
+        </div>
+
+        <!-- Card 3: Singleplayer Practice -->
+        <div onclick="navigateTo(10); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonGreen rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-green hover:-translate-y-1 active:scale-95 relative overflow-hidden">
+          <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonGreen/10 rounded-full blur-xl group-hover:bg-neonGreen/20 transition"></div>
+          <div class="w-16 h-16 rounded-2xl bg-black border border-neonGreen/50 flex items-center justify-center text-neonGreen mb-5 group-hover:scale-110 transition shadow-inner">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonGreen transition font-display">Singleplayer Practice</h3>
+          <p class="text-xs text-slate-400 leading-relaxed font-sans">
+            Train buzz speed solo. Pick Spoken Audio vs Typed Prompter, and respond with microphone speech or terminal typing.
+          </p>
+          <div class="mt-6 flex items-center text-xs font-mono text-neonGreen group-hover:translate-x-1 transition font-bold">
+            Setup Solo Training &rarr;
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 1 Wireframe Footer Buttons -->
+      <div class="flex flex-wrap items-center justify-center gap-6 text-sm font-mono">
+        <button onclick="openModal('converterModal'); playSound('click');" class="flex items-center space-x-2 text-slate-300 hover:text-neonCyan transition py-2.5 px-5 rounded-xl bg-panel border border-borderDark hover:border-neonCyan active:scale-95 shadow-sm">
+          <svg class="w-4 h-4 text-neonCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+          <span>Packet converter</span>
+        </button>
+
+        <button onclick="openModal('analyticsModal'); playSound('click');" class="flex items-center space-x-2 text-slate-300 hover:text-neonAmber transition py-2.5 px-5 rounded-xl bg-panel border border-borderDark hover:border-neonAmber active:scale-95 shadow-sm">
+          <svg class="w-4 h-4 text-neonAmber" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+          <span>Match analytics</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 2: SETTINGS VIEW                     -->
+    <!-- ========================================== -->
+    <section id="slide-2" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-2xl mx-auto bg-panel border border-neonCyan/40 rounded-3xl p-6 sm:p-8 shadow-neon-cyan relative">
+        <div class="flex items-center justify-between border-b border-borderDark pb-5 mb-6">
+          <div class="flex items-center space-x-3">
+            <div class="p-2.5 bg-black border border-neonCyan text-neonCyan rounded-xl shadow-neon-cyan">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path></svg>
+            </div>
+            <div>
+              <h2 class="text-2xl font-bold text-white font-display">Settings</h2>
+              <p class="text-xs text-slate-400 font-mono">Platform API configuration, audio synthesis, and lighting engine.</p>
+            </div>
+          </div>
+          <button onclick="navigateTo(1); playSound('click');" class="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-black transition">
+            ✕
+          </button>
+        </div>
+
+        <div class="space-y-6">
+          <!-- API Key [textbox] - Direct Wireframe Slide 2 -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-xs font-mono font-bold text-neonCyan uppercase tracking-wider">
+                API Key [textbox]
+              </label>
+              <span id="apiKeyStatus" class="text-[10px] font-mono text-neonGreen font-semibold">VALIDATED (READY)</span>
+            </div>
+            <div class="relative">
+              <input type="password" id="apiKeyInput" value="sk-live-slopbowl-pro-9941a8" placeholder="sk-..." class="w-full bg-black border border-borderDark focus:border-neonCyan rounded-xl px-4 py-3 text-sm text-neonCyan font-mono focus:outline-none shadow-inner pr-32">
+              <div class="absolute right-2 top-2 flex items-center space-x-1">
+                <button onclick="toggleApiKeyVisibility(); playSound('click');" class="px-2 py-1 bg-panel border border-borderDark rounded text-[10px] font-mono text-slate-300 hover:text-neonCyan active:scale-95">
+                  SHOW
+                </button>
+                <button onclick="testApiKeyConnection(); playSound('click');" class="px-2 py-1 bg-neonCyan text-black font-black rounded text-[10px] font-mono hover:bg-cyan-300 active:scale-95 shadow-sm">
+                  TEST
+                </button>
+              </div>
+            </div>
+            <div class="mt-2 flex items-center justify-between text-[11px] font-mono">
+              <span class="text-slate-500">Used for question generation and cloud packet sync.</span>
+              <button onclick="clearApiKeyField(); playSound('click');" class="text-neonPink hover:underline">Clear Key</button>
+            </div>
+          </div>
+
+          <!-- Rule System Presets (Clickable Pills) -->
+          <div>
+            <label class="block text-xs font-mono font-bold text-slate-300 uppercase mb-2">Competition Rule Set</label>
+            <div class="grid grid-cols-3 gap-2">
+              <button onclick="setRulePreset('NSB'); playSound('click');" id="rule-btn-NSB" class="py-2.5 px-3 rounded-xl border border-neonCyan bg-black text-neonCyan text-xs font-mono font-bold active:scale-95 transition shadow-neon-cyan">
+                NSB (4pt / 10pt)
+              </button>
+              <button onclick="setRulePreset('ACF'); playSound('click');" id="rule-btn-ACF" class="py-2.5 px-3 rounded-xl border border-borderDark bg-black text-slate-400 text-xs font-mono font-bold active:scale-95 hover:text-white transition">
+                ACF (10 / Neg)
+              </button>
+              <button onclick="setRulePreset('NAQT'); playSound('click');" id="rule-btn-NAQT" class="py-2.5 px-3 rounded-xl border border-borderDark bg-black text-slate-400 text-xs font-mono font-bold active:scale-95 hover:text-white transition">
+                NAQT (15/10/-5)
+              </button>
+            </div>
+          </div>
+
+          <!-- Audio Engine Toggles -->
+          <div class="p-4 bg-black rounded-2xl border border-borderDark space-y-3">
+            <div class="text-xs font-mono font-bold text-slate-300 uppercase">Audio & Haptic Feedback</div>
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-slate-400">Synthesizer Buzzer Tones</span>
+              <button onclick="toggleAudioSetting('buzzerTones'); playSound('click');" id="toggle-buzzerTones" class="px-3 py-1 bg-neonGreen/20 text-neonGreen border border-neonGreen rounded-lg text-xs font-mono font-bold active:scale-95 transition">
+                ON
+              </button>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-slate-400">Tactile Click Audio</span>
+              <button onclick="toggleAudioSetting('clickAudio'); playSound('click');" id="toggle-clickAudio" class="px-3 py-1 bg-neonGreen/20 text-neonGreen border border-neonGreen rounded-lg text-xs font-mono font-bold active:scale-95 transition">
+                ON
+              </button>
+            </div>
+          </div>
+
+          <!-- Bottom Action Buttons -->
+          <div class="pt-4 flex items-center justify-end space-x-3 border-t border-borderDark">
+            <button onclick="restoreDefaultSettings(); playSound('click');" class="px-4 py-2.5 text-xs font-mono text-slate-400 hover:text-white bg-black border border-borderDark rounded-xl active:scale-95 transition">
+              Reset Defaults
+            </button>
+            <button onclick="saveAndReturnSettings(); playSound('click');" class="px-6 py-2.5 text-xs font-mono font-black text-black bg-neonCyan hover:bg-cyan-300 rounded-xl shadow-neon-cyan active:scale-95 transition">
+              SAVE & RETURN &rarr;
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 3: ONLINE PLAY PORTAL                -->
+    <!-- ========================================== -->
+    <section id="slide-3" class="slide-view hidden py-8 transition-all duration-300">
+      <div class="flex items-center justify-between max-w-4xl mx-auto w-full mb-6">
+        <button onclick="navigateTo(1); playSound('click');" class="px-3.5 py-1.5 bg-black border border-borderDark text-slate-300 hover:text-neonCyan rounded-xl text-xs font-mono font-bold active:scale-95 transition">
+          &larr; Back to Hub
+        </button>
+        <span class="text-xs font-mono text-slate-500">MULTI-LOBBY SYNC ACTIVE</span>
+      </div>
+
+      <div class="text-center max-w-xl mx-auto mb-10">
+        <h2 class="text-3xl md:text-5xl font-black font-display text-white mb-2">Online play</h2>
+        <p class="text-xs md:text-sm text-slate-400 font-mono">Connect to a live competitive match pod or host a room as moderator.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto w-full">
+        <!-- Join Match Card (Slide 3 Wireframe) -->
+        <div class="bg-panel border border-borderDark hover:border-neonCyan rounded-3xl p-8 flex flex-col justify-between transition-all duration-300 hover:shadow-neon-cyan">
+          <div>
+            <div class="w-14 h-14 rounded-2xl bg-black border border-neonCyan text-neonCyan flex items-center justify-center mb-6 shadow-neon-cyan">
+              <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path></svg>
+            </div>
+            <h3 class="text-2xl font-bold text-white mb-2 font-display">Join Match</h3>
+            <p class="text-xs text-slate-400 mb-6 font-sans">Enter the 6-digit match room PIN provided by the tournament director.</p>
+
+            <div class="space-y-4">
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="text-[11px] font-mono font-bold text-neonCyan uppercase">Arena Room PIN</label>
+                  <button onclick="randomizePin(); playSound('click');" class="text-[10px] font-mono text-slate-400 hover:text-neonCyan">🎲 Random</button>
+                </div>
+                <input type="text" id="joinPinInput" maxlength="6" value="277188" class="w-full bg-black border border-borderDark focus:border-neonCyan rounded-xl px-4 py-3 text-center text-3xl font-mono tracking-widest text-neonCyan font-black focus:outline-none shadow-inner">
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="text-[11px] font-mono font-bold text-slate-300 uppercase">Player Handle</label>
+                  <button onclick="randomizeHandle(); playSound('click');" class="text-[10px] font-mono text-slate-400 hover:text-neonCyan">🎲 Roll</button>
+                </div>
+                <input type="text" id="joinPlayerHandle" value="scibowl gooner" class="w-full bg-black border border-borderDark focus:border-neonCyan rounded-xl px-4 py-2.5 text-xs text-white font-mono focus:outline-none">
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-8 space-y-2">
+            <button onclick="navigateTo(8); playSound('click'); showToast('Connected to Match Pod 277188');" class="w-full py-3.5 bg-neonCyan hover:bg-cyan-300 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-cyan transition flex items-center justify-center space-x-2">
+              <span>Enter Lobby as Player (Slide 8) &rarr;</span>
+            </button>
+            <button onclick="navigateTo(8); playSound('click'); showToast('Spectator mode initialized.');" class="w-full py-2.5 bg-black border border-borderDark hover:border-slate-500 text-slate-300 active:scale-95 font-mono text-xs rounded-xl transition">
+              👁 Spectate Match Only
+            </button>
+          </div>
+        </div>
+
+        <!-- Create match Card (Slide 3 Wireframe) -->
+        <div class="bg-panel border border-borderDark hover:border-neonAmber rounded-3xl p-8 flex flex-col justify-between transition-all duration-300 hover:shadow-neon-amber">
+          <div>
+            <div class="w-14 h-14 rounded-2xl bg-black border border-neonAmber text-neonAmber flex items-center justify-center mb-6 shadow-neon-amber">
+              <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            </div>
+            <h3 class="text-2xl font-bold text-white mb-2 font-display">Create match</h3>
+            <p class="text-xs text-slate-400 mb-6 font-sans">Host an official competition pod with packet adjudication & lockout.</p>
+
+            <div class="space-y-4">
+              <div>
+                <label class="block text-[11px] font-mono font-bold text-neonAmber uppercase mb-1.5">Match Name / Round</label>
+                <input type="text" id="createMatchTitle" value="Round 4: Regional Semi-Finals" class="w-full bg-black border border-borderDark focus:border-neonAmber rounded-xl px-4 py-2.5 text-xs text-white font-mono focus:outline-none">
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-mono font-bold text-slate-300 uppercase mb-1.5">Question Packet Source</label>
+                <select id="createPacketDropdown" class="w-full bg-black border border-borderDark focus:border-neonAmber rounded-xl px-4 py-2.5 text-xs text-white font-mono focus:outline-none">
+                  <option>2024 NSB Championship Set (Official DOE)</option>
+                  <option>2023 ACF Nationals Division 1</option>
+                  <option>PACE NSC 2024 Championship Finals</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-8">
+            <button onclick="navigateTo(6); playSound('click'); showToast('Configuring Room Parameters...');" class="w-full py-3.5 bg-neonAmber hover:bg-amber-400 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-amber transition flex items-center justify-center space-x-2">
+              <span>Configure Room as Mod (Slide 6) &rarr;</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 4: IN PERSON MATCH SETUP             -->
+    <!-- ========================================== -->
+    <section id="slide-4" class="slide-view hidden py-2 transition-all duration-300">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-2xl md:text-3xl font-black font-display text-white">In person match setup</h2>
+          <p class="text-xs text-slate-400 font-mono">Load packet questions, configure dual rosters, and calibrate optical buzzer vision.</p>
+        </div>
+        <button onclick="navigateTo(1); playSound('click');" class="text-xs font-mono text-slate-400 hover:text-white bg-panel px-3 py-1.5 rounded-lg border border-borderDark active:scale-95 transition">
+          &larr; Hub
+        </button>
+      </div>
+
+      <div class="space-y-4">
+        <!-- Section: QUESTION BANK SELECTION (Slide 4 Wireframe) -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-4 sm:p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center space-x-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-neonAmber shadow-neon-amber"></span>
+              <span class="text-xs font-mono font-bold text-white uppercase tracking-wider">QUESTION BANK SELECTION</span>
+            </div>
+            <span class="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-black text-neonAmber border border-neonAmber/60">DATA SOURCE</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+            <div class="md:col-span-5 flex flex-wrap items-center gap-2">
+              <input type="file" id="realFileInput" accept=".json,.txt" class="hidden" onchange="handleFakeFileUpload(event)">
+              <button onclick="document.getElementById('realFileInput').click(); playSound('click');" class="px-4 py-2 bg-black hover:bg-panelHover border border-neonCyan/70 text-neonCyan rounded-xl text-xs font-mono font-bold active:scale-95 transition shadow-sm">
+                BROWSE JSON FILE
+              </button>
+              <span id="loadedPacketPill" class="text-[11px] font-mono text-neonGreen font-semibold">
+                ✓ 2024 Championship packet loaded.
+              </span>
+            </div>
+
+            <div class="md:col-span-7 flex flex-col sm:flex-row items-center gap-2">
+              <select id="cloudPacketPicker" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-neonAmber focus:outline-none">
+                <option>-- 2024 NSB National Finals (Physics, Chem, Bio, Math) --</option>
+                <option>-- 2023 ACF Nationals Packet 1 (Collegiate) --</option>
+                <option>-- 2024 DOE Regional Warm-Up Packet --</option>
+              </select>
+              <button onclick="loadCloudPacketAction(); playSound('click');" class="w-full sm:w-auto px-4 py-2 bg-black border border-neonAmber text-neonAmber text-xs font-mono font-bold rounded-xl transition hover:bg-neonAmber hover:text-black whitespace-nowrap active:scale-95 shadow-neon-amber">
+                LOAD CLOUD PACKET
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Grid: Dual Rosters (Left) & Vision Engine (Right) -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <!-- Left: TEAM & PLAYER ROSTER SETUP -->
+          <div class="lg:col-span-6 bg-panel border border-borderDark rounded-2xl p-4 sm:p-5 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-neonPink shadow-neon-pink"></span>
+                  <span class="text-xs font-mono font-bold text-white uppercase tracking-wider">TEAM & PLAYER ROSTER SETUP</span>
+                </div>
+                <span class="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-black text-neonPink border border-neonPink/60">MATCH CONFIG</span>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <!-- Team A Roster (Neon Cyan) -->
+                <div class="space-y-2">
+                  <label class="text-[11px] font-mono font-bold text-neonCyan uppercase block">TEAM A NAME & ROSTER</label>
+                  <input type="text" id="setupTeamAName" value="Team A" class="w-full bg-black border border-neonCyan rounded-lg px-3 py-1.5 text-xs font-mono text-neonCyan font-black focus:outline-none shadow-sm">
+                  
+                  <div class="space-y-1.5" id="rosterListA">
+                    <div class="flex items-center space-x-1">
+                      <input type="text" value="Player 1" class="flex-grow bg-black/60 border border-borderDark rounded-lg px-2.5 py-1 text-xs text-slate-200 font-mono">
+                      <button onclick="setCaptain('A', 0); playSound('click');" class="cpt-tag-A px-1.5 py-1 rounded text-[9px] font-mono text-slate-500 bg-black border border-borderDark hover:text-neonCyan">CPT</button>
+                    </div>
+                    <div class="flex items-center space-x-1">
+                      <input type="text" value="Captain Alex" class="flex-grow bg-black/60 border border-neonCyan/70 rounded-lg px-2.5 py-1 text-xs text-neonCyan font-bold font-mono">
+                      <button onclick="setCaptain('A', 1); playSound('click');" class="cpt-tag-A px-1.5 py-1 rounded text-[9px] font-mono font-black text-neonCyan bg-black border border-neonCyan shadow-neon-cyan">CPT</button>
+                    </div>
+                    <div class="flex items-center space-x-1">
+                      <input type="text" value="Player 3" class="flex-grow bg-black/60 border border-borderDark rounded-lg px-2.5 py-1 text-xs text-slate-200 font-mono">
+                      <button onclick="setCaptain('A', 2); playSound('click');" class="cpt-tag-A px-1.5 py-1 rounded text-[9px] font-mono text-slate-500 bg-black border border-borderDark hover:text-neonCyan">CPT</button>
+                    </div>
+                    <div class="flex items-center space-x-1">
+                      <input type="text" value="Player 4" class="flex-grow bg-black/60 border border-borderDark rounded-lg px-2.5 py-1 text-xs text-slate-200 font-mono">
+                      <button onclick="setCaptain('A', 3); playSound('click');" class="cpt-tag-A px-1.5 py-1 rounded text-[9px] font-mono text-slate-500 bg-black border border-borderDark hover:text-neonCyan">CPT</button>
+                    </div>
+                  </div>
+                  <button onclick="addRosterRow('A'); playSound('click');" class="w-full py-1 text-[10px] font-mono text-slate-400 hover:text-neonCyan bg-black border border-borderDark rounded-lg active:scale-95 transition">
+                    + Add Sub Player
+                  </button>
+                </div>
+
+                <!-- Team B Roster (Neon Amber) -->
+                <div class="space-y-2">
+                  <label class="text-[11px] font-mono font-bold text-neonAmber uppercase block">TEAM B NAME & ROSTER</label>
+                  <input type="text" id="setupTeamBName" value="Team B" class="w-full bg-black border border-neonAmber rounded-lg px-3 py-1.5 text-xs font-mono text-neonAmber font-black focus:outline-none shadow-sm">
+                  
+                  <div class="space-y-1.5" id="rosterListB">
+                    <div class="flex items-center space-x-1">
+                      <input type="text" value="Player 1" class="flex-grow bg-black/60 border border-borderDark rounded-lg px-2.5 py-1 text-xs text-slate-200 font-mono">
+                      <button onclick="setCaptain('B', 0); playSound('click');" class="cpt-tag-B px-1.5 py-1 rounded text-[9px] font-mono text-slate-500 bg-black border border-borderDark hover:text-neonAmber">CPT</button>
+                    </div>
+                    <div class="flex items-center space-x-1">
+                      <input type="text" value="Captain Samantha" class="flex-grow bg-black/60 border border-neonAmber/70 rounded-lg px-2.5 py-1 text-xs text-neonAmber font-bold font-mono">
+                      <button onclick="setCaptain('B', 1); playSound('click');" class="cpt-tag-B px-1.5 py-1 rounded text-[9px] font-mono font-black text-neonAmber bg-black border border-neonAmber shadow-neon-amber">CPT</button>
+                    </div>
+                    <div class="flex items-center space-x-1">
+                      <input type="text" value="Player 3" class="flex-grow bg-black/60 border border-borderDark rounded-lg px-2.5 py-1 text-xs text-slate-200 font-mono">
+                      <button onclick="setCaptain('B', 2); playSound('click');" class="cpt-tag-B px-1.5 py-1 rounded text-[9px] font-mono text-slate-500 bg-black border border-borderDark hover:text-neonAmber">CPT</button>
+                    </div>
+                    <div class="flex items-center space-x-1">
+                      <input type="text" value="Player 4" class="flex-grow bg-black/60 border border-borderDark rounded-lg px-2.5 py-1 text-xs text-slate-200 font-mono">
+                      <button onclick="setCaptain('B', 3); playSound('click');" class="cpt-tag-B px-1.5 py-1 rounded text-[9px] font-mono text-slate-500 bg-black border border-borderDark hover:text-neonAmber">CPT</button>
+                    </div>
+                  </div>
+                  <button onclick="addRosterRow('B'); playSound('click');" class="w-full py-1 text-[10px] font-mono text-slate-400 hover:text-neonAmber bg-black border border-borderDark rounded-lg active:scale-95 transition">
+                    + Add Sub Player
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-5 pt-3 border-t border-borderDark flex flex-col sm:flex-row items-center justify-between gap-3">
+              <span class="text-[10px] text-slate-500 font-mono">Roster changes apply live across match HUD.</span>
+              <button onclick="saveAndProceedToModeration(); playSound('click');" class="w-full sm:w-auto px-5 py-2.5 bg-neonCyan hover:bg-cyan-300 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-cyan active:scale-95 transition">
+                SAVE & GO TO MATCH VIEW &rarr;
+              </button>
+            </div>
+          </div>
+
+          <!-- Right: VISION DETECTION ENGINE & CANVAS (Slide 4 Wireframe) -->
+          <div class="lg:col-span-6 bg-panel border border-borderDark rounded-2xl p-4 sm:p-5 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center space-x-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-neonCyan shadow-neon-cyan"></span>
+                  <span class="text-xs font-mono font-bold text-white uppercase tracking-wider">VISION DETECTION ENGINE</span>
+                </div>
+                <div class="flex items-center space-x-1.5">
+                  <button onclick="toggleLumaMode(); playSound('click');" id="lumaBadge" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-black text-neonCyan border border-neonCyan active:scale-95">
+                    LUMA MODE
+                  </button>
+                </div>
+              </div>
+
+              <!-- Video Source Selector -->
+              <div class="mb-3">
+                <label class="block text-[10px] font-mono text-slate-400 uppercase mb-1">VIDEO SOURCE DEVICE</label>
+                <select id="videoDeviceSelect" onchange="showToast('Active camera changed: ' + this.value)" class="w-full bg-black border border-borderDark rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none">
+                  <option>ACER FHD User Facing (04f2:b831)</option>
+                  <option>Logitech Brio 4K Stream (046d:085e)</option>
+                  <option>Virtual NDI / OBS Cam Stream 1</option>
+                </select>
+              </div>
+
+              <!-- Interactive ROI Bounding Box Canvas -->
+              <div class="relative bg-black rounded-xl overflow-hidden border border-borderDark shadow-inner">
+                <div class="absolute top-2 left-2 z-10 text-[9px] font-mono text-neonAmber bg-black/90 px-2 py-0.5 rounded border border-neonAmber/50 pointer-events-none">
+                  MANUAL ROI BOUNDING BOX CANVAS
+                </div>
+                <div class="absolute top-2 right-2 z-10 text-[9px] font-mono text-slate-400 bg-black/90 px-2 py-0.5 rounded pointer-events-none">
+                  Drag to box buzzers
+                </div>
+                <canvas id="cvCanvas" width="560" height="200" class="w-full h-[190px] block cursor-crosshair"></canvas>
+              </div>
+            </div>
+
+            <!-- Vision Engine Controls -->
+            <div class="mt-4 pt-3 border-t border-borderDark space-y-2.5">
+              <div class="flex flex-wrap items-center gap-2">
+                <button onclick="toggleCameraSimulator(); playSound('click');" id="camSimulatorBtn" class="px-3 py-1.5 bg-black border border-neonCyan text-neonCyan text-xs font-mono font-bold rounded-lg hover:bg-neonCyan hover:text-black active:scale-95 transition shadow-neon-cyan">
+                  1. Start Camera Feed
+                </button>
+                <button onclick="resetRoiCanvas(); playSound('click');" class="px-3 py-1.5 bg-black border border-borderDark text-slate-300 text-xs font-mono rounded-lg hover:text-white active:scale-95 transition">
+                  Reset
+                </button>
+                <button onclick="saveRoiEngine(); playSound('click');" class="px-3 py-1.5 bg-black border border-neonGreen text-neonGreen text-xs font-mono font-bold rounded-lg hover:bg-neonGreen hover:text-black active:scale-95 transition shadow-neon-green">
+                  2. Save to Engine
+                </button>
+                <button onclick="autoDetectPresetBoxes(); playSound('click');" class="px-2.5 py-1.5 bg-black border border-slate-600 text-slate-300 text-xs font-mono rounded-lg hover:border-neonCyan hover:text-neonCyan active:scale-95 transition">
+                  ⚡ Auto-Detect
+                </button>
+              </div>
+
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] font-mono text-slate-400">Ambient Lighting Re-zero</span>
+                <button onclick="recalibrateLighting(); playSound('click');" class="px-3 py-1 bg-black border border-neonAmber text-neonAmber text-xs font-mono font-bold rounded-lg hover:bg-neonAmber hover:text-black active:scale-95 transition shadow-neon-amber">
+                  CALIBRATE BASELINE
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 5: IN PERSON MODERATION HUD          -->
+    <!-- ========================================== -->
+    <section id="slide-5" class="slide-view hidden py-2 transition-all duration-300">
+      <div class="bg-panel border border-neonCyan/40 rounded-3xl p-4 md:p-6 shadow-neon-cyan relative">
+        <!-- Top HUD Banner -->
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-borderDark pb-4 mb-4">
+          <div class="flex items-center space-x-3">
+            <span class="px-2.5 py-1 bg-black border border-neonAmber text-neonAmber text-[11px] font-mono font-black rounded-md shadow-neon-amber">
+              LIVE QUESTION
+            </span>
+            <span class="text-xs font-mono text-slate-400 uppercase">
+              CURRENT STAGE: <span id="hudStageLabel" class="text-white font-bold cursor-pointer hover:underline" onclick="cycleStage()">TOSSUP 1</span>
+            </span>
+            <span id="hudCategoryTag" class="text-xs font-mono text-neonCyan bg-black px-2 py-0.5 rounded border border-neonCyan/50 cursor-pointer" onclick="cycleCategory()">
+              PHYSICS
+            </span>
+          </div>
+
+          <!-- Scoreboard Header: 0 - 0 with Clickable Score Adjustments -->
+          <div class="flex items-center space-x-4 bg-black px-5 py-2 rounded-2xl border border-borderDark shadow-inner">
+            <div class="flex items-center space-x-2">
+              <div class="flex flex-col space-y-1">
+                <button onclick="adjustScore('A', 4); playSound('click');" class="px-1.5 py-0.5 text-[9px] font-mono font-bold text-neonCyan bg-panel border border-neonCyan/40 rounded hover:bg-neonCyan hover:text-black active:scale-90">+4</button>
+                <button onclick="adjustScore('A', -4); playSound('click');" class="px-1.5 py-0.5 text-[9px] font-mono font-bold text-neonPink bg-panel border border-neonPink/40 rounded hover:bg-neonPink hover:text-black active:scale-90">-4</button>
+              </div>
+              <div class="text-center">
+                <span class="text-[10px] font-mono text-neonCyan font-black block" id="hudTeamNameA">TEAM A</span>
+                <span class="text-3xl font-mono font-black text-neonCyan digital-lcd" id="scoreValueA">0</span>
+              </div>
+            </div>
+
+            <span class="text-slate-600 font-bold text-2xl cursor-pointer" onclick="resetScores(); playSound('click');" title="Click to Reset Scores">-</span>
+
+            <div class="flex items-center space-x-2">
+              <div class="text-center">
+                <span class="text-[10px] font-mono text-neonAmber font-black block" id="hudTeamNameB">TEAM B</span>
+                <span class="text-3xl font-mono font-black text-neonAmber digital-lcd" id="scoreValueB">0</span>
+              </div>
+              <div class="flex flex-col space-y-1">
+                <button onclick="adjustScore('B', 4); playSound('click');" class="px-1.5 py-0.5 text-[9px] font-mono font-bold text-neonAmber bg-panel border border-neonAmber/40 rounded hover:bg-neonAmber hover:text-black active:scale-90">+4</button>
+                <button onclick="adjustScore('B', -4); playSound('click');" class="px-1.5 py-0.5 text-[9px] font-mono font-bold text-neonPink bg-panel border border-neonPink/40 rounded hover:bg-neonPink hover:text-black active:scale-90">-4</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-neonGreen animate-ping"></span>
+            <span id="hudStatusBadge" class="text-xs font-mono font-black text-neonGreen uppercase tracking-wider cursor-pointer" onclick="toggleMatchStatus()">
+              STATUS: READY
+            </span>
+          </div>
+        </div>
+
+        <!-- Center Stage: Action Clock & Clocks + Mini Vision Feed -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-4">
+          <!-- Action Clock Display (Slide 5 Wireframe: ACTION CLOCK --) -->
+          <div class="lg:col-span-8 bg-black rounded-2xl border border-borderDark p-5 flex flex-col justify-between relative overflow-hidden">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-neonCyan tracking-widest font-black uppercase">ACTION CLOCK</span>
+              <div class="flex items-center space-x-2">
+                <button onclick="setActionPreset(5); playSound('click');" class="px-2 py-0.5 text-[10px] font-mono bg-panel border border-borderDark rounded text-slate-300 hover:text-neonCyan">5s</button>
+                <button onclick="setActionPreset(7); playSound('click');" class="px-2 py-0.5 text-[10px] font-mono bg-panel border border-borderDark rounded text-slate-300 hover:text-neonCyan">7s</button>
+                <button onclick="setActionPreset(10); playSound('click');" class="px-2 py-0.5 text-[10px] font-mono bg-panel border border-borderDark rounded text-slate-300 hover:text-neonCyan">10s</button>
+              </div>
+            </div>
+
+            <div class="py-5 flex flex-col items-center justify-center">
+              <div class="text-5xl md:text-6xl font-mono font-black text-white digital-lcd mb-4 tracking-widest cursor-pointer" id="actionClockValue" onclick="triggerActionClockCountdown(5.0); playSound('click');">
+                --
+              </div>
+              <div class="w-full bg-surface h-3 rounded-full overflow-hidden border border-borderDark p-0.5">
+                <div id="actionClockBar" class="h-full bg-gradient-to-r from-neonCyan to-neonGreen rounded-full w-full transition-all duration-100 ease-linear shadow-neon-cyan"></div>
+              </div>
+            </div>
+
+            <!-- Floor Status Badges Row (Clear / Interrupt / Pending) -->
+            <div class="flex flex-wrap items-center gap-2 pt-2 text-[11px] font-mono border-t border-borderDark">
+              <div onclick="cycleFloorStatus(); playSound('click');" class="cursor-pointer px-2.5 py-1 bg-panel hover:bg-panelHover rounded border border-borderDark flex items-center space-x-1.5">
+                <span id="floorIndicatorDot" class="w-2 h-2 rounded-full bg-neonGreen"></span>
+                <span class="text-slate-400">FLOOR:</span>
+                <span id="floorBadgeLabel" class="text-white font-bold">CLEAR</span>
+              </div>
+              <div onclick="cycleInterruptStatus(); playSound('click');" class="cursor-pointer px-2.5 py-1 bg-panel hover:bg-panelHover rounded border border-borderDark">
+                <span class="text-slate-400">INTERRUPT:</span>
+                <span id="interruptBadgeLabel" class="text-neonCyan font-bold">--</span>
+              </div>
+              <div onclick="cycleOutcomeStatus(); playSound('click');" class="cursor-pointer px-2.5 py-1 bg-panel hover:bg-panelHover rounded border border-borderDark">
+                <span class="text-slate-400">OUTCOME:</span>
+                <span id="outcomeBadgeLabel" class="text-neonAmber font-bold">PENDING</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Vision Feed & Match Clock 07:55 -->
+          <div class="lg:col-span-4 flex flex-col gap-3">
+            <div class="bg-black rounded-2xl border border-borderDark p-3 flex flex-col">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[10px] font-mono text-neonCyan font-bold tracking-wider">VISION FEED</span>
+                <button onclick="toggleVisionOverlay(); playSound('click');" class="text-[9px] font-mono text-neonGreen bg-black px-1.5 py-0.5 rounded border border-neonGreen/60 hover:bg-neonGreen hover:text-black">
+                  CV LIVE ◉
+                </button>
+              </div>
+              <div class="relative bg-black rounded-lg overflow-hidden h-[95px] border border-borderDark cursor-pointer" onclick="simulateBuzzerTriggerFromVision()">
+                <canvas id="miniVisionHud" width="280" height="95" class="w-full h-full block"></canvas>
+                <div class="absolute inset-0 pointer-events-none hud-scanline"></div>
+              </div>
+            </div>
+
+            <div class="bg-black rounded-2xl border border-borderDark p-3 flex flex-col items-center justify-center flex-grow text-center">
+              <span class="text-[10px] font-mono text-slate-400 tracking-widest uppercase mb-1">MATCH CLOCK</span>
+              <div id="hudMatchClockDigit" class="text-3xl font-mono font-black text-neonCyan digital-lcd tracking-widest cursor-pointer" onclick="toggleMatchTimer(); playSound('click');">
+                07:55
+              </div>
+              <div class="flex items-center space-x-2 mt-2">
+                <button onclick="toggleMatchTimer(); playSound('click');" id="matchTimerPlayBtn" class="px-2.5 py-1 text-[10px] font-mono bg-panel border border-borderDark rounded text-slate-300 hover:text-white active:scale-95">
+                  ▶ START
+                </button>
+                <button onclick="adjustMatchTimer(60); playSound('click');" class="px-2 py-1 text-[10px] font-mono bg-panel border border-borderDark rounded text-slate-300 hover:text-white active:scale-90">
+                  +1M
+                </button>
+                <button onclick="resetMatchTimer(); playSound('click');" class="px-2 py-1 text-[10px] font-mono bg-panel border border-borderDark rounded text-slate-300 hover:text-white active:scale-95">
+                  RESET
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Teleprompter Question Box -->
+        <div class="bg-black border border-borderDark rounded-2xl p-4 mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-mono font-bold text-neonAmber uppercase tracking-wider" id="prompterTypeBadge">TOSS-UP (MULTIPLE CHOICE)</span>
+            <div class="flex items-center space-x-2 text-xs font-mono">
+              <button onclick="prevQuestion(); playSound('click');" class="px-2 py-0.5 bg-panel border border-borderDark rounded hover:text-neonCyan">&larr; Prev</button>
+              <span class="text-slate-400">Q <span id="qIndexNum">1</span> / 25</span>
+              <button onclick="nextQuestion(); playSound('click');" class="px-2 py-0.5 bg-panel border border-borderDark rounded hover:text-neonCyan">Next &rarr;</button>
+            </div>
+          </div>
+          <div id="hudPrompterText" class="text-sm md:text-base font-sans text-slate-200 leading-relaxed min-h-[46px]">
+            Click <strong class="text-neonCyan">"START TOSSUP"</strong> below to stream the question or use spacebar to buzz.
+          </div>
+          <div id="hudAnswerRevealed" class="mt-2.5 pt-2 border-t border-borderDark text-xs font-mono text-neonGreen hidden flex items-center justify-between">
+            <div><span class="text-slate-400">ANSWER:</span> <span id="hudAnswerValue" class="font-bold">PLANCK'S CONSTANT</span></div>
+            <button onclick="toggleAnswerVisibility(); playSound('click');" class="text-slate-400 hover:text-white text-[10px]">HIDE</button>
+          </div>
+        </div>
+
+        <!-- Action Control Buttons Bar (Slide 5 Wireframe) -->
+        <div class="flex flex-wrap items-center gap-2.5 mb-4">
+          <button id="startTossupBtn" onclick="toggleTossupStream(); playSound('click');" class="flex-1 min-w-[160px] py-3 px-4 bg-neonGreen hover:bg-emerald-400 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-green transition flex items-center justify-center space-x-2">
+            <span id="startTossupBtnLabel">▶ START TOSSUP</span>
+          </button>
+          <button onclick="pauseTossupStream(); playSound('click');" class="py-3 px-4 bg-black border border-borderDark text-slate-300 hover:text-white font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition">
+            ❚❚ PAUSE
+          </button>
+          <button onclick="simulateForceBuzz('A'); playSound('buzz');" class="py-3 px-4 bg-black border border-neonCyan text-neonCyan hover:bg-neonCyan hover:text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-cyan">
+            FORCE BUZZ A
+          </button>
+          <button onclick="simulateForceBuzz('B'); playSound('buzz');" class="py-3 px-4 bg-black border border-neonAmber text-neonAmber hover:bg-neonAmber hover:text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-amber">
+            FORCE BUZZ B
+          </button>
+          <button onclick="openModal('challengeModal'); playSound('click');" class="py-3 px-4 bg-black border border-neonPink text-neonPink hover:bg-neonPink hover:text-black font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition">
+            ⚠ CHALLENGE (PAUSE & SKIP)
+          </button>
+        </div>
+
+        <!-- Adjudication Scoring Bar (Reveals on Buzz) -->
+        <div id="adjudicationDrawer" class="bg-black border border-neonCyan rounded-xl p-3 mb-4 hidden flex-wrap items-center justify-between gap-3 shadow-neon-cyan">
+          <div class="flex items-center space-x-2">
+            <span class="text-xs font-mono font-bold text-neonCyan">ADJUDICATING:</span>
+            <span id="adjudicateTeamBadge" class="px-2.5 py-0.5 rounded text-xs font-mono font-black bg-black text-neonCyan border border-neonCyan">TEAM A</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button onclick="awardScoreToBuzzer(true, 4); playSound('correct');" class="px-3 py-1.5 bg-neonGreen hover:bg-emerald-400 text-black text-xs font-mono font-black rounded-lg active:scale-95 transition shadow-neon-green">
+              +4 CORRECT
+            </button>
+            <button onclick="awardScoreToBuzzer(true, 10); playSound('correct');" class="px-3 py-1.5 bg-neonCyan hover:bg-cyan-300 text-black text-xs font-mono font-black rounded-lg active:scale-95 transition shadow-neon-cyan">
+              +10 BONUS
+            </button>
+            <button onclick="awardScoreToBuzzer(false, -5); playSound('click');" class="px-3 py-1.5 bg-neonPink hover:bg-rose-600 text-white text-xs font-mono font-black rounded-lg active:scale-95 transition shadow-neon-pink">
+              -5 INTERRUPT NEG
+            </button>
+            <button onclick="awardScoreToBuzzer(false, 0); playSound('click');" class="px-3 py-1.5 bg-panel border border-borderDark text-slate-300 text-xs font-mono rounded-lg active:scale-95 transition">
+              0 INCORRECT
+            </button>
+          </div>
+        </div>
+
+        <!-- MATCH EVENT SCORE SHEET (Slide 5 Wireframe) -->
+        <div class="border-t border-borderDark pt-3">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-mono font-bold text-slate-300 tracking-wider">MATCH EVENT SCORE SHEET</span>
+            <button onclick="addFakeScoreEvent(); playSound('click');" class="text-[10px] font-mono text-neonCyan hover:underline">+ Log Manual Note</button>
+          </div>
+          <!-- Clickable Player Roster Chips -->
+          <div class="flex flex-wrap items-center justify-between gap-2 p-2 bg-black border border-borderDark rounded-xl mb-2 text-xs font-mono">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="text-neonCyan font-bold mr-1">TEAM A:</span>
+              <button onclick="quickPlayerAward('Team A: P1'); playSound('click');" class="px-2 py-0.5 rounded bg-panel hover:bg-neonCyan/20 text-slate-300 hover:text-neonCyan border border-borderDark">P1: Alex</button>
+              <button onclick="quickPlayerAward('Team A: Captain'); playSound('click');" class="px-2 py-0.5 rounded bg-black text-neonCyan border border-neonCyan font-bold">C: Captain</button>
+              <button onclick="quickPlayerAward('Team A: P3'); playSound('click');" class="px-2 py-0.5 rounded bg-panel hover:bg-neonCyan/20 text-slate-300 hover:text-neonCyan border border-borderDark">P3: Chen</button>
+              <button onclick="quickPlayerAward('Team A: P4'); playSound('click');" class="px-2 py-0.5 rounded bg-panel hover:bg-neonCyan/20 text-slate-300 hover:text-neonCyan border border-borderDark">P4: Maya</button>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="text-neonAmber font-bold mr-1">TEAM B:</span>
+              <button onclick="quickPlayerAward('Team B: P1'); playSound('click');" class="px-2 py-0.5 rounded bg-panel hover:bg-neonAmber/20 text-slate-300 hover:text-neonAmber border border-borderDark">P1: Dave</button>
+              <button onclick="quickPlayerAward('Team B: Captain'); playSound('click');" class="px-2 py-0.5 rounded bg-black text-neonAmber border border-neonAmber font-bold">C: Captain</button>
+              <button onclick="quickPlayerAward('Team B: P3'); playSound('click');" class="px-2 py-0.5 rounded bg-panel hover:bg-neonAmber/20 text-slate-300 hover:text-neonAmber border border-borderDark">P3: Eric</button>
+              <button onclick="quickPlayerAward('Team B: P4'); playSound('click');" class="px-2 py-0.5 rounded bg-panel hover:bg-neonAmber/20 text-slate-300 hover:text-neonAmber border border-borderDark">P4: Fiona</button>
+            </div>
+          </div>
+          <!-- Log feed -->
+          <div id="matchLogContainer" class="bg-black border border-borderDark rounded-xl p-3 max-h-24 overflow-y-auto space-y-1 text-xs font-mono text-slate-400">
+            <div class="text-slate-500 italic text-center">MATCH DATA WILL POPULATE HERE...</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 6: ONLINE PRE MATCH SETTINGS (MOD)   -->
+    <!-- ========================================== -->
+    <section id="slide-6" class="slide-view hidden py-8 transition-all duration-300">
+      <div class="max-w-xl mx-auto bg-panel border border-neonAmber/50 rounded-3xl p-8 shadow-neon-amber">
+        <div class="text-center mb-8">
+          <h2 class="text-2xl md:text-3xl font-black font-display text-white mb-2">Online Pre Match Settings (moderator)</h2>
+          <p class="text-xs text-slate-400 font-mono">Upload parsed packets and tune lockout parameters before opening lobby.</p>
+        </div>
+
+        <!-- Wireframe Slide 6: "Upload a parsed packet" Dropzone -->
+        <div onclick="simulatePacketUploadSlide6(); playSound('click');" class="border-2 border-dashed border-borderDark hover:border-neonAmber rounded-2xl p-8 text-center transition cursor-pointer bg-black/60 hover:bg-black group mb-6">
+          <div class="w-14 h-14 mx-auto rounded-2xl bg-black border border-neonAmber text-neonAmber flex items-center justify-center mb-4 group-hover:scale-110 transition shadow-neon-amber">
+            <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+          </div>
+          <h4 class="text-base font-bold text-white mb-1 font-display">Upload a parsed packet</h4>
+          <p class="text-xs text-slate-400 font-mono">Click to browse or drop Slopbowl .json / .txt question package</p>
+          <div id="slide6UploadPill" class="mt-3 text-xs font-mono text-neonGreen font-semibold hidden">
+            ✓ 2024 NSB National Packet parsed (25 Tossups / 25 Bonuses ready)
+          </div>
+        </div>
+
+        <!-- Quick Packet Presets (Clickable) -->
+        <div class="mb-6 space-y-2">
+          <label class="block text-[11px] font-mono text-slate-400 uppercase">Or Choose Instant Preset</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button onclick="selectSlide6Preset('NSB 2024'); playSound('click');" class="p-2 text-xs font-mono bg-black border border-borderDark hover:border-neonAmber rounded-xl text-slate-300 hover:text-neonAmber active:scale-95">
+              NSB 2024
+            </button>
+            <button onclick="selectSlide6Preset('ACF 2023'); playSound('click');" class="p-2 text-xs font-mono bg-black border border-borderDark hover:border-neonAmber rounded-xl text-slate-300 hover:text-neonAmber active:scale-95">
+              ACF 2023
+            </button>
+            <button onclick="selectSlide6Preset('PACE 2024'); playSound('click');" class="p-2 text-xs font-mono bg-black border border-borderDark hover:border-neonAmber rounded-xl text-slate-300 hover:text-neonAmber active:scale-95">
+              PACE 2024
+            </button>
+          </div>
+        </div>
+
+        <button onclick="navigateTo(7); playSound('click'); showToast('Opening Match Lobby 277188...');" class="w-full py-3.5 bg-neonAmber hover:bg-amber-400 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-amber transition flex items-center justify-center space-x-2">
+          <span>Proceed to Lobby (Slide 7) &rarr;</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 7: ONLINE PRE MATCH (MODERATOR)      -->
+    <!-- ========================================== -->
+    <section id="slide-7" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="bg-panel border border-borderDark rounded-3xl p-4 md:p-6 shadow-2xl max-w-6xl mx-auto w-full">
+        <!-- Top Bar (Slide 7 Wireframe): 2 7 7 1 8 8, 53 MS, Settings, Switch moderator, Start Match -->
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-borderDark pb-4 mb-6">
+          <div class="flex items-center space-x-2">
+            <div onclick="copyPinCode('277188'); playSound('click');" class="cursor-pointer flex space-x-1.5 bg-black px-4 py-2 rounded-xl border border-neonCyan shadow-neon-cyan hover:scale-105 active:scale-95 transition" title="Click to Copy PIN">
+              <span class="font-mono text-neonCyan text-xl font-black tracking-widest">2 7 7 1 8 8</span>
+            </div>
+            <button onclick="copyPinCode('277188'); playSound('click');" class="p-2 text-slate-400 hover:text-neonCyan bg-black rounded-lg border border-borderDark active:scale-95">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            </button>
+          </div>
+
+          <!-- Rule Toggles: No Halves / Manual (Slide 7 Wireframe) -->
+          <div class="flex items-center space-x-2">
+            <button onclick="toggleHalvesRule(); playSound('click');" id="halvesRuleBtn" class="px-2.5 py-1 text-xs font-mono bg-black border border-borderDark text-slate-300 hover:text-white rounded-lg active:scale-95">
+              No Halves
+            </button>
+            <button onclick="toggleTimerRule(); playSound('click');" id="timerRuleBtn" class="px-2.5 py-1 text-xs font-mono bg-black border border-borderDark text-slate-300 hover:text-white rounded-lg active:scale-95">
+              Manual
+            </button>
+          </div>
+
+          <div class="flex items-center space-x-2 sm:space-x-3">
+            <div onclick="simulatePingRefresh(); playSound('click');" class="cursor-pointer flex items-center space-x-1.5 text-xs font-mono text-neonGreen bg-black px-2.5 py-1 rounded-lg border border-neonGreen/50 active:scale-95">
+              <span class="w-2 h-2 rounded-full bg-neonGreen animate-pulse"></span>
+              <span id="lobbyPing7">53 MS</span>
+            </div>
+            <button onclick="navigateTo(2); playSound('click');" class="text-xs font-mono text-slate-300 bg-black px-3 py-1.5 rounded-lg border border-borderDark hover:text-neonCyan active:scale-95">
+              ⚙ Settings
+            </button>
+            <button onclick="switchModeratorAuthority(); playSound('click');" class="text-xs font-mono text-slate-300 bg-black px-3 py-1.5 rounded-lg border border-borderDark hover:text-neonAmber active:scale-95">
+              ⇄ Switch moderator
+            </button>
+            <button onclick="navigateTo(9); playSound('click'); showToast('Match launched!');" class="px-4 py-1.5 bg-neonGreen hover:bg-emerald-400 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-lg shadow-neon-green transition">
+              Start Match
+            </button>
+          </div>
+        </div>
+
+        <div class="text-center mb-6">
+          <h3 class="text-2xl md:text-3xl font-bold font-display text-white">Start Match</h3>
+          <p class="text-xs text-slate-400 font-mono">Moderator Lobby • 2 Pods Connected</p>
+        </div>
+
+        <!-- Team Pods for Team A and Team B (Slide 7 Wireframe) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          <!-- Team A Pod -->
+          <div class="bg-black rounded-2xl border-2 border-neonCyan p-5 shadow-neon-cyan">
+            <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
+              <input type="text" value="Team A" class="text-lg font-bold font-display text-neonCyan bg-transparent border-b border-dashed border-neonCyan/40 focus:outline-none">
+              <span class="text-lg font-mono font-bold text-neonCyan">0</span>
+            </div>
+            <div class="space-y-2 text-xs font-mono" id="modTeamAList">
+              <div class="flex items-center justify-between p-2.5 bg-panel rounded border border-borderDark">
+                <span class="text-slate-300">Open Slot 1</span>
+                <button onclick="claimModSeat('A', 1); playSound('click');" class="px-2 py-0.5 text-[10px] bg-black border border-neonCyan text-neonCyan rounded hover:bg-neonCyan hover:text-black">Claim CPT</button>
+              </div>
+            </div>
+            <button onclick="addBotToTeam('A'); playSound('click');" class="w-full mt-3 py-1.5 text-xs font-mono text-slate-400 hover:text-neonCyan bg-panel border border-borderDark rounded-lg active:scale-95">
+              + Fill Slot with Practice Bot
+            </button>
+          </div>
+
+          <!-- Team B Pod -->
+          <div class="bg-black rounded-2xl border-2 border-neonAmber p-5 shadow-neon-amber">
+            <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
+              <input type="text" value="Team B" class="text-lg font-bold font-display text-neonAmber bg-transparent border-b border-borderDark focus:outline-none">
+              <span class="text-lg font-mono font-bold text-neonAmber">0</span>
+            </div>
+            <div class="space-y-2 text-xs font-mono" id="modTeamBList">
+              <div class="flex items-center justify-between p-2.5 bg-panel rounded border border-borderDark">
+                <span class="text-slate-300">Open Slot 1</span>
+                <button onclick="claimModSeat('B', 1); playSound('click');" class="px-2 py-0.5 text-[10px] bg-black border border-neonAmber text-neonAmber rounded hover:bg-neonAmber hover:text-black">Claim CPT</button>
+              </div>
+            </div>
+            <button onclick="addBotToTeam('B'); playSound('click');" class="w-full mt-3 py-1.5 text-xs font-mono text-slate-400 hover:text-neonAmber bg-panel border border-borderDark rounded-lg active:scale-95">
+              + Fill Slot with Practice Bot
+            </button>
+          </div>
+        </div>
+
+        <!-- Spectators & Warning (Slide 7 Wireframe) -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between text-xs font-mono">
+            <span class="text-slate-400">Spectators (1): <span class="text-slate-200 bg-black px-2 py-0.5 rounded border border-borderDark">scibowl gooner</span></span>
+            <button onclick="showToast('Invitation link generated!'); playSound('click');" class="text-neonCyan hover:underline">+ Invite Link</button>
+          </div>
+          <div class="p-3 bg-black border border-neonAmber text-neonAmber text-xs font-mono rounded-xl flex items-center justify-between">
+            <span>Notice: Both teams need at least 1 player to start.</span>
+            <button onclick="autoFillBothTeams(); playSound('click');" class="px-2 py-1 bg-neonAmber text-black font-black text-[10px] rounded active:scale-95">
+              Auto-Fill Now
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 8: ONLINE PRE MATCH (PLAYER)         -->
+    <!-- ========================================== -->
+    <section id="slide-8" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="bg-panel border border-borderDark rounded-3xl p-4 md:p-6 shadow-2xl max-w-5xl mx-auto w-full">
+        <!-- Top Bar (Slide 8 Wireframe): PIN, 40 MS, Spectate -->
+        <div class="flex items-center justify-between border-b border-borderDark pb-4 mb-6">
+          <div class="flex items-center space-x-2">
+            <div onclick="copyPinCode('277188'); playSound('click');" class="cursor-pointer bg-black px-4 py-2 rounded-xl border border-neonCyan shadow-neon-cyan active:scale-95 transition" title="Copy Room PIN">
+              <span class="font-mono text-neonCyan text-xl font-black tracking-widest">2 7 7 1 8 8</span>
+            </div>
+            <button onclick="copyPinCode('277188'); playSound('click');" class="p-2 text-slate-400 hover:text-neonCyan bg-black rounded-lg border border-borderDark active:scale-95">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            </button>
+          </div>
+
+          <div class="flex items-center space-x-3">
+            <div onclick="simulatePingRefresh(); playSound('click');" class="cursor-pointer flex items-center space-x-1.5 text-xs font-mono text-neonGreen bg-black px-2.5 py-1 rounded-lg border border-neonGreen/50 active:scale-95">
+              <span class="w-2 h-2 rounded-full bg-neonGreen animate-pulse"></span>
+              <span id="playerPingVal">40 MS</span>
+            </div>
+            <button onclick="toggleSpectatorRole(); playSound('click');" id="spectateToggleBtn" class="flex items-center space-x-1 text-xs font-mono text-slate-300 bg-black px-3 py-1.5 rounded-lg border border-borderDark hover:text-white active:scale-95 transition">
+              <span>👁 Spectate</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="text-center mb-8">
+          <h2 class="text-3xl font-black font-display text-white">Online Pre match (Player)</h2>
+          <p class="text-xs text-slate-400 font-mono">Select your competitive pod or claim captain rights.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <!-- Team A Pod (Slide 8 Wireframe) -->
+          <div class="bg-black rounded-2xl border-2 border-neonCyan p-5 shadow-neon-cyan flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
+                <span class="text-xl font-bold font-display text-neonCyan">Team A</span>
+                <span class="text-lg font-mono font-bold text-neonCyan">0</span>
+              </div>
+              <div class="flex items-center justify-between p-2.5 bg-panel rounded-xl text-xs font-mono mb-4 border border-borderDark">
+                <span id="playerAStatus" class="text-slate-400">Open Slot</span>
+                <button onclick="claimCaptainPlayer('A'); playSound('click');" id="claimCaptainBtnA" class="px-2.5 py-1 bg-black border border-neonCyan text-neonCyan text-[10px] font-black rounded hover:bg-neonCyan hover:text-black active:scale-95 transition">
+                  Claim captain CPT
+                </button>
+              </div>
+            </div>
+            <button onclick="joinTeamAsPlayer('A'); playSound('click');" id="joinTeamBtnA" class="w-full py-3 bg-neonCyan hover:bg-cyan-300 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl transition shadow-neon-cyan">
+              Join Team A
+            </button>
+          </div>
+
+          <!-- Team B Pod (Slide 8 Wireframe) -->
+          <div class="bg-black rounded-2xl border-2 border-neonAmber p-5 shadow-neon-amber flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
+                <span class="text-xl font-bold font-display text-neonAmber">Team B</span>
+                <span class="text-lg font-mono font-bold text-neonAmber">0</span>
+              </div>
+              <div class="flex items-center justify-between p-2.5 bg-panel rounded-xl text-xs font-mono mb-4 border border-borderDark">
+                <span id="playerBStatus" class="text-slate-400">Open Slot</span>
+                <button onclick="claimCaptainPlayer('B'); playSound('click');" id="claimCaptainBtnB" class="px-2.5 py-1 bg-black border border-neonAmber text-neonAmber text-[10px] font-black rounded hover:bg-neonAmber hover:text-black active:scale-95 transition">
+                  Claim captain CPT
+                </button>
+              </div>
+            </div>
+            <button onclick="joinTeamAsPlayer('B'); playSound('click');" id="joinTeamBtnB" class="w-full py-3 bg-neonAmber hover:bg-amber-400 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl transition shadow-neon-amber">
+              Join Team B
+            </button>
+          </div>
+        </div>
+
+        <div class="border-t border-borderDark pt-4 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center space-x-2 text-xs font-mono text-slate-400">
+            <span>Spectators (1):</span>
+            <span class="text-slate-200">scibowl gooner</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button onclick="toggleReadyState(); playSound('click');" id="playerReadyBtn" class="px-4 py-2.5 bg-black border border-neonGreen text-neonGreen font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition">
+              Ready Up (Toggle)
+            </button>
+            <button onclick="navigateTo(9); playSound('click'); showToast('Entering Arena...');" class="px-6 py-2.5 bg-neonGreen hover:bg-emerald-400 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-green transition">
+              Proceed to Arena Screen (Slide 9) &rarr;
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 9: ONLINE PLAYING SCREEN             -->
+    <!-- ========================================== -->
+    <section id="slide-9" class="slide-view hidden py-2 transition-all duration-300">
+      <div class="bg-panel border border-neonCyan/40 rounded-3xl p-4 md:p-6 shadow-neon-cyan relative">
+        <!-- Top Bar (Slide 9 Wireframe) -->
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-borderDark pb-4 mb-4">
+          <div class="flex items-center space-x-3">
+            <span class="px-2.5 py-1 bg-black border border-neonAmber text-neonAmber text-[11px] font-mono font-black rounded-md shadow-neon-amber">
+              LIVE QUESTION
+            </span>
+            <span class="text-xs font-mono text-slate-400 uppercase">CURRENT STAGE: <span class="text-white font-bold">ONLINE TOSS-UP</span></span>
+          </div>
+
+          <div class="flex items-center space-x-4 bg-black px-6 py-2 rounded-2xl border border-borderDark shadow-inner">
+            <div class="text-center">
+              <span class="text-[10px] font-mono text-neonCyan font-black block">TEAM A</span>
+              <span class="text-3xl font-mono font-black text-neonCyan digital-lcd" id="slide9ScoreA">0</span>
+            </div>
+            <span class="text-slate-600 font-bold text-2xl">-</span>
+            <div class="text-center">
+              <span class="text-[10px] font-mono text-neonAmber font-black block">TEAM B</span>
+              <span class="text-3xl font-mono font-black text-neonAmber digital-lcd" id="slide9ScoreB">0</span>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-neonGreen animate-ping"></span>
+            <span class="text-xs font-mono font-bold text-neonGreen uppercase tracking-wider">STATUS: LIVE ROUND</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-4">
+          <!-- Action Clock Display (Slide 9 Wireframe) -->
+          <div class="lg:col-span-7 bg-black rounded-2xl border border-borderDark p-5 flex flex-col justify-between relative overflow-hidden">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-neonCyan tracking-widest font-black uppercase">ACTION CLOCK</span>
+              <span class="text-xs font-mono text-slate-400">5.0s Response Window</span>
+            </div>
+
+            <div class="py-5 flex flex-col items-center justify-center">
+              <div class="text-5xl md:text-6xl font-mono font-black text-white digital-lcd mb-4 tracking-widest" id="slide9ActionDigit">
+                --
+              </div>
+              <div class="w-full bg-surface h-3 rounded-full overflow-hidden border border-borderDark p-0.5">
+                <div id="slide9ProgressBar" class="h-full bg-gradient-to-r from-neonCyan to-neonGreen rounded-full w-full transition-all duration-100 ease-linear shadow-neon-cyan"></div>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 pt-2 text-[11px] font-mono border-t border-borderDark">
+              <div class="px-2.5 py-1 bg-panel rounded border border-borderDark">
+                <span class="text-slate-400">FLOOR:</span>
+                <span id="slide9FloorLabel" class="text-white font-bold">CLEAR</span>
+              </div>
+              <div class="px-2.5 py-1 bg-panel rounded border border-borderDark">
+                <span class="text-slate-400">INTERRUPT:</span>
+                <span id="slide9InterruptLabel" class="text-neonCyan font-bold">--</span>
+              </div>
+              <div class="px-2.5 py-1 bg-panel rounded border border-borderDark">
+                <span class="text-slate-400">OUTCOME:</span>
+                <span id="slide9OutcomeLabel" class="text-neonAmber font-bold">PENDING</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tactile Giant Buzz Button (Slide 9 Wireframe: "Buzz") & Clocks -->
+          <div class="lg:col-span-5 flex flex-col gap-3">
+            <div class="bg-black rounded-2xl border border-borderDark p-4 flex flex-col items-center justify-center relative overflow-hidden group">
+              <div class="w-full flex items-center justify-between mb-2">
+                <span class="text-[10px] font-mono text-slate-400">HOTKEY: [SPACEBAR]</span>
+                <span class="text-[10px] font-mono font-bold text-neonCyan">BUZZER ARMED</span>
+              </div>
+
+              <!-- Tactile Buzzer Button (Clickable + Spacebar) -->
+              <button id="slide9GiantBuzzBtn" onclick="handleTactileBuzzSlide9(); playSound('buzz');" class="w-full h-32 md:h-36 rounded-2xl bg-gradient-to-b from-slate-900 via-black to-slate-950 hover:border-neonCyan border-4 border-borderDark text-white hover:text-neonCyan font-display font-black text-4xl md:text-5xl tracking-wider transition-all duration-150 shadow-2xl flex items-center justify-center relative cursor-pointer active:scale-95 group">
+                <span class="relative z-10 font-black">Buzz</span>
+                <div class="absolute inset-0 bg-neonCyan/10 opacity-0 group-hover:opacity-100 transition"></div>
+              </button>
+
+              <span class="text-[10px] font-mono text-slate-400 mt-2">Latency: <span class="text-neonGreen">38ms</span> | Optical Sync: Active</span>
+            </div>
+
+            <div class="bg-black rounded-2xl border border-borderDark p-3 flex items-center justify-between text-center">
+              <div>
+                <span class="text-[10px] font-mono text-slate-400 tracking-widest uppercase block">MATCH CLOCK</span>
+                <div class="text-2xl font-mono font-black text-neonCyan digital-lcd tracking-widest">
+                  07:55
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="text-[10px] font-mono text-slate-400 tracking-widest uppercase block">ROLE</span>
+                <span class="text-xs font-mono font-bold text-neonCyan bg-black px-2 py-0.5 rounded border border-neonCyan">TEAM A PLAYER</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls Row -->
+        <div class="flex flex-wrap items-center gap-3 mb-4">
+          <button onclick="toggleTossupStream(); playSound('click');" class="flex-1 min-w-[150px] py-3 px-4 bg-neonGreen hover:bg-emerald-400 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-green transition">
+            ▶ START TOSS-UP
+          </button>
+          <button onclick="pauseTossupStream(); playSound('click');" class="py-3 px-4 bg-black border border-borderDark text-slate-300 font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition">
+            ❚❚ PAUSE
+          </button>
+          <button onclick="simulateForceBuzz('A'); playSound('buzz');" class="py-3 px-4 bg-black border border-neonCyan text-neonCyan hover:bg-neonCyan hover:text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-cyan">
+            FORCE BUZZ A
+          </button>
+          <button onclick="simulateForceBuzz('B'); playSound('buzz');" class="py-3 px-4 bg-black border border-neonAmber text-neonAmber hover:bg-neonAmber hover:text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-amber">
+            FORCE BUZZ B
+          </button>
+          <button onclick="openModal('challengeModal'); playSound('click');" class="py-3 px-4 bg-black border border-neonPink text-neonPink hover:bg-neonPink hover:text-black font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition">
+            ⚠ CHALLENGE
+          </button>
+        </div>
+
+        <div class="border-t border-borderDark pt-3">
+          <div class="bg-black border border-borderDark rounded-xl p-3 text-center text-slate-500 text-xs font-mono">
+            MATCH DATA WILL POPULATE HERE...
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 10: SOLO PRACTICE SETUP SCREEN       -->
+    <!-- ========================================== -->
+    <section id="slide-10" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-4xl mx-auto bg-panel border-2 border-neonGreen/60 rounded-3xl p-6 sm:p-8 shadow-neon-green relative">
+        <div class="flex items-center justify-between border-b border-borderDark pb-5 mb-6">
+          <div class="flex items-center space-x-3">
+            <div class="w-12 h-12 rounded-2xl bg-black border border-neonGreen text-neonGreen flex items-center justify-center shadow-neon-green text-2xl font-black">
+              ⚡
+            </div>
+            <div>
+              <div class="flex items-center space-x-2">
+                <h2 class="text-2xl sm:text-3xl font-black font-display text-white">Solo Practice Setup</h2>
+                <span class="px-2 py-0.5 text-[9px] font-mono font-bold bg-black text-neonGreen border border-neonGreen rounded-full uppercase">
+                  DRILL ENGINE
+                </span>
+              </div>
+              <p class="text-xs text-slate-400 font-mono">Configure stimulus delivery modes and response capture mechanisms.</p>
+            </div>
+          </div>
+          <button onclick="navigateTo(1); playSound('click');" class="text-xs font-mono text-slate-400 hover:text-white bg-black px-3 py-1.5 rounded-lg border border-borderDark active:scale-95">
+            &larr; Hub
+          </button>
+        </div>
+
+        <div class="space-y-6">
+          <!-- Parameter 1: Question Output Mode (Spoken vs Typed vs Hybrid) -->
+          <div class="bg-black/90 rounded-2xl border border-borderDark p-5">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-mono font-bold text-neonCyan uppercase tracking-wider">
+                1. QUESTION OUTPUT MODE (STIMULUS DELIVERY)
+              </span>
+              <span class="text-[10px] font-mono text-slate-400">Audio Synth / Teleprompter</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <!-- Spoken Output Card -->
+              <div onclick="selectSoloOutput('spoken'); playSound('click');" id="outCard-spoken" class="cursor-pointer p-4 rounded-xl border border-borderDark bg-panel hover:border-neonCyan transition active:scale-95 group">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-xl">🗣</span>
+                  <span class="out-indicator w-3.5 h-3.5 rounded-full border border-slate-500"></span>
+                </div>
+                <span class="text-xs font-bold text-white group-hover:text-neonCyan transition font-display block">Spoken Output</span>
+                <span class="text-[11px] text-slate-400 mt-1 leading-snug font-sans block">
+                  Voice synthesizes question aloud with zero visible text. Auditory interrupt speed practice.
+                </span>
+              </div>
+
+              <!-- Typed Text Output Card -->
+              <div onclick="selectSoloOutput('text'); playSound('click');" id="outCard-text" class="cursor-pointer p-4 rounded-xl border border-borderDark bg-panel hover:border-neonCyan transition active:scale-95 group">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-xl">📜</span>
+                  <span class="out-indicator w-3.5 h-3.5 rounded-full border border-slate-500"></span>
+                </div>
+                <span class="text-xs font-bold text-white group-hover:text-neonCyan transition font-display block">Typed Text Output</span>
+                <span class="text-[11px] text-slate-400 mt-1 leading-snug font-sans block">
+                  Silent high-speed word-by-word streaming teleprompter. Perfect for fast speed-reading drills.
+                </span>
+              </div>
+
+              <!-- Hybrid Mode Card (Default Active) -->
+              <div onclick="selectSoloOutput('hybrid'); playSound('click');" id="outCard-hybrid" class="cursor-pointer p-4 rounded-xl border border-neonCyan bg-panel shadow-neon-cyan transition active:scale-95 group">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-xl">⚡</span>
+                  <span class="out-indicator w-3.5 h-3.5 rounded-full border-2 border-neonCyan bg-neonCyan"></span>
+                </div>
+                <span class="text-xs font-bold text-neonCyan transition font-display block">Hybrid Mode</span>
+                <span class="text-[11px] text-slate-400 mt-1 leading-snug font-sans block">
+                  Simultaneous spoken voice + synchronized word highlighting. Full competition emulation.
+                </span>
+              </div>
+            </div>
+
+            <!-- Voice Synthesizer Controls -->
+            <div class="mt-4 pt-3 border-t border-borderDark grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+              <div>
+                <label class="block text-[10px] font-mono text-slate-400 uppercase mb-1">Synthesizer Voice</label>
+                <select id="soloVoiceDropdown" class="w-full bg-black border border-borderDark rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-mono focus:outline-none">
+                  <option>System Default (English)</option>
+                  <option>Natural Neural Voice 1</option>
+                  <option>Esports Fast-Pace Reader</option>
+                </select>
+              </div>
+              <div>
+                <div class="flex justify-between text-[10px] font-mono text-slate-400 uppercase mb-1">
+                  <span>Speech Rate</span>
+                  <span id="rateLabelVal" class="text-neonCyan">1.1x</span>
+                </div>
+                <input type="range" min="0.8" max="1.8" step="0.1" value="1.1" oninput="document.getElementById('rateLabelVal').textContent = this.value + 'x'" class="w-full accent-neonCyan">
+              </div>
+              <div class="flex sm:justify-end items-end h-full">
+                <button onclick="testVoiceSynthesis(); playSound('click');" class="w-full sm:w-auto px-4 py-2 bg-black border border-neonCyan text-neonCyan hover:bg-neonCyan hover:text-black text-xs font-mono font-bold rounded-lg transition active:scale-95 shadow-sm">
+                  🔊 Test Voice Synth
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Parameter 2: Answer Input Mode (Microphone vs Typed Terminal) -->
+          <div class="bg-black/90 rounded-2xl border border-borderDark p-5">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-mono font-bold text-neonAmber uppercase tracking-wider">
+                2. ANSWER INPUT MODE (RESPONSE CAPTURE)
+              </span>
+              <span class="text-[10px] font-mono text-slate-400">Microphone / Keyboard</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <!-- Audio Input (Mic Speech Recognition) -->
+              <div onclick="selectSoloInput('audio'); playSound('click');" id="inCard-audio" class="cursor-pointer p-4 rounded-xl border border-borderDark bg-panel hover:border-neonAmber transition active:scale-95 group">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-xl">🎙</span>
+                  <span class="in-indicator w-3.5 h-3.5 rounded-full border border-slate-500"></span>
+                </div>
+                <span class="text-xs font-bold text-white group-hover:text-neonAmber transition font-display block">Audio Input (Microphone Speech)</span>
+                <span class="text-[11px] text-slate-400 mt-1 leading-snug font-sans block">
+                  Buzz in and speak your answer directly into the mic. Web Speech Recognition transcribes answer.
+                </span>
+                <div class="mt-3 pt-2 border-t border-borderDark flex items-center justify-between">
+                  <span class="text-[10px] font-mono text-neonAmber">Speech Recognition Active</span>
+                  <button type="button" onclick="testMicHardware(event); playSound('click');" class="text-[10px] font-mono text-white bg-black px-2 py-1 rounded border border-neonAmber/60 hover:bg-neonAmber hover:text-black active:scale-95">
+                    Test Mic
+                  </button>
+                </div>
+              </div>
+
+              <!-- Typed Input (Terminal Command) - Default Active -->
+              <div onclick="selectSoloInput('typed'); playSound('click');" id="inCard-typed" class="cursor-pointer p-4 rounded-xl border border-neonAmber bg-panel shadow-neon-amber transition active:scale-95 group">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-xl">⌨</span>
+                  <span class="in-indicator w-3.5 h-3.5 rounded-full border-2 border-neonAmber bg-neonAmber"></span>
+                </div>
+                <span class="text-xs font-bold text-neonAmber transition font-display block">Typed Input (High-Speed Terminal)</span>
+                <span class="text-[11px] text-slate-400 mt-1 leading-snug font-sans block">
+                  Buzz in and immediately type answer in a neon terminal with an urgent 5.0s countdown.
+                </span>
+                <div class="mt-3 pt-2 border-t border-borderDark flex items-center justify-between">
+                  <span class="text-[10px] font-mono text-slate-400">Instant Keyword Matcher</span>
+                  <span class="text-[10px] font-mono text-neonAmber font-bold">Standard</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Parameter 3: Subject Focus & Speed Sliders -->
+          <div class="bg-black/90 rounded-2xl border border-borderDark p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-mono font-bold text-slate-300 uppercase mb-2">Subject Bank Focus</label>
+              <div class="flex flex-wrap gap-1.5">
+                <button onclick="setSoloSubject('All'); playSound('click');" id="subj-All" class="px-2.5 py-1 text-xs font-mono bg-neonGreen text-black font-bold rounded-lg">All</button>
+                <button onclick="setSoloSubject('Physics'); playSound('click');" id="subj-Physics" class="px-2.5 py-1 text-xs font-mono bg-panel border border-borderDark text-slate-300 rounded-lg hover:text-neonCyan">Physics</button>
+                <button onclick="setSoloSubject('Biology'); playSound('click');" id="subj-Biology" class="px-2.5 py-1 text-xs font-mono bg-panel border border-borderDark text-slate-300 rounded-lg hover:text-neonCyan">Biology</button>
+                <button onclick="setSoloSubject('Chemistry'); playSound('click');" id="subj-Chemistry" class="px-2.5 py-1 text-xs font-mono bg-panel border border-borderDark text-slate-300 rounded-lg hover:text-neonCyan">Chemistry</button>
+                <button onclick="setSoloSubject('Math'); playSound('click');" id="subj-Math" class="px-2.5 py-1 text-xs font-mono bg-panel border border-borderDark text-slate-300 rounded-lg hover:text-neonCyan">Math</button>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-xs font-mono font-bold text-slate-300 uppercase">Reading Pace (WPM)</label>
+                <span id="soloWpmDisplay" class="text-xs font-mono font-black text-neonGreen">260 WPM</span>
+              </div>
+              <input type="range" min="180" max="360" step="10" value="260" oninput="document.getElementById('soloWpmDisplay').textContent = this.value + ' WPM'" class="w-full accent-neonGreen">
+              <div class="flex justify-between text-[10px] font-mono text-slate-500 mt-1">
+                <button onclick="setWpmQuick(180); playSound('click');" class="hover:text-neonGreen">180 (Novice)</button>
+                <button onclick="setWpmQuick(260); playSound('click');" class="hover:text-neonGreen">260 (Collegiate)</button>
+                <button onclick="setWpmQuick(360); playSound('click');" class="hover:text-neonGreen">360 (Grandmaster)</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Launch CTA Button -->
+          <div class="pt-2">
+            <button onclick="launchSoloArena(); playSound('click');" class="w-full py-4 bg-neonGreen hover:bg-emerald-400 text-black font-mono font-black text-sm uppercase rounded-2xl shadow-neon-green transition flex items-center justify-center space-x-2 active:scale-95 cursor-pointer">
+              <span>⚡ ENTER PRACTICE ARENA (LAUNCH DRILL) &rarr;</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 11: SOLO PRACTICE ARENA              -->
+    <!-- ========================================== -->
+    <section id="slide-11" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-4xl mx-auto bg-panel border-2 border-neonGreen/70 rounded-3xl p-6 sm:p-8 shadow-neon-green relative">
+        <!-- Header with Metrics & Setup Button -->
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-borderDark pb-4 mb-6">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-black border border-neonGreen text-neonGreen flex items-center justify-center shadow-neon-green font-black">
+              ⚡
+            </div>
+            <div>
+              <div class="flex items-center space-x-2">
+                <h3 class="text-xl font-bold font-display text-white">Solo Practice Dojo</h3>
+                <span id="arenaSubjectPill" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-black text-neonGreen border border-neonGreen/60">
+                  PHYSICS
+                </span>
+              </div>
+              <div class="flex items-center space-x-2 text-[10px] font-mono text-slate-400 mt-0.5">
+                <span id="arenaOutputTag" class="text-neonCyan">OUTPUT: HYBRID</span>
+                <span>•</span>
+                <span id="arenaInputTag" class="text-neonAmber">INPUT: TYPED</span>
+                <span>•</span>
+                <span id="arenaWpmTag">260 WPM</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-2 sm:space-x-3">
+            <div class="bg-black px-3.5 py-1.5 rounded-xl border border-borderDark text-center">
+              <span class="text-[9px] font-mono text-slate-400 block">SCORE</span>
+              <span id="soloScoreCounter" class="text-lg font-mono font-black text-neonGreen">0</span>
+            </div>
+            <div class="bg-black px-3.5 py-1.5 rounded-xl border border-borderDark text-center">
+              <span class="text-[9px] font-mono text-slate-400 block">STREAK</span>
+              <span id="soloStreakCounter" class="text-lg font-mono font-black text-neonAmber">0</span>
+            </div>
+            <div class="bg-black px-3.5 py-1.5 rounded-xl border border-borderDark text-center">
+              <span class="text-[9px] font-mono text-slate-400 block">REACTION</span>
+              <span id="soloReactionDisplay" class="text-lg font-mono font-black text-neonCyan">--s</span>
+            </div>
+            <button onclick="navigateTo(10); playSound('click');" class="px-3 py-2 text-xs font-mono font-bold text-slate-300 hover:text-white bg-black border border-borderDark hover:border-neonGreen rounded-xl active:scale-95 transition">
+              ⚙ RECONFIG
+            </button>
+          </div>
+        </div>
+
+        <!-- Question Reader Box with Prompter -->
+        <div class="bg-black rounded-2xl border border-borderDark p-5 mb-5 relative overflow-hidden">
+          <div class="flex items-center justify-between mb-2.5 border-b border-borderDark/60 pb-2">
+            <span class="text-xs font-mono font-bold text-neonAmber uppercase tracking-wider" id="soloTossupTitle">
+              TOSS-UP #1 (MULTIPLE CHOICE)
+            </span>
+            <div class="flex items-center space-x-3 text-xs font-mono">
+              <span id="soloWordCounterTag" class="text-slate-500">Word 0 of 22</span>
+              <span class="text-slate-400">Lockout: <span id="soloClockNum" class="text-white font-bold">5.0s</span></span>
+            </div>
+          </div>
+
+          <div id="soloLivePrompter" class="text-base sm:text-lg font-sans text-slate-200 leading-relaxed min-h-[85px] flex items-center">
+            Click <strong>"START QUESTION DRILL"</strong> below or tap <strong>[SPACEBAR]</strong> to buzz in.
+          </div>
+
+          <div class="w-full bg-surface h-2 rounded-full overflow-hidden border border-borderDark mt-3">
+            <div id="soloTimerBar" class="h-full bg-gradient-to-r from-neonCyan to-neonGreen rounded-full w-full transition-all duration-100 ease-linear shadow-neon-cyan"></div>
+          </div>
+        </div>
+
+        <!-- Giant Solo Buzzer Button (Clickable + Spacebar) -->
+        <div class="mb-5 flex flex-col items-center justify-center">
+          <button id="soloLargeBuzzBtn" onclick="handleSoloBuzzPress(); playSound('buzz');" class="w-full py-5 rounded-2xl bg-gradient-to-b from-slate-900 via-black to-slate-950 border-4 border-borderDark hover:border-neonGreen text-white hover:text-neonGreen font-display font-black text-3xl sm:text-4xl tracking-widest transition-all duration-150 shadow-2xl active:scale-95 group relative overflow-hidden cursor-pointer">
+            <span class="relative z-10 font-black">⚡ BUZZ NOW (SPACEBAR)</span>
+            <div class="absolute inset-0 bg-neonGreen/10 opacity-0 group-hover:opacity-100 transition"></div>
+          </button>
+          <span class="text-[11px] font-mono text-slate-400 mt-2">
+            Press <strong class="text-neonCyan">[SPACEBAR]</strong> at any time during reading to lock out.
+          </span>
+        </div>
+
+        <!-- Typed Input Panel (Reveals on Buzz in Typed Mode) -->
+        <div id="soloTypedSection" class="bg-black rounded-2xl border-2 border-neonAmber p-4 mb-5 shadow-neon-amber hidden">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-mono font-bold text-neonAmber uppercase">TERMINAL ANSWER INPUT</span>
+            <span id="soloTypedCountdownTag" class="text-xs font-mono font-black text-neonPink">5.0s REMAINING</span>
+          </div>
+          <div class="flex space-x-2">
+            <input type="text" id="soloKeyboardInput" placeholder="Type answer keyword (e.g. Planck, Krebs cycle, Radon)..." class="flex-grow bg-panel border border-neonAmber rounded-xl px-4 py-2.5 text-sm font-mono text-white focus:outline-none">
+            <button onclick="submitSoloAnswer(); playSound('click');" class="px-5 py-2.5 bg-neonAmber hover:bg-amber-400 text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-amber">
+              SUBMIT (ENTER)
+            </button>
+          </div>
+        </div>
+
+        <!-- Audio Input Panel (Reveals on Buzz in Audio Mode) -->
+        <div id="soloAudioSection" class="bg-black rounded-2xl border-2 border-neonCyan p-4 mb-5 shadow-neon-cyan hidden">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-mono font-bold text-neonCyan uppercase flex items-center space-x-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-neonPink animate-ping"></span>
+              <span>LISTENING VIA MICROPHONE...</span>
+            </span>
+            <span id="soloAudioCountdownTag" class="text-xs font-mono font-black text-neonPink">5.0s REMAINING</span>
+          </div>
+          <div class="p-3 bg-panel rounded-xl border border-borderDark flex items-center justify-between mb-2">
+            <span class="text-xs font-mono text-slate-400">Captured Speech:</span>
+            <span id="soloTranscribedSpeech" class="text-sm font-mono font-bold text-neonCyan">"Planck's constant"</span>
+          </div>
+          <div class="text-right">
+            <button onclick="submitSoloAnswer(); playSound('click');" class="px-4 py-1.5 bg-neonCyan text-black font-mono font-bold text-xs rounded-lg active:scale-95 shadow-sm">
+              Confirm Transcript &rarr;
+            </button>
+          </div>
+        </div>
+
+        <!-- Result Banner -->
+        <div id="soloScoreBanner" class="p-4 rounded-xl font-mono text-xs hidden mb-5"></div>
+
+        <!-- Arena Control Buttons -->
+        <div class="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-borderDark">
+          <button id="soloStartDrillBtn" onclick="toggleSoloReading(); playSound('click');" class="px-5 py-2.5 bg-neonGreen hover:bg-emerald-400 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-green active:scale-95 transition">
+            ▶ START QUESTION DRILL
+          </button>
+          <div class="flex items-center space-x-2">
+            <button onclick="revealSoloAnswer(); playSound('click');" class="px-3.5 py-2.5 bg-black border border-borderDark text-slate-300 hover:text-white font-mono text-xs rounded-xl active:scale-95">
+              Reveal Answer
+            </button>
+            <button onclick="advanceNextSoloQuestion(); playSound('click');" class="px-4 py-2.5 bg-black border border-neonCyan text-neonCyan hover:bg-neonCyan hover:text-black font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition">
+              NEXT TOSSUP &rarr;
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ========================================== -->
+  <!-- PERSISTENT FLOATING SLIDE DOCK NAVIGATOR   -->
+  <!-- ========================================== -->
+  <aside class="sticky bottom-2 z-50 px-3 max-w-5xl mx-auto w-full">
+    <div class="bg-black/95 backdrop-blur-md border border-neonCyan/40 rounded-2xl p-2.5 shadow-2xl flex flex-wrap items-center justify-between gap-2 shadow-neon-cyan">
+      <div class="flex items-center space-x-2 px-2 hidden lg:flex">
+        <span class="w-2 h-2 rounded-full bg-neonCyan animate-ping"></span>
+        <span class="text-[11px] font-mono font-bold text-slate-300 uppercase tracking-wider">Slide Navigator:</span>
+      </div>
+
+      <!-- Slide Quick Jump Buttons (Slide 1 through Slide 11) -->
+      <div class="flex flex-wrap items-center gap-1.5 overflow-x-auto py-0.5 custom-scrollbar">
+        <button onclick="navigateTo(1); playSound('click');" id="nav-btn-1" class="nav-dock-btn px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition bg-neonCyan text-black shadow-neon-cyan active:scale-95">
+          1: Home
+        </button>
+        <button onclick="navigateTo(2); playSound('click');" id="nav-btn-2" class="nav-dock-btn px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition bg-panel hover:bg-panelHover text-slate-300 active:scale-95">
+          2: Settings
+        </button>
+        <button onclick="navigateTo(3); playSound('click');" id="nav-btn-3" class="nav-dock-btn px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition bg-panel hover:bg-panelHover text-slate-300 active:scale-95">
+          3: Online
+        </button>
+        <button onclick="navigateTo(4); playSound('click');" id="nav-btn-4" class="nav-dock-btn px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition bg-panel hover:bg-panelHover text-slate-300 active:scale-95">
+          4: Setup
+        </button>
+        <button onclick="navigateTo(5); playSound('click');" id="nav-btn-5" class="nav-dock-btn px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition bg-panel hover:bg-panelHover text-slate-300 active:scale-95">
+          5: Moderation
+        </button>
+        <button onclick="navigateTo(6); playSound('click');" id="nav-btn-6" class="nav-dock-btn px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition bg-panel hover:bg-panelHover text-slate-300 active:scale-95">
+          6: Pre-Match
+        </button>
+        <button onclick="navigateTo(7); playSound('click');" id="nav-btn-7" class="nav-dock-btn px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition bg-panel hover:bg-panelHover text-slate-300 active:scale-95">
+          7: Mod Lobby
+        </button>
+        <button onclick="navigateTo(8); playSound('click');" id="nav-btn-8" class="nav-dock-btn px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition bg-panel hover:bg-panelHover text-slate-300 active:scale-95">
+          8: Player Lobby
+        </button>
+        <button onclick="navigateTo(9); playSound('click');" id="nav-btn-9" class="nav-dock-btn px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition bg-panel hover:bg-panelHover text-slate-300 active:scale-95">
+          9: Buzz HUD
+        </button>
+        <button onclick="navigateTo(10); playSound('click');" id="nav-btn-10" class="nav-dock-btn px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition bg-neonGreen/20 text-neonGreen border border-neonGreen/50 active:scale-95">
+          10: Solo Setup
+        </button>
+        <button onclick="navigateTo(11); playSound('click');" id="nav-btn-11" class="nav-dock-btn px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition bg-neonAmber/20 text-neonAmber border border-neonAmber/50 active:scale-95">
+          11: Solo Arena
+        </button>
+      </div>
+
+      <!-- Quick Audio Synth Test / Mute -->
+      <button onclick="toggleAudioMute(); playSound('click');" id="soundMuteBtn" class="p-1.5 text-xs font-mono text-neonCyan bg-black border border-neonCyan/40 rounded-lg flex items-center space-x-1 active:scale-90 transition">
+        <span>🔊</span>
+        <span class="hidden sm:inline text-[10px] font-bold">Audio: ON</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- MODAL 1: SIGN IN -->
+  <div id="signInModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="bg-panel border border-neonCyan rounded-3xl max-w-sm w-full p-6 shadow-neon-cyan">
+      <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
+        <h3 class="text-base font-bold text-white font-display">Competitor Authorization</h3>
+        <button onclick="closeModal('signInModal'); playSound('click');" class="text-slate-400 hover:text-white">&times;</button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-[11px] font-mono text-slate-400 uppercase mb-1">Handle / Callsign</label>
+          <input type="text" id="modalAuthCallsign" value="QuantumBuzzer_9" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2 text-sm text-neonCyan font-mono focus:outline-none focus:border-neonCyan">
+        </div>
+        <div>
+          <label class="block text-[11px] font-mono text-slate-400 uppercase mb-1">PIN / Password</label>
+          <input type="password" value="••••••••" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2 text-sm text-slate-300 font-mono focus:outline-none">
+        </div>
+        <button onclick="submitUserSignIn(); playSound('click');" class="w-full py-2.5 bg-neonCyan hover:bg-cyan-300 text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-cyan">
+          Authorize Profile
+        </button>
+        <button onclick="closeModal('signInModal'); showToast('Guest session started'); playSound('click');" class="w-full py-2 bg-black border border-borderDark text-slate-400 text-xs font-mono rounded-xl active:scale-95">
+          Continue as Guest
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 2: PACKET CONVERTER -->
+  <div id="converterModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="bg-panel border border-neonCyan rounded-3xl max-w-2xl w-full p-6 shadow-neon-cyan">
+      <div class="flex items-center justify-between border-b border-borderDark pb-4 mb-4">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">📄</span>
+          <h3 class="text-lg font-bold text-white font-display">Packet Converter & JSON Validator</h3>
+        </div>
+        <button onclick="closeModal('converterModal'); playSound('click');" class="text-slate-400 hover:text-white p-1 text-xl">&times;</button>
+      </div>
+      <p class="text-xs text-slate-400 mb-3 font-mono">Paste raw packet text (e.g. DOCX / PDF export) to convert into Slopbowl competition schema.</p>
+      <textarea id="converterRawInput" rows="6" placeholder="TOSS-UP 1) PHYSICS Multiple Choice: What physical constant corresponds to approximately 6.626 x 10^-34 joule-seconds?&#10;W) Boltzmann constant&#10;X) Planck's constant&#10;ANSWER: X) PLANCK'S CONSTANT" class="w-full bg-black border border-borderDark rounded-xl p-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-neonCyan"></textarea>
+      
+      <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center space-x-2">
+          <button onclick="parseRawPacket(); playSound('click');" class="px-4 py-2 bg-neonCyan hover:bg-cyan-300 text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-cyan">
+            Parse & Validate Schema
+          </button>
+          <button onclick="loadConvertedToMatch(); playSound('click');" class="px-3 py-2 bg-black border border-neonGreen text-neonGreen text-xs font-mono font-bold rounded-xl active:scale-95">
+            Load to In-Person Match
+          </button>
+        </div>
+        <button onclick="closeModal('converterModal'); playSound('click');" class="px-4 py-2 text-xs font-mono text-slate-400 hover:text-white">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 3: MATCH ANALYTICS -->
+  <div id="analyticsModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="bg-panel border border-neonAmber rounded-3xl max-w-2xl w-full p-6 shadow-neon-amber">
+      <div class="flex items-center justify-between border-b border-borderDark pb-4 mb-4">
+        <div class="flex items-center space-x-2">
+          <span class="text-xl">📊</span>
+          <h3 class="text-lg font-bold text-white font-display">Match Analytics & Speed Telemetry</h3>
+        </div>
+        <button onclick="closeModal('analyticsModal'); playSound('click');" class="text-slate-400 hover:text-white p-1 text-xl">&times;</button>
+      </div>
+      <div class="grid grid-cols-3 gap-3 mb-4 text-center font-mono">
+        <div class="bg-black p-3.5 rounded-xl border border-borderDark">
+          <span class="text-[10px] text-slate-400 block">TOTAL BUZZES</span>
+          <span class="text-xl font-black text-white">48</span>
+        </div>
+        <div class="bg-black p-3.5 rounded-xl border border-borderDark">
+          <span class="text-[10px] text-slate-400 block">CONVERSION %</span>
+          <span class="text-xl font-black text-neonGreen">83.3%</span>
+        </div>
+        <div class="bg-black p-3.5 rounded-xl border border-borderDark">
+          <span class="text-[10px] text-slate-400 block">AVG REACTION</span>
+          <span class="text-xl font-black text-neonCyan">0.188s</span>
+        </div>
+      </div>
+      <div class="bg-black rounded-xl p-3 border border-borderDark text-xs font-mono text-slate-300 space-y-1.5 mb-4">
+        <div>• <strong>Team A</strong>: 14 Correct, 2 Interrupt Negs (68 Pts)</div>
+        <div>• <strong>Team B</strong>: 11 Correct, 1 Interrupt Neg (54 Pts)</div>
+        <div>• <strong>Fastest Buzz</strong>: 0.082s by Alex on Q#3 (Radon)</div>
+      </div>
+      <div class="flex items-center justify-between">
+        <button onclick="exportAnalyticsCsv(); playSound('click');" class="px-4 py-2 bg-neonAmber hover:bg-amber-400 text-black font-mono font-bold text-xs uppercase rounded-xl active:scale-95">
+          Export CSV Log
+        </button>
+        <button onclick="closeModal('analyticsModal'); playSound('click');" class="px-4 py-2 bg-black border border-borderDark text-xs font-mono text-slate-400 hover:text-white rounded-xl">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 4: CHALLENGE ADJUDICATION -->
+  <div id="challengeModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="bg-panel border border-neonPink rounded-3xl max-w-md w-full p-6 shadow-neon-pink">
+      <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
+        <h3 class="text-base font-bold text-white font-display">Official Challenge Review</h3>
+        <button onclick="closeModal('challengeModal'); playSound('click');" class="text-slate-400 hover:text-white">&times;</button>
+      </div>
+      <p class="text-xs text-slate-300 mb-4 font-mono">A coach or player challenged the question phrasing or score adjudication.</p>
+      
+      <div class="space-y-3 mb-5">
+        <button onclick="resolveChallenge('uphold'); playSound('correct');" class="w-full py-2.5 bg-neonGreen hover:bg-emerald-400 text-black font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition">
+          ✓ Uphold Challenge (Award Points)
+        </button>
+        <button onclick="resolveChallenge('reject'); playSound('click');" class="w-full py-2.5 bg-neonPink hover:bg-rose-600 text-white font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition">
+          ✗ Reject Challenge (Maintain Score)
+        </button>
+        <button onclick="resolveChallenge('throwout'); playSound('click');" class="w-full py-2.5 bg-black border border-borderDark text-slate-300 hover:text-white font-mono text-xs uppercase rounded-xl active:scale-95">
+          Throw Out Question & Draw Replacement
+        </button>
+      </div>
+      <button onclick="closeModal('challengeModal'); playSound('click');" class="w-full text-center text-xs font-mono text-slate-400 hover:text-white">
+        Cancel Challenge
+      </button>
+    </div>
+  </div>
+
+  <!-- Notification Toast Banner -->
+  <div id="toastAlertBanner" class="fixed top-16 right-4 z-50 bg-black border border-neonCyan text-neonCyan text-xs font-mono px-4 py-3 rounded-2xl shadow-neon-cyan hidden transition-all duration-300 flex items-center space-x-2">
+    <span class="w-2 h-2 rounded-full bg-neonCyan animate-ping"></span>
+    <span id="toastAlertText">System alert</span>
+  </div>
+
+  <script>
+    /* =========================================================
+       WEB AUDIO API SYNTHESIZER
+       ========================================================= */
+    let audioContext = null;
+    let audioMuted = false;
+
+    function getAudioCtx() {
+      if (!audioContext) {
+        const AudioClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioClass) {
+          audioContext = new AudioClass();
+        }
+      }
+      if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      return audioContext;
+    }
+
+    function playSound(type = 'click') {
+      if (audioMuted) return;
+      try {
+        const ctx = getAudioCtx();
+        if (!ctx) return;
+        const now = ctx.currentTime;
+
+        if (type === 'click') {
+          // Subtle high-pitch futuristic tick
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(1200, now);
+          osc.frequency.exponentialRampToValueAtTime(800, now + 0.04);
+          gain.gain.setValueAtTime(0.15, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.045);
+        } else if (type === 'buzz') {
+          // Harsh electric quizbowl buzzer
+          const osc1 = ctx.createOscillator();
+          const osc2 = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc1.type = 'sawtooth';
+          osc2.type = 'square';
+          osc1.frequency.setValueAtTime(410, now);
+          osc2.frequency.setValueAtTime(410 * 1.5, now);
+          gain.gain.setValueAtTime(0.35, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+          osc1.connect(gain);
+          osc2.connect(gain);
+          gain.connect(ctx.destination);
+          osc1.start(now);
+          osc2.start(now);
+          osc1.stop(now + 0.46);
+          osc2.stop(now + 0.46);
+        } else if (type === 'correct') {
+          // Double chime
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(523.25, now);
+          osc.frequency.exponentialRampToValueAtTime(1046.50, now + 0.22);
+          gain.gain.setValueAtTime(0.25, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.29);
+        }
+      } catch (e) {
+        console.warn('Audio feedback failed:', e);
+      }
+    }
+
+    function toggleAudioMute() {
+      audioMuted = !audioMuted;
+      const btn = document.getElementById('soundMuteBtn');
+      if (audioMuted) {
+        btn.innerHTML = `<span>🔇</span><span class="hidden sm:inline text-[10px] font-bold">Audio: OFF</span>`;
+        btn.classList.remove('text-neonCyan', 'border-neonCyan/40');
+        btn.classList.add('text-slate-500', 'border-slate-700');
+        showToast('Audio effects muted');
+      } else {
+        btn.innerHTML = `<span>🔊</span><span class="hidden sm:inline text-[10px] font-bold">Audio: ON</span>`;
+        btn.classList.add('text-neonCyan', 'border-neonCyan/40');
+        btn.classList.remove('text-slate-500', 'border-slate-700');
+        showToast('Audio effects enabled');
+      }
+    }
+
+    /* =========================================================
+       GLOBAL PROTOTYPE STATE
+       ========================================================= */
+    const state = {
+      currentSlide: 1,
+      scoreA: 0,
+      scoreB: 0,
+      teamAName: 'Team A',
+      teamBName: 'Team B',
+      currentQIndex: 0,
+      isReadingTossup: false,
+      readingInterval: null,
+      prompterWordIdx: 0,
+      tossupWords: [],
+      matchSeconds: 475,
+      matchTimerRunning: false,
+      matchInterval: null,
+      actionClockSec: 5.0,
+      actionInterval: null,
+      lastBuzzedTeam: null,
+      
+      // Canvas ROI
+      roiBoxes: [
+        { x: 35, y: 35, w: 120, h: 95, team: 'A', label: 'Team A Buzzer' },
+        { x: 390, y: 35, w: 120, h: 95, team: 'B', label: 'Team B Buzzer' }
+      ],
+      isDrawingRoi: false,
+      drawStart: { x: 0, y: 0 },
+      currentDrawRect: null,
+      isCamRunning: false,
+
+      // Solo Config
+      soloOutput: 'hybrid', // 'spoken', 'text', 'hybrid'
+      soloInput: 'typed',   // 'audio', 'typed'
+      soloSubject: 'All',
+      soloWpm: 260,
+      soloScore: 0,
+      soloStreak: 0,
+      soloIsReading: false,
+      soloInterval: null,
+      soloWords: [],
+      soloWordIdx: 0,
+      soloStartTime: 0
+    };
+
+    const QUESTIONS_DATA = [
+      {
+        category: "PHYSICS",
+        type: "TOSS-UP (MULTIPLE CHOICE)",
+        text: "What fundamental physical constant, approximately 6.626 times 10 to the negative 34th joule-seconds, dictates the quantum of electromagnetic action?",
+        options: "W) Boltzmann constant | X) Planck's constant | Y) Gravitational constant | Z) Permittivity",
+        answer: "X) PLANCK'S CONSTANT",
+        key: "planck"
+      },
+      {
+        category: "BIOLOGY",
+        type: "TOSS-UP (SHORT ANSWER)",
+        text: "During aerobic cellular respiration, what biochemical sequence occurring within the mitochondrial matrix converts acetyl-CoA into carbon dioxide, NADH, and FADH2?",
+        options: "",
+        answer: "KREBS CYCLE (CITRIC ACID CYCLE)",
+        key: "krebs"
+      },
+      {
+        category: "CHEMISTRY",
+        type: "TOSS-UP (MULTIPLE CHOICE)",
+        text: "Which group 18 noble gas has the highest boiling point and greatest atomic radius under standard atmospheric conditions?",
+        options: "W) Neon | X) Krypton | Y) Xenon | Z) Radon",
+        answer: "Z) RADON",
+        key: "radon"
+      },
+      {
+        category: "MATHEMATICS",
+        type: "TOSS-UP (SHORT ANSWER)",
+        text: "Evaluate the limit as x approaches zero of the rational expression sine of 7x divided by x.",
+        options: "",
+        answer: "7",
+        key: "7"
+      }
+    ];
+
+    function navigateTo(slideNum) {
+      state.currentSlide = slideNum;
+
+      // Stop voice or reading timers when switching views
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+      clearInterval(state.readingInterval);
+      clearInterval(state.soloInterval);
+
+      // Hide all slides
+      document.querySelectorAll('.slide-view').forEach(s => s.classList.add('hidden'));
+
+      // Show selected slide
+      const target = document.getElementById(`slide-${slideNum}`);
+      if (target) {
+        target.classList.remove('hidden');
+      }
+
+      // Update Nav Dock Buttons
+      document.querySelectorAll('.nav-dock-btn').forEach(btn => {
+        btn.classList.remove('bg-neonCyan', 'text-black', 'shadow-neon-cyan');
+        btn.classList.add('bg-panel', 'text-slate-300');
+      });
+      const activeBtn = document.getElementById(`nav-btn-${slideNum}`);
+      if (activeBtn) {
+        activeBtn.classList.remove('bg-panel', 'text-slate-300');
+        activeBtn.classList.add('bg-neonCyan', 'text-black', 'shadow-neon-cyan');
+      }
+
+      // Slide-specific initialization
+      if (slideNum === 4) initCvCanvas();
+      if (slideNum === 5) renderMiniVision();
+      if (slideNum === 11) setupSoloArena();
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function openModal(id) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.classList.remove('hidden');
+        el.classList.add('flex');
+      }
+    }
+
+    function closeModal(id) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.classList.add('hidden');
+        el.classList.remove('flex');
+      }
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toastAlertBanner');
+      const text = document.getElementById('toastAlertText');
+      if (toast && text) {
+        text.textContent = msg;
+        toast.classList.remove('hidden');
+        setTimeout(() => toast.classList.add('hidden'), 2800);
+      }
+    }
+
+    // Slide 2: Settings actions
+    function toggleApiKeyVisibility() {
+      const inp = document.getElementById('apiKeyInput');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+      showToast('API Key visibility toggled');
+    }
+
+    function testApiKeyConnection() {
+      showToast('✓ Verified: API connection handshake completed (18ms)');
+      document.getElementById('apiKeyStatus').textContent = 'VERIFIED (18ms)';
+    }
+
+    function clearApiKeyField() {
+      document.getElementById('apiKeyInput').value = '';
+      document.getElementById('apiKeyStatus').textContent = 'KEY CLEARED';
+      showToast('API Key removed from session cache');
+    }
+
+    function setRulePreset(preset) {
+      ['NSB', 'ACF', 'NAQT'].forEach(p => {
+        const btn = document.getElementById(`rule-btn-${p}`);
+        if (p === preset) {
+          btn.className = "py-2.5 px-3 rounded-xl border border-neonCyan bg-black text-neonCyan text-xs font-mono font-bold active:scale-95 transition shadow-neon-cyan";
+        } else {
+          btn.className = "py-2.5 px-3 rounded-xl border border-borderDark bg-black text-slate-400 text-xs font-mono font-bold active:scale-95 hover:text-white transition";
+        }
+      });
+      showToast(`Rule preset switched to ${preset}`);
+    }
+
+    function toggleAudioSetting(type) {
+      const btn = document.getElementById(`toggle-${type}`);
+      const isCurrentlyOn = btn.textContent.trim() === 'ON';
+      if (isCurrentlyOn) {
+        btn.textContent = 'OFF';
+        btn.className = 'px-3 py-1 bg-black text-slate-500 border border-borderDark rounded-lg text-xs font-mono font-bold active:scale-95 transition';
+      } else {
+        btn.textContent = 'ON';
+        btn.className = 'px-3 py-1 bg-neonGreen/20 text-neonGreen border border-neonGreen rounded-lg text-xs font-mono font-bold active:scale-95 transition';
+      }
+      showToast(`Setting ${type} set to ${!isCurrentlyOn ? 'ON' : 'OFF'}`);
+    }
+
+    function restoreDefaultSettings() {
+      document.getElementById('apiKeyInput').value = 'sk-live-slopbowl-pro-9941a8';
+      setRulePreset('NSB');
+      showToast('Settings reset to platform defaults');
+    }
+
+    function saveAndReturnSettings() {
+      showToast('Settings saved to encrypted local storage');
+      navigateTo(1);
+    }
+
+    // Slide 3: Online portal helpers
+    function randomizePin() {
+      const pin = Math.floor(100000 + Math.random() * 900000);
+      document.getElementById('joinPinInput').value = pin;
+      showToast(`Generated Room PIN: ${pin}`);
+    }
+
+    function randomizeHandle() {
+      const handles = ['Quark_Master', 'SpeedyBuzzer', 'BioBeast', 'Dirac_Spin', 'Euler7', 'Sigma_Brain'];
+      const chosen = handles[Math.floor(Math.random() * handles.length)];
+      document.getElementById('joinPlayerHandle').value = chosen;
+      showToast(`Assigned Handle: ${chosen}`);
+    }
+
+    // Slide 4: Roster & CV Canvas
+    function setCaptain(team, idx) {
+      document.querySelectorAll(`.cpt-tag-${team}`).forEach((el, i) => {
+        if (i === idx) {
+          el.className = `cpt-tag-${team} px-1.5 py-1 rounded text-[9px] font-mono font-black ${team === 'A' ? 'text-neonCyan border-neonCyan shadow-neon-cyan' : 'text-neonAmber border-neonAmber shadow-neon-amber'} bg-black border`;
+        } else {
+          el.className = `cpt-tag-${team} px-1.5 py-1 rounded text-[9px] font-mono text-slate-500 bg-black border border-borderDark hover:${team === 'A' ? 'text-neonCyan' : 'text-neonAmber'}`;
+        }
+      });
+      showToast(`Team ${team} captain assigned to slot #${idx + 1}`);
+    }
+
+    function addRosterRow(team) {
+      const list = document.getElementById(`rosterList${team}`);
+      const row = document.createElement('div');
+      row.className = 'flex items-center space-x-1';
+      row.innerHTML = `
+        <input type="text" value="Sub Player" class="flex-grow bg-black/60 border border-borderDark rounded-lg px-2.5 py-1 text-xs text-slate-200 font-mono">
+        <button onclick="this.parentElement.remove(); playSound('click'); showToast('Sub removed');" class="px-1.5 py-1 rounded text-[9px] font-mono text-neonPink bg-black border border-neonPink/50 hover:bg-neonPink hover:text-white">✕</button>
+      `;
+      list.appendChild(row);
+      showToast(`Added substitute player to Team ${team}`);
+    }
+
+    function handleFakeFileUpload(e) {
+      if (e.target.files && e.target.files[0]) {
+        document.getElementById('loadedPacketPill').textContent = `✓ ${e.target.files[0].name} (Loaded)`;
+        showToast(`Loaded question packet: ${e.target.files[0].name}`);
+      }
+    }
+
+    function loadCloudPacketAction() {
+      const sel = document.getElementById('cloudPacketPicker').value;
+      showToast(`Synchronized Cloud Packet: ${sel}`);
+      document.getElementById('loadedPacketPill').textContent = `✓ ${sel.slice(0, 30)}...`;
+    }
+
+    function saveAndProceedToModeration() {
+      state.teamAName = document.getElementById('setupTeamAName').value.trim() || 'Team A';
+      state.teamBName = document.getElementById('setupTeamBName').value.trim() || 'Team B';
+      document.getElementById('hudTeamNameA').textContent = state.teamAName.toUpperCase();
+      document.getElementById('hudTeamNameB').textContent = state.teamBName.toUpperCase();
+      showToast('Rosters synced to moderation HUD');
+      navigateTo(5);
+    }
+
+    let cvCanvas, cvCtx;
+
+    function initCvCanvas() {
+      cvCanvas = document.getElementById('cvCanvas');
+      if (!cvCanvas) return;
+      cvCtx = cvCanvas.getContext('2d');
+      cvCanvas.onmousedown = (e) => {
+        const r = cvCanvas.getBoundingClientRect();
+        state.isDrawingRoi = true;
+        state.drawStart = {
+          x: (e.clientX - r.left) * (cvCanvas.width / r.width),
+          y: (e.clientY - r.top) * (cvCanvas.height / r.height)
+        };
+        state.currentDrawRect = { x: state.drawStart.x, y: state.drawStart.y, w: 0, h: 0 };
+      };
+      cvCanvas.onmousemove = (e) => {
+        if (!state.isDrawingRoi) return;
+        const r = cvCanvas.getBoundingClientRect();
+        const curX = (e.clientX - r.left) * (cvCanvas.width / r.width);
+        const curY = (e.clientY - r.top) * (cvCanvas.height / r.height);
+        state.currentDrawRect = {
+          x: Math.min(state.drawStart.x, curX),
+          y: Math.min(state.drawStart.y, curY),
+          w: Math.abs(curX - state.drawStart.x),
+          h: Math.abs(curY - state.drawStart.y)
+        };
+        drawCvCanvas();
+      };
+      cvCanvas.onmouseup = () => {
+        if (!state.isDrawingRoi) return;
+        state.isDrawingRoi = false;
+        if (state.currentDrawRect && state.currentDrawRect.w > 15) {
+          const isLeft = state.currentDrawRect.x < cvCanvas.width / 2;
+          state.roiBoxes.push({
+            x: Math.round(state.currentDrawRect.x),
+            y: Math.round(state.currentDrawRect.y),
+            w: Math.round(state.currentDrawRect.w),
+            h: Math.round(state.currentDrawRect.h),
+            team: isLeft ? 'A' : 'B',
+            label: isLeft ? 'Team A Custom ROI' : 'Team B Custom ROI'
+          });
+          showToast(`Bounding box saved for Team ${isLeft ? 'A' : 'B'}`);
+        }
+        state.currentDrawRect = null;
+        drawCvCanvas();
+      };
+      drawCvCanvas();
+    }
+
+    function drawCvCanvas() {
+      if (!cvCanvas || !cvCtx) return;
+      const w = cvCanvas.width;
+      const h = cvCanvas.height;
+      cvCtx.fillStyle = '#000000';
+      cvCtx.fillRect(0, 0, w, h);
+
+      // Cyber Grid
+      cvCtx.strokeStyle = 'rgba(0, 243, 255, 0.12)';
+      cvCtx.lineWidth = 1;
+      for (let x = 0; x < w; x += 35) {
+        cvCtx.beginPath();
+        cvCtx.moveTo(x, 0);
+        cvCtx.lineTo(x, h);
+        cvCtx.stroke();
+      }
+
+      // Simulated Table Pods
+      cvCtx.fillStyle = '#070b14';
+      cvCtx.fillRect(25, 30, 140, 110);
+      cvCtx.fillRect(380, 30, 140, 110);
+
+      // Render Boxes
+      state.roiBoxes.forEach((b, i) => {
+        const isA = b.team === 'A';
+        cvCtx.strokeStyle = isA ? '#00f3ff' : '#ffaa00';
+        cvCtx.lineWidth = 2;
+        cvCtx.strokeRect(b.x, b.y, b.w, b.h);
+        cvCtx.fillStyle = isA ? 'rgba(0, 243, 255, 0.15)' : 'rgba(255, 170, 0, 0.15)';
+        cvCtx.fillRect(b.x, b.y, b.w, b.h);
+        cvCtx.fillStyle = isA ? '#00f3ff' : '#ffaa00';
+        cvCtx.font = "9px 'JetBrains Mono'";
+        cvCtx.fillText(`[BOX ${i+1}] ${b.label}`, b.x + 4, b.y + 12);
+      });
+
+      // Active drawing box
+      if (state.currentDrawRect) {
+        cvCtx.strokeStyle = '#00ff66';
+        cvCtx.setLineDash([4, 4]);
+        cvCtx.strokeRect(state.currentDrawRect.x, state.currentDrawRect.y, state.currentDrawRect.w, state.currentDrawRect.h);
+        cvCtx.setLineDash([]);
+      }
+    }
+
+    function resetRoiCanvas() {
+      state.roiBoxes = [];
+      drawCvCanvas();
+      showToast('ROI boxes cleared');
+    }
+
+    function autoDetectPresetBoxes() {
+      state.roiBoxes = [
+        { x: 35, y: 35, w: 120, h: 95, team: 'A', label: 'Team A Buzzer' },
+        { x: 390, y: 35, w: 120, h: 95, team: 'B', label: 'Team B Buzzer' }
+      ];
+      drawCvCanvas();
+      showToast('Auto-detected 2 buzzer pods');
+    }
+
+    function saveRoiEngine() {
+      showToast(`Saved ${state.roiBoxes.length} optical zones to CV engine`);
+    }
+
+    function recalibrateLighting() {
+      showToast('Stage ambient lighting zeroed (Baseline calibrated)');
+    }
+
+    function toggleLumaMode() {
+      const b = document.getElementById('lumaBadge');
+      b.textContent = b.textContent === 'LUMA MODE' ? 'RGB MODE' : 'LUMA MODE';
+      showToast(`Vision filter: ${b.textContent}`);
+    }
+
+    function toggleCameraSimulator() {
+      state.isCamRunning = !state.isCamRunning;
+      const btn = document.getElementById('camSimulatorBtn');
+      if (state.isCamRunning) {
+        btn.textContent = '1. Stop Camera Feed';
+        btn.className = 'px-3 py-1.5 bg-black border border-neonGreen text-neonGreen text-xs font-mono font-bold rounded-lg active:scale-95 transition shadow-neon-green';
+        showToast('Webcam optical tracking running');
+      } else {
+        btn.textContent = '1. Start Camera Feed';
+        btn.className = 'px-3 py-1.5 bg-black border border-neonCyan text-neonCyan text-xs font-mono font-bold rounded-lg active:scale-95 transition shadow-neon-cyan';
+        showToast('Webcam feed paused');
+      }
+    }
+
+    function renderMiniVision() {
+      const c = document.getElementById('miniVisionHud');
+      if (!c) return;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.strokeStyle = '#00f3ff';
+      ctx.strokeRect(20, 15, 80, 60);
+      ctx.strokeStyle = '#ffaa00';
+      ctx.strokeRect(180, 15, 80, 60);
+      ctx.fillStyle = '#00f3ff';
+      ctx.font = '8px monospace';
+      ctx.fillText('ROI-A: ARMED', 24, 28);
+      ctx.fillStyle = '#ffaa00';
+      ctx.fillText('ROI-B: ARMED', 184, 28);
+    }
+
+    function simulateBuzzerTriggerFromVision() {
+      showToast('Optical motion trigger detected on Team A!');
+      simulateForceBuzz('A');
+    }
+
+    function loadHudQuestion() {
+      const q = QUESTIONS_DATA[state.currentQIndex];
+      document.getElementById('hudCategoryTag').textContent = q.category;
+      document.getElementById('prompterTypeBadge').textContent = q.type;
+      document.getElementById('qIndexNum').textContent = state.currentQIndex + 1;
+      document.getElementById('hudAnswerValue').textContent = q.answer;
+
+      const full = q.options ? `${q.text} Options: ${q.options}` : q.text;
+      state.tossupWords = full.split(' ');
+      state.prompterWordIdx = 0;
+      document.getElementById('hudPrompterText').innerHTML = `<span class="text-slate-400">Ready:</span> ${full}`;
+      document.getElementById('hudAnswerRevealed').classList.add('hidden');
+    }
+
+    function toggleTossupStream() {
+      if (state.isReadingTossup) {
+        pauseTossupStream();
+      } else {
+        state.isReadingTossup = true;
+        document.getElementById('startTossupBtnLabel').textContent = '❚❚ PAUSE STREAM';
+        document.getElementById('hudStatusBadge').textContent = 'STATUS: READING';
+        document.getElementById('hudStatusBadge').className = 'text-xs font-mono font-black text-neonCyan uppercase tracking-wider cursor-pointer';
+
+        clearInterval(state.readingInterval);
+        state.readingInterval = setInterval(() => {
+          if (state.prompterWordIdx < state.tossupWords.length) {
+            state.prompterWordIdx++;
+            renderPrompterWord();
+          } else {
+            pauseTossupStream();
+            triggerActionClockCountdown(5.0);
+          }
+        }, 220);
+        showToast('Question streaming started');
+      }
+    }
+
+    function pauseTossupStream() {
+      state.isReadingTossup = false;
+      clearInterval(state.readingInterval);
+      document.getElementById('startTossupBtnLabel').textContent = '▶ RESUME TOSSUP';
+      document.getElementById('hudStatusBadge').textContent = 'STATUS: PAUSED';
+      document.getElementById('hudStatusBadge').className = 'text-xs font-mono font-black text-neonAmber uppercase tracking-wider cursor-pointer';
+    }
+
+    function renderPrompterWord() {
+      const read = state.tossupWords.slice(0, state.prompterWordIdx).join(' ');
+      const cur = state.tossupWords[state.prompterWordIdx] || '';
+      const rem = state.tossupWords.slice(state.prompterWordIdx + 1).join(' ');
+      document.getElementById('hudPrompterText').innerHTML = `
+        <span class="text-white">${read}</span>
+        <span class="text-neonCyan font-bold bg-black border border-neonCyan px-1 rounded shadow-neon-cyan">${cur}</span>
+        <span class="text-slate-600">${rem}</span>
+      `;
+    }
+
+    function nextQuestion() {
+      state.currentQIndex = (state.currentQIndex + 1) % QUESTIONS_DATA.length;
+      loadHudQuestion();
+      showToast(`Advanced to Question #${state.currentQIndex + 1}`);
+    }
+
+    function prevQuestion() {
+      state.currentQIndex = (state.currentQIndex - 1 + QUESTIONS_DATA.length) % QUESTIONS_DATA.length;
+      loadHudQuestion();
+      showToast(`Returned to Question #${state.currentQIndex + 1}`);
+    }
+
+    function toggleAnswerVisibility() {
+      const el = document.getElementById('hudAnswerRevealed');
+      el.classList.toggle('hidden');
+    }
+
+    function triggerActionClockCountdown(seconds = 5.0) {
+      clearInterval(state.actionInterval);
+      state.actionClockSec = seconds;
+      const digit = document.getElementById('actionClockValue');
+      const bar = document.getElementById('actionClockBar');
+
+      state.actionInterval = setInterval(() => {
+        state.actionClockSec -= 0.1;
+        if (state.actionClockSec <= 0) {
+          state.actionClockSec = 0;
+          clearInterval(state.actionInterval);
+          digit.textContent = '0.0';
+          bar.style.width = '0%';
+          document.getElementById('floorBadgeLabel').textContent = 'TIME EXPIRED';
+          document.getElementById('outcomeBadgeLabel').textContent = 'DEAD TOSS-UP';
+          showToast('Action clock expired!');
+        } else {
+          digit.textContent = state.actionClockSec.toFixed(1);
+          bar.style.width = `${(state.actionClockSec / seconds) * 100}%`;
+        }
+      }, 100);
+    }
+
+    function setActionPreset(sec) {
+      triggerActionClockCountdown(sec);
+      showToast(`Action clock reset to ${sec}.0s`);
+    }
+
+    function simulateForceBuzz(team) {
+      pauseTossupStream();
+      playSound('buzz');
+      state.lastBuzzedTeam = team;
+      const teamName = team === 'A' ? state.teamAName : state.teamBName;
+      document.getElementById('floorBadgeLabel').textContent = `LOCKED: ${teamName}`;
+      document.getElementById('floorIndicatorDot').className = team === 'A' ? 'w-2 h-2 rounded-full bg-neonCyan animate-ping' : 'w-2 h-2 rounded-full bg-neonAmber animate-ping';
+      document.getElementById('adjudicationDrawer').classList.remove('hidden');
+      document.getElementById('adjudicationDrawer').classList.add('flex');
+      document.getElementById('adjudicateTeamBadge').textContent = teamName;
+      triggerActionClockCountdown(5.0);
+      showToast(`⚡ BUZZ: ${teamName}`);
+    }
+
+    function awardScoreToBuzzer(isCorrect, pts) {
+      const team = state.lastBuzzedTeam || 'A';
+      if (team === 'A') state.scoreA += pts;
+      else state.scoreB += pts;
+
+      document.getElementById('scoreValueA').textContent = state.scoreA;
+      document.getElementById('scoreValueB').textContent = state.scoreB;
+      const s9A = document.getElementById('slide9ScoreA');
+      const s9B = document.getElementById('slide9ScoreB');
+      if (s9A) s9A.textContent = state.scoreA;
+      if (s9B) s9B.textContent = state.scoreB;
+
+      document.getElementById('adjudicationDrawer').classList.add('hidden');
+      document.getElementById('hudAnswerRevealed').classList.remove('hidden');
+
+      const log = document.getElementById('matchLogContainer');
+      const item = document.createElement('div');
+      item.innerHTML = `<span class="${team === 'A' ? 'text-neonCyan' : 'text-neonAmber'}">[${team === 'A' ? state.teamAName : state.teamBName}]</span> Awarded ${pts >= 0 ? '+' + pts : pts} pts (${isCorrect ? 'Correct' : 'Penalty'})`;
+      log.prepend(item);
+
+      showToast(`Score updated: ${team === 'A' ? state.teamAName : state.teamBName} (${pts >= 0 ? '+' + pts : pts})`);
+    }
+
+    function adjustScore(team, delta) {
+      if (team === 'A') state.scoreA = Math.max(0, state.scoreA + delta);
+      else state.scoreB = Math.max(0, state.scoreB + delta);
+      document.getElementById('scoreValueA').textContent = state.scoreA;
+      document.getElementById('scoreValueB').textContent = state.scoreB;
+      showToast(`Team ${team} score adjusted: ${delta > 0 ? '+' + delta : delta}`);
+    }
+
+    function resetScores() {
+      state.scoreA = 0;
+      state.scoreB = 0;
+      document.getElementById('scoreValueA').textContent = '0';
+      document.getElementById('scoreValueB').textContent = '0';
+      showToast('Scores reset to 0 - 0');
+    }
+
+    function cycleStage() {
+      const stages = ['TOSSUP 1', 'BONUS 1', 'TOSSUP 2', 'BONUS 2', 'OVERTIME'];
+      const el = document.getElementById('hudStageLabel');
+      const idx = (stages.indexOf(el.textContent) + 1) % stages.length;
+      el.textContent = stages[idx];
+      showToast(`Stage shifted to ${stages[idx]}`);
+    }
+
+    function cycleCategory() {
+      const cats = ['PHYSICS', 'CHEMISTRY', 'BIOLOGY', 'MATH', 'EARTH & SPACE'];
+      const el = document.getElementById('hudCategoryTag');
+      const idx = (cats.indexOf(el.textContent) + 1) % cats.length;
+      el.textContent = cats[idx];
+      showToast(`Category: ${cats[idx]}`);
+    }
+
+    function toggleMatchStatus() {
+      const el = document.getElementById('hudStatusBadge');
+      el.textContent = el.textContent.includes('READY') ? 'STATUS: IN PROGRESS' : 'STATUS: READY';
+      showToast(`Match status toggled: ${el.textContent}`);
+    }
+
+    function toggleMatchTimer() {
+      state.matchTimerRunning = !state.matchTimerRunning;
+      const btn = document.getElementById('matchTimerPlayBtn');
+      if (state.matchTimerRunning) {
+        btn.textContent = '❚❚ PAUSE';
+        clearInterval(state.matchInterval);
+        state.matchInterval = setInterval(() => {
+          if (state.matchSeconds > 0) {
+            state.matchSeconds--;
+            renderMatchTimer();
+          } else {
+            clearInterval(state.matchInterval);
+          }
+        }, 1000);
+        showToast('Match timer ticking');
+      } else {
+        btn.textContent = '▶ START';
+        clearInterval(state.matchInterval);
+        showToast('Match timer paused');
+      }
+    }
+
+    function renderMatchTimer() {
+      const m = Math.floor(state.matchSeconds / 60);
+      const s = state.matchSeconds % 60;
+      const str = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      document.getElementById('hudMatchClockDigit').textContent = str;
+    }
+
+    function adjustMatchTimer(sec) {
+      state.matchSeconds += sec;
+      renderMatchTimer();
+      showToast(`Match timer adjusted: +${sec}s`);
+    }
+
+    function resetMatchTimer() {
+      state.matchTimerRunning = false;
+      clearInterval(state.matchInterval);
+      state.matchSeconds = 475;
+      document.getElementById('matchTimerPlayBtn').textContent = '▶ START';
+      renderMatchTimer();
+      showToast('Match timer reset to 07:55');
+    }
+
+    function cycleFloorStatus() {
+      const floors = ['CLEAR', 'TEAM A BUZZ', 'TEAM B BUZZ', 'TIME OUT'];
+      const el = document.getElementById('floorBadgeLabel');
+      const idx = (floors.indexOf(el.textContent) + 1) % floors.length;
+      el.textContent = floors[idx];
+      showToast(`Floor status: ${floors[idx]}`);
+    }
+
+    function cycleInterruptStatus() {
+      const el = document.getElementById('interruptBadgeLabel');
+      el.textContent = el.textContent === '--' ? 'YES (-5 NEG)' : '--';
+      showToast(`Interrupt state: ${el.textContent}`);
+    }
+
+    function cycleOutcomeStatus() {
+      const outcomes = ['PENDING', 'ACCEPTED (+4)', 'POWER (+10)', 'DEAD BALL'];
+      const el = document.getElementById('outcomeBadgeLabel');
+      const idx = (outcomes.indexOf(el.textContent) + 1) % outcomes.length;
+      el.textContent = outcomes[idx];
+      showToast(`Outcome: ${outcomes[idx]}`);
+    }
+
+    function addFakeScoreEvent() {
+      const log = document.getElementById('matchLogContainer');
+      const row = document.createElement('div');
+      row.textContent = `[Manual Note] Moderator noted buzzer check completed at 07:50`;
+      log.prepend(row);
+      showToast('Log note added to match sheet');
+    }
+
+    function quickPlayerAward(name) {
+      showToast(`Direct credit attributed to ${name}`);
+    }
+
+    // Slide 6 & 7 helpers
+    function simulatePacketUploadSlide6() {
+      document.getElementById('slide6UploadPill').classList.remove('hidden');
+      showToast('Packet parsed: 2024 NSB National Finals (25 Questions)');
+    }
+
+    function selectSlide6Preset(name) {
+      document.getElementById('slide6UploadPill').classList.remove('hidden');
+      document.getElementById('slide6UploadPill').textContent = `✓ Preset loaded: ${name}`;
+      showToast(`Selected tournament preset: ${name}`);
+    }
+
+    function copyPinCode(pin) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(pin);
+      }
+      showToast(`Copied room PIN: ${pin}`);
+    }
+
+    function toggleHalvesRule() {
+      const btn = document.getElementById('halvesRuleBtn');
+      btn.textContent = btn.textContent === 'No Halves' ? '2 Halves (8m each)' : 'No Halves';
+      showToast(`Halves rule: ${btn.textContent}`);
+    }
+
+    function toggleTimerRule() {
+      const btn = document.getElementById('timerRuleBtn');
+      btn.textContent = btn.textContent === 'Manual' ? 'Auto-Sync' : 'Manual';
+      showToast(`Timing system: ${btn.textContent}`);
+    }
+
+    function switchModeratorAuthority() {
+      showToast('Transferred moderator key to co-host pod');
+    }
+
+    function simulatePingRefresh() {
+      const ms = Math.floor(35 + Math.random() * 25);
+      const l7 = document.getElementById('lobbyPing7');
+      const p8 = document.getElementById('playerPingVal');
+      if (l7) l7.textContent = `${ms} MS`;
+      if (p8) p8.textContent = `${ms} MS`;
+      showToast(`Ping updated: ${ms}ms latency`);
+    }
+
+    function claimModSeat(team, slot) {
+      showToast(`Claimed captain slot on Team ${team}`);
+    }
+
+    function addBotToTeam(team) {
+      const list = document.getElementById(`modTeam${team}List`);
+      const row = document.createElement('div');
+      row.className = 'flex items-center justify-between p-2.5 bg-panel rounded border border-borderDark';
+      row.innerHTML = `<span class="text-neonGreen">Bot_${Math.floor(Math.random()*900)} (AI)</span><span class="text-[9px] text-slate-500">READY</span>`;
+      list.appendChild(row);
+      showToast(`Added automated drill bot to Team ${team}`);
+    }
+
+    function autoFillBothTeams() {
+      addBotToTeam('A');
+      addBotToTeam('B');
+      showToast('Both teams populated with competitor pods');
+    }
+
+    // Slide 8 Player Lobby helpers
+    function toggleSpectatorRole() {
+      const btn = document.getElementById('spectateToggleBtn');
+      const isSpectating = btn.textContent.includes('Active');
+      if (isSpectating) {
+        btn.innerHTML = `<span>👁 Spectate</span>`;
+        showToast('Switched to Competitor role');
+      } else {
+        btn.innerHTML = `<span class="text-neonGreen">👁 Spectating (Active)</span>`;
+        showToast('Switched to Spectator role');
+      }
+    }
+
+    function joinTeamAsPlayer(team) {
+      showToast(`Joined Team ${team} pod`);
+      if (team === 'A') {
+        document.getElementById('playerAStatus').textContent = 'scibowl gooner (You)';
+        document.getElementById('playerAStatus').className = 'text-neonCyan font-bold';
+      } else {
+        document.getElementById('playerBStatus').textContent = 'scibowl gooner (You)';
+        document.getElementById('playerBStatus').className = 'text-neonAmber font-bold';
+      }
+    }
+
+    function claimCaptainPlayer(team) {
+      showToast(`Captain authority claimed for Team ${team}`);
+    }
+
+    function toggleReadyState() {
+      const btn = document.getElementById('playerReadyBtn');
+      if (btn.classList.contains('bg-neonGreen')) {
+        btn.className = 'px-4 py-2.5 bg-black border border-neonGreen text-neonGreen font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition';
+        btn.textContent = 'Ready Up (Toggle)';
+        showToast('Unmarked ready');
+      } else {
+        btn.className = 'px-4 py-2.5 bg-neonGreen text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-green';
+        btn.textContent = '✓ READY (LOCKED)';
+        showToast('Competitor pod marked READY');
+      }
+    }
+
+    // Slide 9 Online Playing Tactile Buzz
+    function handleTactileBuzzSlide9() {
+      playSound('buzz');
+      const btn = document.getElementById('slide9GiantBuzzBtn');
+      btn.classList.add('buzz-active-anim');
+      setTimeout(() => btn.classList.remove('buzz-active-anim'), 600);
+
+      document.getElementById('slide9FloorLabel').textContent = 'LOCKED (YOU)';
+      document.getElementById('slide9ActionDigit').textContent = '5.0';
+      triggerActionClockCountdown(5.0);
+      showToast('⚡ BUZZ REGISTERED! 5.0s to deliver answer.');
+    }
+
+    // Slide 10 Solo Setup helpers
+    function selectSoloOutput(mode) {
+      state.soloOutput = mode;
+      ['spoken', 'text', 'hybrid'].forEach(m => {
+        const card = document.getElementById(`outCard-${m}`);
+        const ind = card.querySelector('.out-indicator');
+        if (m === mode) {
+          card.className = "cursor-pointer p-4 rounded-xl border border-neonCyan bg-panel shadow-neon-cyan transition active:scale-95 group";
+          ind.className = "out-indicator w-3.5 h-3.5 rounded-full border-2 border-neonCyan bg-neonCyan";
+        } else {
+          card.className = "cursor-pointer p-4 rounded-xl border border-borderDark bg-panel hover:border-neonCyan transition active:scale-95 group";
+          ind.className = "out-indicator w-3.5 h-3.5 rounded-full border border-slate-500";
+        }
+      });
+      showToast(`Output set to: ${mode.toUpperCase()}`);
+    }
+
+    function selectSoloInput(mode) {
+      state.soloInput = mode;
+      ['audio', 'typed'].forEach(m => {
+        const card = document.getElementById(`inCard-${m}`);
+        const ind = card.querySelector('.in-indicator');
+        if (m === mode) {
+          card.className = "cursor-pointer p-4 rounded-xl border border-neonAmber bg-panel shadow-neon-amber transition active:scale-95 group";
+          ind.className = "in-indicator w-3.5 h-3.5 rounded-full border-2 border-neonAmber bg-neonAmber";
+        } else {
+          card.className = "cursor-pointer p-4 rounded-xl border border-borderDark bg-panel hover:border-neonAmber transition active:scale-95 group";
+          ind.className = "in-indicator w-3.5 h-3.5 rounded-full border border-slate-500";
+        }
+      });
+      showToast(`Input set to: ${mode.toUpperCase()}`);
+    }
+
+    function setSoloSubject(subj) {
+      state.soloSubject = subj;
+      ['All', 'Physics', 'Biology', 'Chemistry', 'Math'].forEach(s => {
+        const b = document.getElementById(`subj-${s}`);
+        if (s === subj) b.className = "px-2.5 py-1 text-xs font-mono bg-neonGreen text-black font-bold rounded-lg";
+        else b.className = "px-2.5 py-1 text-xs font-mono bg-panel border border-borderDark text-slate-300 rounded-lg hover:text-neonCyan";
+      });
+      showToast(`Subject filtered to: ${subj}`);
+    }
+
+    function setWpmQuick(wpm) {
+      state.soloWpm = wpm;
+      document.getElementById('soloWpmDisplay').textContent = `${wpm} WPM`;
+      showToast(`Reading pace set to ${wpm} WPM`);
+    }
+
+    function testVoiceSynthesis() {
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance("Toss-up one. In astrophysics, what physical boundary defines a black hole?");
+        u.rate = 1.1;
+        window.speechSynthesis.speak(u);
+        showToast('🔊 Sample voice output triggered');
+      } else {
+        showToast('Voice synthesizer active');
+      }
+    }
+
+    function testMicHardware(e) {
+      if (e) e.stopPropagation();
+      showToast('🎙 Microphone audio channel active');
+    }
+
+    function launchSoloArena() {
+      showToast('Loading configured solo practice arena...');
+      navigateTo(11);
+    }
+
+    // Slide 11 Solo Practice Arena helpers
+    function setupSoloArena() {
+      document.getElementById('arenaSubjectPill').textContent = state.soloSubject.toUpperCase();
+      document.getElementById('arenaOutputTag').textContent = `OUTPUT: ${state.soloOutput.toUpperCase()}`;
+      document.getElementById('arenaInputTag').textContent = `INPUT: ${state.soloInput.toUpperCase()}`;
+      document.getElementById('arenaWpmTag').textContent = `${state.soloWpm} WPM`;
+
+      const q = QUESTIONS_DATA[0];
+      const full = q.options ? `${q.text} Options: ${q.options}` : q.text;
+      state.soloWords = full.split(' ');
+      state.soloWordIdx = 0;
+
+      document.getElementById('soloTypedSection').classList.add('hidden');
+      document.getElementById('soloAudioSection').classList.add('hidden');
+      document.getElementById('soloScoreBanner').classList.add('hidden');
+      document.getElementById('soloClockNum').textContent = '5.0s';
+      document.getElementById('soloTimerBar').style.width = '100%';
+      document.getElementById('soloLivePrompter').innerHTML = `<span class="text-slate-400">Ready. Hit <strong>"START QUESTION DRILL"</strong> to launch delivery.</span>`;
+    }
+
+    function toggleSoloReading() {
+      if (state.soloIsReading) return;
+      state.soloIsReading = true;
+      state.soloWordIdx = 0;
+      state.soloStartTime = performance.now();
+      document.getElementById('soloStartDrillBtn').textContent = '❚❚ READING IN PROGRESS...';
+      document.getElementById('soloTypedSection').classList.add('hidden');
+      document.getElementById('soloAudioSection').classList.add('hidden');
+      document.getElementById('soloScoreBanner').classList.add('hidden');
+
+      // If spoken output or hybrid, speak
+      if ((state.soloOutput === 'spoken' || state.soloOutput === 'hybrid') && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(QUESTIONS_DATA[0].text);
+        u.rate = 1.1;
+        window.speechSynthesis.speak(u);
+      }
+
+      const msPerWord = Math.round((60 / state.soloWpm) * 1000);
+      clearInterval(state.soloInterval);
+      state.soloInterval = setInterval(() => {
+        if (state.soloWordIdx < state.soloWords.length) {
+          state.soloWordIdx++;
+          renderSoloPrompter();
+        } else {
+          clearInterval(state.soloInterval);
+          state.soloIsReading = false;
+          document.getElementById('soloStartDrillBtn').textContent = '▶ RE-READ QUESTION';
+          startSoloClock(5.0);
+        }
+      }, msPerWord);
+    }
+
+    function renderSoloPrompter() {
+      document.getElementById('soloWordCounterTag').textContent = `Word ${state.soloWordIdx} of ${state.soloWords.length}`;
+      const p = document.getElementById('soloLivePrompter');
+      if (state.soloOutput === 'spoken') {
+        p.innerHTML = `<span class="text-neonCyan italic font-mono flex items-center space-x-2"><span class="animate-pulse">🔊</span><span>[Auditory Mode: Question is being read aloud. Buzz when ready!]</span></span>`;
+        return;
+      }
+      const read = state.soloWords.slice(0, state.soloWordIdx).join(' ');
+      const cur = state.soloWords[state.soloWordIdx] || '';
+      const rem = state.soloWords.slice(state.soloWordIdx + 1).join(' ');
+      p.innerHTML = `
+        <span class="text-white">${read}</span>
+        <span class="text-neonCyan font-bold bg-black border border-neonCyan px-1 rounded shadow-neon-cyan">${cur}</span>
+        <span class="text-slate-600">${rem}</span>
+      `;
+    }
+
+    function handleSoloBuzzPress() {
+      playSound('buzz');
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+      clearInterval(state.soloInterval);
+      state.soloIsReading = false;
+      document.getElementById('soloStartDrillBtn').textContent = '▶ START QUESTION DRILL';
+
+      const react = ((performance.now() - state.soloStartTime) / 1000).toFixed(3);
+      document.getElementById('soloReactionDisplay').textContent = `${react}s`;
+
+      if (state.soloInput === 'typed') {
+        document.getElementById('soloTypedSection').classList.remove('hidden');
+        document.getElementById('soloAudioSection').classList.add('hidden');
+        const inp = document.getElementById('soloKeyboardInput');
+        inp.value = '';
+        inp.focus();
+      } else {
+        document.getElementById('soloAudioSection').classList.remove('hidden');
+        document.getElementById('soloTypedSection').classList.add('hidden');
+      }
+
+      startSoloClock(5.0);
+      showToast('⚡ INTERRUPT RECORDED! 5.0s to enter answer');
+    }
+
+    function startSoloClock(sec = 5.0) {
+      let remain = sec;
+      const bar = document.getElementById('soloTimerBar');
+      const num = document.getElementById('soloClockNum');
+      const tagT = document.getElementById('soloTypedCountdownTag');
+      const tagA = document.getElementById('soloAudioCountdownTag');
+
+      const timer = setInterval(() => {
+        remain -= 0.1;
+        if (remain <= 0) {
+          clearInterval(timer);
+          num.textContent = '0.0s';
+          bar.style.width = '0%';
+          submitSoloAnswer(true); // timed out
+        } else {
+          num.textContent = remain.toFixed(1) + 's';
+          bar.style.width = `${(remain / sec) * 100}%`;
+          if (tagT) tagT.textContent = `${remain.toFixed(1)}s REMAINING`;
+          if (tagA) tagA.textContent = `${remain.toFixed(1)}s REMAINING`;
+        }
+      }, 100);
+    }
+
+    function submitSoloAnswer(isTimeout = false) {
+      const banner = document.getElementById('soloScoreBanner');
+      banner.classList.remove('hidden');
+
+      if (isTimeout) {
+        state.soloStreak = 0;
+        banner.className = 'p-4 rounded-xl font-mono text-xs mb-5 bg-black border border-neonPink text-neonPink shadow-neon-pink';
+        banner.innerHTML = `<strong>✗ TIMEOUT</strong> - Correct Answer: ${QUESTIONS_DATA[0].answer}`;
+      } else {
+        playSound('correct');
+        state.soloScore += 10;
+        state.soloStreak += 1;
+        banner.className = 'p-4 rounded-xl font-mono text-xs mb-5 bg-black border border-neonGreen text-neonGreen shadow-neon-green';
+        banner.innerHTML = `<strong>✓ CORRECT! (+10 POINTS)</strong> - Official Answer: ${QUESTIONS_DATA[0].answer}`;
+      }
+
+      document.getElementById('soloScoreCounter').textContent = state.soloScore;
+      document.getElementById('soloStreakCounter').textContent = state.soloStreak;
+      document.getElementById('soloTypedSection').classList.add('hidden');
+      document.getElementById('soloAudioSection').classList.add('hidden');
+    }
+
+    function revealSoloAnswer() {
+      const banner = document.getElementById('soloScoreBanner');
+      banner.classList.remove('hidden');
+      banner.className = 'p-4 rounded-xl font-mono text-xs mb-5 bg-black border border-neonCyan text-neonCyan';
+      banner.innerHTML = `<strong>REVEALED:</strong> ${QUESTIONS_DATA[0].answer}`;
+      showToast('Answer revealed');
+    }
+
+    function advanceNextSoloQuestion() {
+      setupSoloArena();
+      toggleSoloReading();
+      showToast('Next toss-up loaded');
+    }
+
+    // Modal Helpers
+    function submitUserSignIn() {
+      const h = document.getElementById('modalAuthCallsign').value.trim();
+      document.getElementById('userAuthTag').textContent = h.toUpperCase();
+      closeModal('signInModal');
+      showToast(`Authenticated as ${h}`);
+    }
+
+    function parseRawPacket() {
+      showToast('Packet parsed: 25 questions validated');
+    }
+
+    function loadConvertedToMatch() {
+      closeModal('converterModal');
+      navigateTo(4);
+      showToast('Converted questions sent to In-Person setup');
+    }
+
+    function exportAnalyticsCsv() {
+      showToast('Exported match_telemetry_277188.csv');
+      closeModal('analyticsModal');
+    }
+
+    function resolveChallenge(type) {
+      closeModal('challengeModal');
+      if (type === 'uphold') {
+        showToast('Challenge UPHELD: +4 points awarded');
+        adjustScore('A', 4);
+      } else if (type === 'reject') {
+        showToast('Challenge REJECTED: Floor decision stands');
+      } else {
+        showToast('Toss-up thrown out: Next question drawn');
+        nextQuestion();
+      }
+    }
+
+    function cycleEnginePreset() {
+      const p = ['NSB Championship #01', 'ACF Nationals Div 1', 'PACE NSC Grand Final'];
+      const el = document.getElementById('headerSyncLabel');
+      const idx = (p.indexOf(el.textContent) + 1) % p.length;
+      el.textContent = p[idx];
+      showToast(`Active Tournament Engine: ${p[idx]}`);
+    }
+
+    // Keyboard Spacebar Listener (Buzzer) & Enter Listener
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        if (state.currentSlide === 11) handleSoloBuzzPress();
+        else if (state.currentSlide === 9) handleTactileBuzzSlide9();
+        else if (state.currentSlide === 5) simulateForceBuzz('A');
+      } else if (e.code === 'Enter') {
+        if (e.target.id === 'soloKeyboardInput') {
+          e.preventDefault();
+          submitSoloAnswer();
+        } else if (e.target.id === 'joinPinInput') {
+          e.preventDefault();
+          navigateTo(8);
+        }
+      }
+    });
+
+    // Window Load Bootstrap
+    window.onload = function() {
+      loadHudQuestion();
+      renderMatchTimer();
+      initCvCanvas();
+    };
+  </script>
+</body>
+</html>

@@ -115,6 +115,10 @@ class ScienceBowlModerator:
                 except Exception as e:
                     print(f"⚠️ [WARNING]: Judge Service failed to initialize: {e}")
 
+        elif evt_type == "MATCH_BEGIN":
+            if self.question_bank and self.current_q_idx < len(self.question_bank):
+                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✅ Match timer started. Ready for the first tossup."}})
+
         elif evt_type == "SAVE_ROSTER":
             self.custom_teams = event.payload.get("teams", {})
             self.custom_roster = event.payload.get("players", {})
@@ -135,9 +139,8 @@ class ScienceBowlModerator:
             
             await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": 0, "score_b": 0}})
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"✅ Loaded {len(self.question_bank)} new questions."}})
-            
-            # FORCE THE UI TO RESET TO TOSSUP MODE
-            await self.outbound_queue.put({"type": "UI_STATE", "payload": {"show": "TOSSUP"}})
+            await self.outbound_queue.put({"type": "PREMATCH_READY", "payload": {"count": len(self.question_bank), "first_category": self.question_bank[0].get("category", "GENERAL")}})
+            await self.outbound_queue.put({"type": "UI_STATE", "payload": {"show": "NONE"}})
             
             await self.inbound_queue.put(Event(type=EventType.STATE_CHANGED, payload={}))
             
@@ -574,6 +577,7 @@ class ScienceBowlModerator:
         await asyncio.sleep(1)
 
         try:
+
             while True:
                 if not self.question_bank or self.current_q_idx >= len(self.question_bank):
                     # NEW: Process the queue so LOAD_BANK and SAVE_ROSTER don't get stuck forever
@@ -595,7 +599,7 @@ class ScienceBowlModerator:
                     "visual": q_data.get('tossup_visual', False)
                 }})
                 
-                # TELL UI TO ONLY SHOW TOSSUP BUTTON
+                # Keep tossups locked until the moderator begins the prematch.
                 await self.outbound_queue.put({"type": "UI_STATE", "payload": {"show": "TOSSUP"}})
                 
                 action = await self.wait_for_moderator_action(["MANUAL_START_TOSSUP"])

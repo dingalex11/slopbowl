@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=str(PROJECT_ROOT / "static")), name="static")
 
-OWNER_ONLY_EVENTS = {"SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY", "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP", "PAUSE_MATCH", "READING_DONE", "ANSWER_AUDIO", "LOG_BUZZPOINT", "AUTH_INIT"}
+OWNER_ONLY_EVENTS = {"SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY", "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP",    "PAUSE_MATCH", "MATCH_BEGIN", "READING_DONE", "ANSWER_AUDIO", "LOG_BUZZPOINT", "AUTH_INIT"}
 OWNER_ONLY_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "DOWNLOAD_CSV", "DEBUG_FRAME"}
 ONLINE_PUBLIC_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "UPDATE_STATUS", "UPDATE_SCORE", "BUZZ", "ROOM_ROSTER", "CONNECTED", "ERROR", "OPEN_BUZZ", "CLOSE_BUZZ"}
 ONLINE_PLAYER_EVENTS = {"BUZZ", "ANSWER_AUDIO", "READING_DONE", "PING"}
@@ -263,9 +263,8 @@ class HTMLGUIService:
                 await self.broadcast({"type": event_type, "payload": getattr(event, "payload", {})})
 
 
-@app.get("/")
-async def get_index():
-    html = (PROJECT_ROOT / "index.html").read_text(encoding="utf-8")
+def _render_index(filename: str) -> HTMLResponse:
+    html = (PROJECT_ROOT / filename).read_text(encoding="utf-8")
     config_values = {
         "__FIREBASE_API_KEY__": os.environ.get("FIREBASE_API_KEY", ""),
         "__FIREBASE_AUTH_DOMAIN__": os.environ.get("FIREBASE_AUTH_DOMAIN", ""),
@@ -278,6 +277,16 @@ async def get_index():
         encoded = json.dumps(value)[1:-1].replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
         html = html.replace(marker, encoded)
     return HTMLResponse(html)
+
+
+@app.get("/")
+async def get_index():
+    return _render_index("index.html")
+
+
+@app.get("/legacy")
+async def get_legacy_index():
+    return _render_index("index_legacy.html")
 
 
 def _bearer_token(request: Request) -> str:
@@ -424,6 +433,9 @@ async def room_websocket_endpoint(websocket: WebSocket, room_id: str):
             if not connection.allow_message(event_type):
                 await websocket.close(code=4429, reason="Rate limit exceeded")
                 break
+            if event_type == "MATCH_BEGIN" and role != "owner":
+                await websocket.send_json({"type": "ERROR", "payload": {"message": "Only the moderator can begin the match"}})
+                continue
             if mode == "online" and event_type == "PING":
                 continue
             if mode == "online" and event_type == "READING_DONE":

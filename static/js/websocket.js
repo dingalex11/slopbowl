@@ -152,6 +152,8 @@ function connectWebSocket(roomId, apiKey = null) {
             });
             const ownTeamName = currentTeam === 'Team A' ? document.getElementById('header-team-a-name') : document.getElementById('header-team-b-name');
             if (ownTeamName && payload.name) ownTeamName.title = `You are ${payload.name}${isOnlineCaptain ? ' (Captain)' : ''}`;
+            if (typeof applyRoleVisibility === 'function') applyRoleVisibility(currentUserRole);
+            if (typeof updateSeatLabels === 'function') updateSeatLabels(payload);
             updateOnlineBuzzButton();
         }
         else if (data.type === 'ROOM_ROSTER') {
@@ -159,6 +161,10 @@ function connectWebSocket(roomId, apiKey = null) {
         }
         else if (data.type === 'UPDATE_STATUS') {
             if (statusEl) statusEl.innerText = payload.text || 'READY';
+            const playerStatus = document.getElementById('player-lobby-status');
+            if (playerStatus) playerStatus.innerText = payload.text || 'Connected';
+            const micLabel = document.getElementById('player-mic-label');
+            if (micLabel) micLabel.innerText = (payload.text || 'STANDBY').slice(0, 42).toUpperCase();
             
             // EXACT TRIGGER: Start the 5-second physical timer only when the backend opens the buzz window
             if (payload.text === "⏳ 5 Seconds to Buzz...") {
@@ -193,8 +199,7 @@ function connectWebSocket(roomId, apiKey = null) {
         }
         else if (data.type === 'UPDATE_QUESTION') {
             currentStageType = "TOSSUP";
-            const questionDisplay = document.getElementById('stage-title-text');
-            if (questionDisplay) questionDisplay.innerText = payload.text || '';
+            // AUDIO-ONLY READOUT: question text is never rendered on screen.
             setStage('READ_TOSSUP'); 
             
             const catMap = {
@@ -210,23 +215,10 @@ function connectWebSocket(roomId, apiKey = null) {
             const rawCat = (payload.category || 'GENERAL').toUpperCase();
             currentCategoryAbbrev = catMap[rawCat] || rawCat.substring(0, 4);
 
-            const titleText = document.getElementById('stage-title-text');
-            const subText = document.getElementById('stage-subtitle-text');
             const catBadge = document.getElementById('stage-cat-badge');
             
             if (catBadge) catBadge.innerText = payload.category || 'GENERAL';
-            if (titleText) titleText.innerText = "";
-            
-            if (subText) {
-                const safeAnswer = payload.answer ? String(payload.answer).trim() : "";
-                if (safeAnswer !== "") {
-                    subText.innerText = ``;
-                    subText.className = "text-lg text-emerald-400 font-bold font-sans mt-3";
-                } else {
-                    subText.innerText = `OFFICIAL ANSWER: [Not Provided]`;
-                    subText.className = "text-lg text-amber-500 font-bold font-sans mt-3";
-                }
-            }
+            // No question or answer text is written to the DOM.
         } 
         else if (data.type === 'NEW_LOG_ENTRY') {
             const tbody = document.getElementById('scoresheet-body');
@@ -464,8 +456,10 @@ function connectWebSocket(roomId, apiKey = null) {
             const playerEl = document.getElementById('buzz-player-name');
             if (playerEl) playerEl.innerText = `FLOOR: ${team} (${player})`;
             
-            document.body.style.backgroundColor = '#450a0a';
-            setTimeout(() => document.body.style.backgroundColor = '#121214', 300);
+            const playerStage = document.getElementById('player-stage-label');
+            if (playerStage) playerStage.innerText = `BUZZ: ${team} (${player})`;
+            document.body.style.backgroundColor = '#2a0505';
+            setTimeout(() => document.body.style.backgroundColor = '#000000', 300);
         }
     };
 
@@ -534,22 +528,31 @@ function sendEvent(eventType, payload = {}) {
 
 // --- TEXT TO SPEECH (TTS) LOGIC ---
 function updateOnlineBuzzButton() {
-    const button = document.getElementById('btn-online-buzz');
-    if (!button) return;
+    const buttons = document.querySelectorAll('.js-online-buzz');
+    if (!buttons.length) return;
     const canBuzz = onlineBuzzOpen && currentTeam === currentOnlineBuzzTeam && (!onlineCaptainOnly || isOnlineCaptain);
-    button.disabled = currentRoomMode !== 'online' || !canBuzz;
-    button.textContent = onlineBuzzOpen && currentTeam !== currentOnlineBuzzTeam ? 'OTHER TEAM BUZZING' : (onlineBuzzOpen && onlineCaptainOnly && !isOnlineCaptain ? 'CAPTAIN BUZZES BONUS' : (canBuzz ? 'BUZZ NOW' : 'BUZZ CLOSED'));
+    buttons.forEach((button) => {
+        button.disabled = currentRoomMode !== 'online' || !canBuzz;
+        if (button.classList.contains('buzz-btn')) {
+            // Giant player buzzer keeps its label short.
+            button.textContent = canBuzz ? 'BUZZ' : (onlineBuzzOpen ? 'STANDBY' : 'BUZZ CLOSED');
+        } else {
+            button.textContent = onlineBuzzOpen && currentTeam !== currentOnlineBuzzTeam ? 'OTHER TEAM BUZZING' : (onlineBuzzOpen && onlineCaptainOnly && !isOnlineCaptain ? 'CAPTAIN BUZZES BONUS' : 'MY BUZZER');
+        }
+    });
 }
 
 function renderOnlineRoster(players) {
-    const holder = document.getElementById('online-roster');
-    if (!holder) return;
-    holder.replaceChildren();
-    players.forEach((player) => {
-        const item = document.createElement('span');
-        item.className = 'px-2 py-1 rounded bg-isodark border border-isoborder text-xs text-slate-300';
-        item.textContent = `${player.name} · ${player.team}${player.captain ? ' · Captain' : ''}`;
-        holder.appendChild(item);
+    const holders = document.querySelectorAll('.js-online-roster');
+    if (!holders.length) return;
+    holders.forEach((holder) => {
+        holder.replaceChildren();
+        players.forEach((player) => {
+            const item = document.createElement('span');
+            item.className = 'px-2 py-1 rounded bg-black border border-borderDark text-xs text-slate-300';
+            item.textContent = `${player.name} · ${player.team}${player.captain ? ' · Captain' : ''}`;
+            holder.appendChild(item);
+        });
     });
 }
 
@@ -578,8 +581,8 @@ function speakText(text) {
                 if (event.name === 'word') {
                     const wordStr = text.substring(event.charIndex);
                     currentSpokenWord = wordStr.split(/[ \n\r\t]+/, 1)[0].replace(/[^a-zA-Z0-9-]/g, '');
-                    const statusEl = document.getElementById('header-status');
-                    if (statusEl) statusEl.innerText = `🗣️ ...${currentSpokenWord}`;
+                    // AUDIO-ONLY READOUT: the spoken word is tracked for buzzpoint
+                    // logging but never displayed on screen.
                 }
             };
             
