@@ -22,6 +22,14 @@ from services.camera_service import VisionService
 
 MANUAL_START_EVENTS = ("MANUAL_START_TOSSUP", "MANUAL_REREAD_TOSSUP", "MANUAL_START_BONUS")
 
+# Events the loops must keep serving while a question is live. Anything here is
+# processed (or answered) instead of being silently dropped mid-read or mid-buzz.
+ADMIN_EVENTS = (
+    "EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE",
+    "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE",
+    "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT",
+) + MANUAL_START_EVENTS
+
 
 class ScienceBowlModerator:
     def __init__(self, use_audio=True, use_camera=False, initial_bank=None, inbound_queue_size=INBOUND_QUEUE_SIZE, outbound_queue_size=OUTBOUND_QUEUE_SIZE):
@@ -133,6 +141,11 @@ class ScienceBowlModerator:
                     await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✅ Cloud API Key Linked & AI Judge Online!"}})
                 except Exception as e:
                     print(f"⚠️ [WARNING]: Judge Service failed to initialize: {e}")
+
+        elif evt_type in MANUAL_START_EVENTS:
+            # A start that arrives while a question is live must not vanish: it is not
+            # the loop's turn to accept one yet, so say so.
+            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ A question is already in progress — finish or challenge it before starting the next one."}})
 
         elif evt_type == "MATCH_BEGIN":
             if self.question_bank and self.current_q_idx < len(self.question_bank):
@@ -337,7 +350,7 @@ class ScienceBowlModerator:
             if evt_type == "READING_DONE" and (not self.online_mode or reply.payload.get("reading_id") == self.current_reading_id):
                 self.current_reading_id = None
                 break
-            elif evt_type in ["PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "EXPORT_CSV", "RESET_CALIBRATION", "SAVE_CALIBRATION", "CALIBRATE_BASELINE", "ADJUST_SCORE"]:
+            elif evt_type in ADMIN_EVENTS:
                 if evt_type not in ["PING", "PAUSE_MATCH"]:
                     await self.process_admin_event(reply)
             else:
@@ -408,7 +421,7 @@ class ScienceBowlModerator:
             event = await self.inbound_queue.get()
             evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
             
-            if evt_type in ["EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE"]:
+            if evt_type in ADMIN_EVENTS:
                 if evt_type not in ["PING", "PAUSE_MATCH"]:
                     await self.process_admin_event(event)
                 continue 
@@ -445,7 +458,7 @@ class ScienceBowlModerator:
                     event = await asyncio.wait_for(self.inbound_queue.get(), timeout=remaining)
                     evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
                     
-                    if evt_type in ["PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "EXPORT_CSV", "RESET_CALIBRATION", "SAVE_CALIBRATION", "CALIBRATE_BASELINE", "ADJUST_SCORE"]:
+                    if evt_type in ADMIN_EVENTS:
                         if evt_type not in ["PING", "PAUSE_MATCH"]:
                             await self.process_admin_event(event)
                         continue
@@ -491,7 +504,7 @@ class ScienceBowlModerator:
                     if evt_type == "LOG_BUZZPOINT":
                         buzzpoint_word = reply.payload.get("buzzpoint", "")
                         break
-                    elif evt_type in ["PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "EXPORT_CSV", "RESET_CALIBRATION", "SAVE_CALIBRATION", "CALIBRATE_BASELINE", "ADJUST_SCORE"]:
+                    elif evt_type in ADMIN_EVENTS:
                         if evt_type not in ["PING", "PAUSE_MATCH"]:
                             await self.process_admin_event(reply)
                     else:
@@ -532,7 +545,7 @@ class ScienceBowlModerator:
                 if evt_type == "READING_DONE" and (not self.online_mode or reply.payload.get("reading_id") == self.current_reading_id):
                     self.current_reading_id = None
                     break
-                elif evt_type in ["PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "EXPORT_CSV","RESET_CALIBRATION", "SAVE_CALIBRATION", "CALIBRATE_BASELINE", "ADJUST_SCORE"]:
+                elif evt_type in ADMIN_EVENTS:
                     if evt_type not in ["PING", "PAUSE_MATCH"]:
                         await self.process_admin_event(reply)
                 else:
@@ -565,7 +578,7 @@ class ScienceBowlModerator:
                         await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🗣️ Heard: '{spoken_answer}'"}})
                         break
                         
-                    elif evt_type in ["EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE"]:
+                    elif evt_type in ADMIN_EVENTS:
                         if evt_type not in ["PING", "PAUSE_MATCH"]:
                             await self.process_admin_event(reply)
             except asyncio.TimeoutError:
@@ -833,7 +846,7 @@ class ScienceBowlModerator:
                                     await self._set_online_buzz_window(False)
                                     challenge_triggered = True
                                     break
-                                elif evt_type in ["EXPORT_CSV", "SAVE_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE", "EDIT_LOG_ENTRY"]:
+                                elif evt_type in ADMIN_EVENTS:
                                     if evt_type not in ["PING", "PAUSE_MATCH"]:
                                         await self.process_admin_event(reply)
                             except asyncio.TimeoutError:
@@ -881,7 +894,7 @@ class ScienceBowlModerator:
                                     elif evt_type == "CHALLENGE":
                                         challenge_triggered = True
                                         break
-                                    elif evt_type in ["EXPORT_CSV", "SAVE_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE", "EDIT_LOG_ENTRY"]:
+                                    elif evt_type in ADMIN_EVENTS:
                                         if evt_type not in ["PING", "PAUSE_MATCH"]:
                                             await self.process_admin_event(reply)
                             except asyncio.TimeoutError:

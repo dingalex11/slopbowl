@@ -20,6 +20,14 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_question_bank([{"tossup_text": "x" * 12001, "tossup_answer": "Answer"}])
 
+    def test_question_bank_accepts_both_visual_flags(self):
+        bank = [{"tossup_text": "Q", "tossup_answer": "A", "tossup_visual": True, "bonus_visual": False}]
+        self.assertEqual(validate_question_bank(bank), bank)
+        with self.assertRaises(ValueError):
+            validate_question_bank([{"tossup_text": "Q", "tossup_answer": "A", "bonus_visual": "yes"}])
+        with self.assertRaises(ValueError):
+            validate_question_bank([{"tossup_text": "Q", "tossup_answer": "A", "round": 1}])
+
     def test_events_reject_unknown_or_invalid_payloads(self):
         self.assertEqual(validate_client_event("BUZZ", {"team": "Team A", "player": "A-1"})["team"], "Team A")
         with self.assertRaises(ValueError):

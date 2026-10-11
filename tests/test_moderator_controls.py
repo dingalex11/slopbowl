@@ -63,5 +63,16 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message["payload"]["show"], "NONE")
 
 
+    async def test_manual_start_mid_question_reports_in_progress(self):
+        """A start arriving while a question is live must answer, not vanish."""
+        moderator = ScienceBowlModerator(use_audio=False)
+
+        await moderator.process_admin_event(Event(type="MANUAL_START_TOSSUP", payload={}))
+
+        message = await moderator.outbound_queue.get()
+        self.assertEqual(message["type"], "UPDATE_STATUS")
+        self.assertIn("already in progress", message["payload"]["text"].lower())
+
+
 if __name__ == "__main__":
     unittest.main()

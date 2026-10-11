@@ -180,12 +180,24 @@ function connectWebSocket(roomId, apiKey = null) {
                 settingsStatus.innerText = payload.text;
                 settingsStatus.className = 'mt-4 text-center text-xs font-mono font-bold text-neonPink min-h-5';
             }
+
+            // The status line alone also proves the packet landed, so the pending
+            // confirmation cannot hang on one missed message.
+            const loaded = /Loaded (\d+) new questions/.exec(payload.text || '');
+            if (loaded) announcePacketLoaded({ count: Number(loaded[1]) });
         }
         else if (data.type === 'PREMATCH_READY') {
             announcePacketLoaded(payload);
         }
         else if (data.type === 'ERROR') {
-            showEventFeedback(payload.message || 'The room rejected that action.');
+            const roomError = payload.message || 'The room rejected that action.';
+            showEventFeedback(roomError);
+            // Resolve the packet confirmation: a rejected upload must not sit on "waiting".
+            const pendingStatus = document.getElementById('settings-packet-status');
+            if (pendingStatus && (pendingStatus.className || '').includes('text-neonAmber')) {
+                pendingStatus.innerText = `Packet rejected — ${roomError}`;
+                pendingStatus.className = 'mt-4 text-center text-xs font-mono font-bold text-neonPink min-h-5';
+            }
         }
         // ... [Existing websocket.js handlers like NEW_LOG_ENTRY] ...
         

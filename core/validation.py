@@ -31,16 +31,21 @@ def _bounded_string(value: Any, name: str, max_length: int, *, allow_empty: bool
 def validate_question_bank(bank: Any) -> list[dict[str, Any]]:
     if not isinstance(bank, list) or not bank or len(bank) > MAX_QUESTIONS_PER_BANK:
         raise ValueError(f"Question bank must contain 1 to {MAX_QUESTIONS_PER_BANK} questions")
-    allowed_fields = {"tossup_text", "tossup_answer", "bonus_text", "bonus_answer", "category", "type", "tossup_options", "bonus_options", "tossup_visual"}
+    # bonus_visual mirrors tossup_visual: the game loop already reads it for the bonus
+    # readout, so rejecting it made valid packets unloadable.
+    allowed_fields = {"tossup_text", "tossup_answer", "bonus_text", "bonus_answer", "category", "type", "tossup_options", "bonus_options", "tossup_visual", "bonus_visual"}
     if len(json.dumps(bank, ensure_ascii=False).encode("utf-8")) > 768 * 1024:
         raise ValueError("Question bank exceeds the 768 KB limit")
     for index, question in enumerate(bank):
         if not isinstance(question, dict):
             raise ValueError(f"Question {index + 1} must be an object")
-        if set(question) - allowed_fields:
-            raise ValueError(f"Question {index + 1} contains unsupported fields")
-        if "tossup_visual" in question and not isinstance(question["tossup_visual"], bool):
-            raise ValueError(f"Question {index + 1} tossup_visual must be true or false")
+        unexpected_fields = sorted(set(question) - allowed_fields)
+        if unexpected_fields:
+            # Name them: an upload rejected for unknown metadata is otherwise unfixable.
+            raise ValueError(f"Question {index + 1} contains unsupported fields: {', '.join(unexpected_fields)}")
+        for visual_field in ("tossup_visual", "bonus_visual"):
+            if visual_field in question and not isinstance(question[visual_field], bool):
+                raise ValueError(f"Question {index + 1} {visual_field} must be true or false")
         for field in ("tossup_text", "tossup_answer"):
             _bounded_string(question.get(field), f"question {index + 1} {field}", 12000)
         for field in ("bonus_text", "bonus_answer"):
