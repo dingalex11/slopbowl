@@ -38,9 +38,12 @@ MIN_READ_SECONDS = 1.0
 READ_EARLY_REPORT_FRACTION = 0.4
 READ_WATCHDOG_FACTOR = 1.8
 READ_WATCHDOG_MIN_SECONDS = 6.0
-# When the only report about a read was impossible (an older station claiming it finished
-# at once), nothing else is coming: the window opens once the question has had its say.
-READ_ASSUMED_END_FACTOR = 1.15
+# When a read's only report was impossible (an older station claiming it finished at
+# once), the end of the read has to be guessed from the text. Speech is much slower than
+# the sanity-check pace above — measured at about 12 characters per second at the
+# client's speech rate — so the guess uses a deliberately slower pace: a guessed end
+# must never land while the question is still being read out.
+READ_SLOW_CHARS_PER_SECOND = 9.0
 
 
 def read_clock() -> float:
@@ -421,8 +424,9 @@ class ScienceBowlModerator:
 
         The reading station is normally the only thing that knows speaking stopped, but an
         older station reports the read as finished the instant it starts. The earliest
-        believable end is therefore derived from the text length, and a watchdog keeps the
-        match moving when no report arrives at all.
+        believable end is therefore derived from the text length, a slow reading pace
+        bounds what the guessed end may be, and a watchdog keeps the match moving when no
+        report arrives at all.
         """
         now = read_clock()
         self.read_report_doubted = False
@@ -431,9 +435,10 @@ class ScienceBowlModerator:
             self.read_assumed_end = now
             self.read_deadline = now + READ_WATCHDOG_MIN_SECONDS
             return
-        estimate = max(MIN_READ_SECONDS, len(text or "") / READ_CHARS_PER_SECOND)
+        length = len(text or "")
+        estimate = max(MIN_READ_SECONDS, length / READ_CHARS_PER_SECOND)
         self.read_earliest_end = now + estimate * READ_EARLY_REPORT_FRACTION
-        self.read_assumed_end = now + estimate * READ_ASSUMED_END_FACTOR
+        self.read_assumed_end = now + max(MIN_READ_SECONDS, length / READ_SLOW_CHARS_PER_SECOND)
         self.read_deadline = now + estimate * READ_WATCHDOG_FACTOR + READ_WATCHDOG_MIN_SECONDS
 
     def note_impossible_read_report(self) -> None:

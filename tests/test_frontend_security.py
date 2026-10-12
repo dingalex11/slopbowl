@@ -67,6 +67,25 @@ class FrontendSecurityTests(unittest.TestCase):
         self.assertIn("const readingId = payload.reading_id || currentReadingId;", source)
         self.assertIn("speakText(payload.text, payload.reading_id || null);", source)
 
+    def test_a_read_whose_end_event_never_arrives_still_reports_completion(self):
+        """A long question can stop speaking without Chromium delivering 'end'.
+
+        The engine's own state is then the only truth about the read. Without polling it
+        the station never reports the question as finished, so the room waits out the
+        server's watchdog and the 5-second buzz timer starts long after the read.
+        """
+        source = (ROOT / "static/js/websocket.js").read_text(encoding="utf-8")
+        self.assertIn("const watchSpokenEnd = () => {", source)
+        # The poll must actually run for the utterance, not merely exist.
+        self.assertIn("\n        watchSpokenEnd();", source)
+        self.assertIn("if (synth.speaking || synth.pending) {", source)
+        # A paused match holds the utterance, so waiting on the engine cannot end the read.
+        self.assertIn("so a pause is not an end", source)
+        self.assertIn("utterance.onstart = () => { spoken = true; };", source)
+        # The utterance may only report one outcome: 'end', the poll and a retry cannot
+        # each claim the same read finished or failed.
+        self.assertIn("if (generation !== readingGeneration || finished) return;", source)
+
     def test_room_codes_are_validated_instead_of_rewritten(self):
         source = (ROOT / "static/js/ui.js").read_text(encoding="utf-8")
         self.assertIn("!/^[a-z0-9][a-z0-9-]{0,63}$/.test(currentRoomId)", source)

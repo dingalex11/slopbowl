@@ -701,6 +701,13 @@ function cancelSpeech() {
     synth.cancel();
 }
 
+// A long question can end without Chromium ever firing the utterance 'end' event, so the
+// station cannot rely on that event alone to report the read as finished. Polling the
+// engine's own state is the ground truth for when speaking stopped; the start grace
+// covers the delay before an utterance actually begins.
+const SPEECH_POLL_MS = 200;
+const SPEECH_START_GRACE_MS = 1500;
+
 function speakText(text, readingId = null) {
     try {
         const generation = ++readingGeneration;
@@ -747,8 +754,16 @@ function scheduleUtterance(text, readingId, generation, attempt) {
             }
         };
 
+        // Exactly one report per utterance: 'end' and the spoken-end poll below both
+        // finish the read, and the room must not be told twice.
+        let spoken = false;
+        let finished = false;
+        let endWatch = null;
+
         const finishReading = (failed) => {
-            if (generation !== readingGeneration) return;
+            if (generation !== readingGeneration || finished) return;
+            finished = true;
+            if (endWatch) clearInterval(endWatch);
             isReading = false;
             window._activeUtterance = null;
             if (currentRoomMode === 'online') isReadingOnline = false;
@@ -761,22 +776,59 @@ function scheduleUtterance(text, readingId, generation, attempt) {
             // The timer trigger has been removed from here so it doesn't fire after reading the result!
         };
 
+        const retryReading = () => {
+            finished = true;  // This utterance is spent: a silence report cannot report it too.
+            if (endWatch) clearInterval(endWatch);
+            synth.cancel();
+            scheduleUtterance(text, readingId, generation, 1);
+        };
+
+        // The engine stops speaking whether or not it delivers 'end'. Waiting on its own
+        // state reports the read when the audio really stopped, instead of leaving the
+        // room to wait out its watchdog with the buzz timer starting long after.
+        const watchSpokenEnd = () => {
+            const began = performance.now();
+            endWatch = setInterval(() => {
+                if (generation !== readingGeneration || finished) {
+                    clearInterval(endWatch);
+                    return;
+                }
+                if (synth.speaking || synth.pending) {
+                    // True while a paused match is holding the utterance, so a pause is not an end.
+                    spoken = true;
+                    return;
+                }
+                if (!spoken) {
+                    if (performance.now() - began < SPEECH_START_GRACE_MS) return;
+                    clearInterval(endWatch);
+                    if (attempt === 0) {
+                        retryReading();
+                        return;
+                    }
+                    finishReading(true);
+                    return;
+                }
+                finishReading(false);
+            }, SPEECH_POLL_MS);
+        };
+
+        utterance.onstart = () => { spoken = true; };
         utterance.onend = () => finishReading(false);
         utterance.onerror = () => {
             // An utterance we stopped ourselves is already filtered by the generation
             // guard, so anything arriving here came from outside us: another page that
             // stole the speech engine, or a browser that cannot speak at all. Neither
             // means the question has been read, so retry once, then say so plainly.
-            if (generation !== readingGeneration) return;
+            if (generation !== readingGeneration || finished) return;
             if (attempt === 0) {
-                synth.cancel();
-                scheduleUtterance(text, readingId, generation, 1);
+                retryReading();
                 return;
             }
             finishReading(true);
         };
 
         synth.speak(utterance);
+        watchSpokenEnd();
     }, attempt === 0 ? 50 : 350);
 }
 

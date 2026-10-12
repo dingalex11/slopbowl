@@ -220,10 +220,14 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
         )
         moderator.state.transition_to(GameState.READING_TOSSUP)
 
-        with patch.object(main, "MIN_READ_SECONDS", 1.0), patch.object(main, "READ_CHARS_PER_SECOND", 400.0):
+        # Both paces are compressed so the read window is a fraction of a second: the
+        # point here is which fallback ends the read, not how long a real question takes.
+        with patch.object(main, "MIN_READ_SECONDS", 1.0), patch.object(main, "READ_CHARS_PER_SECOND", 400.0), patch.object(
+            main, "READ_SLOW_CHARS_PER_SECOND", 400.0
+        ):
             task = asyncio.create_task(moderator._handle_tossup_attempt(moderator.question_bank[0]))
             try:
-                # 1.0s estimate -> believable at 0.4s, assumed end at 1.15s.
+                # 1.0s estimate -> believable at 0.4s, assumed end at 1.0s, watchdog at 7.8s.
                 async def report_immediately():
                     while True:
                         message = await asyncio.wait_for(moderator.outbound_queue.get(), 3.0)
@@ -253,6 +257,27 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("⏳ 5 Seconds to Buzz...", elapsed_statuses)
         self.assertIn(READ_TIMEOUT_WARNING, elapsed_statuses)
+
+    def test_a_guessed_read_end_is_not_earlier_than_a_real_question_takes_to_speak(self):
+        """With no believable report the read is only guessed at a deliberately slow pace.
+
+        Speech on the moderator's machine measures about 12 characters per second, so a
+        guess derived from the faster sanity-check pace opened the buzz window — and its
+        timer — while the question was still being read out; the guess must stay past the
+        slowest reading a station can honestly produce.
+        """
+        measured_speech_chars_per_second = 12.0
+        moderator = ScienceBowlModerator(use_audio=True)
+        text = "Tossup,  " + ("Question " * 20) + "  "
+
+        moderator._set_read_window(text)
+
+        now = main.read_clock()
+        guessed_end = moderator.read_assumed_end - now
+        watchdog = moderator.read_deadline - now
+        self.assertGreaterEqual(guessed_end, len(text) / measured_speech_chars_per_second)
+        self.assertLess(guessed_end, watchdog)
+        self.assertLess(moderator.read_earliest_end - now, guessed_end)
 
     async def test_a_silent_station_times_out_with_a_warning(self):
         """When nothing reports at all, the watchdog opens the window and says so."""
