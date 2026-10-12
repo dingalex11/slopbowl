@@ -230,13 +230,18 @@ const bukRun = {
   readStart: 0, buzzAt: 0, firstKeystrokeAt: 0,
   wordStreamDone: false, speechDone: false,
   streamTimer: null, windowTimer: null, lockoutTimer: null, speechPoll: null,
-  utterance: null, words: [], shownWords: 0,
+  utterance: null, words: [], shownWords: 0, wordSpans: [], revealIndex: -1,
+  sawBoundary: false, fallbackTimer: null, fallbackInterval: null,
+  answering: false, awaitingNext: false,
   records: [], finished: false,
 };
 
 const BUK_TOSSUP_WINDOW_S = 5.0;
 const BUK_ANSWER_WINDOW_S = 5.0;
 const BUK_BONUS_WINDOW_S = 20.0;
+// Realistic spoken pace (chars/sec at rate 1) for the reveal fallback when the engine gives
+// no word boundaries. Matches the app's measured pace (SOLO_SPOKEN_CHARS_PER_SECOND).
+const BUK_SPOKEN_CHARS_PER_SECOND = 12;
 
 function bukStopSpeech() {
   if (window.speechSynthesis) window.speechSynthesis.cancel();
@@ -246,6 +251,8 @@ function bukStopSpeech() {
 function bukStopDelivery() {
   bukRun.delivering = false;
   if (bukRun.streamTimer) { clearInterval(bukRun.streamTimer); bukRun.streamTimer = null; }
+  if (bukRun.fallbackTimer) { clearTimeout(bukRun.fallbackTimer); bukRun.fallbackTimer = null; }
+  if (bukRun.fallbackInterval) { clearInterval(bukRun.fallbackInterval); bukRun.fallbackInterval = null; }
   bukStopSpeech();
 }
 
@@ -277,61 +284,106 @@ function bukStartQuestion(question) {
   if (textEl) textEl.replaceChildren();
   bukRun.readStart = performance.now();
   bukRun.tracker.noteStart();
-  bukStreamWords(question.text || '');
+  bukPrepareReveal();
   bukSpeak(question.text || '');
 }
 
-function bukStreamWords(text) {
-  const words = bukRun.words;
+function bukPrepareReveal() {
   const textEl = bukEl('buk-question-text');
+  if (textEl) textEl.replaceChildren();
+  // Pre-create every word as a hidden text node so the reveal only toggles visibility:
+  // the layout stays put and untrusted packet text stays text (never markup).
+  bukRun.wordSpans = bukRun.words.map((word) => {
+    const span = document.createElement('span');
+    span.textContent = `${word.word} `;
+    span.style.visibility = 'hidden';
+    if (textEl) textEl.appendChild(span);
+    return span;
+  });
+  bukRun.revealIndex = -1;
+  if (!bukRun.words.length) bukRun.wordStreamDone = true;
+}
+
+function bukRevealUpTo(index) {
+  const words = bukRun.words;
+  const last = words.length - 1;
+  const target = Math.max(-1, Math.min(index, last));
+  if (target <= bukRun.revealIndex) return;
+  for (let i = bukRun.revealIndex + 1; i <= target; i += 1) {
+    if (bukRun.wordSpans[i]) bukRun.wordSpans[i].style.visibility = 'visible';
+  }
+  bukRun.revealIndex = target;
+  bukRun.shownWords = target + 1;
   const counter = bukEl('buk-word-count');
+  if (counter) counter.textContent = `Word ${Math.max(1, target + 1)} of ${words.length}`;
   const bar = bukEl('buk-progress-bar');
-  const msPerWord = Math.max(55, Math.round(60000 / 260));
-  const caret = document.createElement('span');
-  caret.className = 'text-neonCyan animate-pulse';
-  caret.textContent = '\u258c';
-  if (textEl) textEl.appendChild(caret);
-  let index = 0;
-  bukRun.streamTimer = setInterval(() => {
-    if (!bukRun.delivering) { clearInterval(bukRun.streamTimer); bukRun.streamTimer = null; return; }
-    index += 1;
-    bukRun.shownWords = index;
-    if (bukRun.tracker) bukRun.tracker.noteCounted(index - 1);
-    if (textEl && caret.parentNode === textEl) {
-      const span = document.createElement('span');
-      span.textContent = `${words[index - 1] ? words[index - 1].word : ''} `;
-      textEl.insertBefore(span, caret);
-    }
-    if (counter) counter.textContent = `Word ${index} of ${words.length}`;
-    if (bar) bar.style.width = `${Math.min(100, Math.round((index / Math.max(1, words.length)) * 100))}%`;
-    if (index >= words.length) {
-      clearInterval(bukRun.streamTimer); bukRun.streamTimer = null;
-      if (caret.parentNode) caret.remove();
-      bukRun.wordStreamDone = true;
-      bukFinishDelivery();
-    }
-  }, msPerWord);
+  if (bar) bar.style.width = `${Math.min(100, Math.round(((target + 1) / Math.max(1, words.length)) * 100))}%`;
+  if (target >= last) {
+    bukRun.wordStreamDone = true;
+    bukFinishDelivery();
+  }
+}
+
+// Fallback for engines that never fire word boundaries: pace the reveal to a realistic
+// spoken rate (not a fixed WPM) so the text tracks the audio as closely as it can. The
+// first real boundary cancels this in favour of exact, audio-driven sync.
+function bukStartFallbackReveal() {
+  if (bukRun.fallbackTimer || bukRun.fallbackInterval) return;
+  bukRun.fallbackTimer = setTimeout(() => {
+    bukRun.fallbackTimer = null;
+    if (bukRun.sawBoundary || !bukRun.delivering) return;
+    const rate = (bukRun.utterance && bukRun.utterance.rate) || 1;
+    const charsPerSecond = BUK_SPOKEN_CHARS_PER_SECOND * rate;
+    bukRun.fallbackInterval = setInterval(() => {
+      if (bukRun.sawBoundary || !bukRun.delivering) {
+        clearInterval(bukRun.fallbackInterval); bukRun.fallbackInterval = null;
+        return;
+      }
+      const elapsedSeconds = (performance.now() - bukRun.readStart) / 1000;
+      bukRevealUpTo(bukWordIndexAt(bukRun.words, elapsedSeconds * charsPerSecond));
+      if (bukRun.tracker) bukRun.tracker.noteCounted(bukRun.revealIndex);
+    }, 120);
+  }, 120);
 }
 
 function bukSpeak(text) {
-  if (!window.speechSynthesis) { bukRun.speechDone = true; bukFinishDelivery(); return; }
+  if (!window.speechSynthesis) {
+    bukRun.speechDone = true;
+    bukStartFallbackReveal();
+    bukFinishDelivery();
+    return;
+  }
   bukStopSpeech();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.rate = 1.05;
   bukRun.utterance = utterance;
+  bukRun.sawBoundary = false;
   let settled = false;
   let spoke = false;
   const settle = () => {
     if (settled) return;
     settled = true;
     if (bukRun.speechPoll) { clearInterval(bukRun.speechPoll); bukRun.speechPoll = null; }
+    if (bukRun.fallbackTimer) { clearTimeout(bukRun.fallbackTimer); bukRun.fallbackTimer = null; }
+    if (bukRun.fallbackInterval) { clearInterval(bukRun.fallbackInterval); bukRun.fallbackInterval = null; }
     bukRun.speechDone = true;
+    bukRevealUpTo(bukRun.words.length - 1);
     bukFinishDelivery();
   };
-  utterance.onstart = () => { spoke = true; if (bukRun.tracker) bukRun.tracker.noteStart(); };
+  utterance.onstart = () => {
+    spoke = true;
+    if (bukRun.tracker) bukRun.tracker.noteStart();
+    bukRevealUpTo(0);
+    bukStartFallbackReveal();
+  };
   utterance.onboundary = (event) => {
-    // Primary capture source; only meaningful for word boundaries.
-    if (event && event.name === 'word' && bukRun.tracker) bukRun.tracker.noteBoundary(event.charIndex);
+    if (!event || event.name !== 'word') return;
+    // The boundary IS the audio's position, so the reveal follows the sound exactly.
+    bukRun.sawBoundary = true;
+    if (bukRun.fallbackInterval) { clearInterval(bukRun.fallbackInterval); bukRun.fallbackInterval = null; }
+    const index = buzzWordIndexAt(bukRun.words, event.charIndex);
+    bukRevealUpTo(index);
+    if (bukRun.tracker) bukRun.tracker.noteBoundary(event.charIndex);
   };
   utterance.onend = () => {
     // A cancelled read must never be recorded as a completed word or a finished read.
@@ -399,6 +451,7 @@ function bukOpenAnswerPanel(seconds, phase) {
   const input = bukEl('buk-answer-input');
   if (input) { input.value = ''; input.focus(); }
   bukRun.answerPhase = phase;
+  bukRun.answering = true;
   const label = bukEl('buk-answer-timer');
   const deadline = performance.now() + seconds * 1000;
   bukRun.lockoutTimer = setInterval(() => {
@@ -460,6 +513,7 @@ async function bukSubmitToServer(typedAnswer, buzz, expired, outcome) {
     bukStatus('buk-run-status', err.message || 'Could not record that answer.', '#ff4d4d');
   } finally {
     bukRun.submitting = false;
+    bukRun.answering = false;
   }
 }
 
@@ -471,14 +525,15 @@ function bukAdvance(next) {
   // Correct toss-up -> the bonus is next (same question); otherwise the next toss-up.
   const nextBtn = bukEl('buk-next-btn'); if (nextBtn) nextBtn.classList.remove('hidden');
   bukRun.pendingNext = next;
+  bukRun.awaitingNext = true;
 }
 
 function bukNextQuestion() {
   const nextBtn = bukEl('buk-next-btn'); if (nextBtn) nextBtn.classList.add('hidden');
   const feedback = bukEl('buk-feedback'); if (feedback) feedback.textContent = '';
   if (bukRun.pendingNext) {
-    const next = bukRun.pendingNext;
-    bukRun.pendingNext = null;
+    const next = bukRun.pendingNext;      bukRun.pendingNext = null;
+      bukRun.awaitingNext = false;
     bukStartQuestion(next);
   } else {
     bukFinishRun();
@@ -915,13 +970,32 @@ function bukInit() {
     const code = (bukEl('buk-board-code') || {}).value || '';
     bukSeedBoard(code.trim());
   });
-  // Spacebar buzzes, matching a real buzzer.
+  // Keyboard controls (see the run legend): Space buzzes, Enter submits, N goes next.
   document.addEventListener('keydown', (event) => {
-    if (event.code === 'Space' && bukRun.question && !bukRun.answered && (bukRun.windowOpen || bukRun.delivering)) {
-      const active = document.activeElement;
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
-      event.preventDefault();
-      bukBuzz();
+    const active = document.activeElement;
+    const typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+    if (event.code === 'Space') {
+      // Streaming / active clue -> buzz (the Buzz button does the same).
+      if (!typing && bukRun.question && !bukRun.answered && (bukRun.windowOpen || bukRun.delivering)) {
+        event.preventDefault();
+        bukBuzz();
+      }
+      return;
+    }
+    if (event.key === 'Enter') {
+      // Buzzed -> submit the typed answer (the answer input handles its own Enter too).
+      if (!typing && bukRun.answering) {
+        event.preventDefault();
+        bukSubmitTyped();
+      }
+      return;
+    }
+    if (event.key === 'n' || event.key === 'N') {
+      // Post-question / lobby -> next question.
+      if (!typing && bukRun.awaitingNext) {
+        event.preventDefault();
+        bukNextQuestion();
+      }
     }
   });
 }
