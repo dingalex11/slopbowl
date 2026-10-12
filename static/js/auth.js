@@ -289,3 +289,29 @@ window.loadMatchLogsFromCloud = async () => {
     snapshot.forEach(doc => logs.push(doc.data()));
     return logs;
 };
+
+// Solo drill sessions live beside the match logs, under the same owner-only rules.
+// A session is written under its own id, so saving the same session twice updates it
+// instead of piling up duplicates.
+window.saveSoloSessionToCloud = async (session) => {
+    const user = auth.currentUser;
+    if (!user) throw new Error("Sign in to save a drill session to your account.");
+    if (!session || !session.id) throw new Error("Start a drill before saving a session.");
+
+    const sessionRef = doc(db, "users", user.uid, "solo_sessions", session.id);
+    await setDoc(sessionRef, { ...session, updatedAt: new Date().toISOString() }, { merge: true });
+    return session.id;
+};
+
+window.loadSoloSessionsFromCloud = async (limit = 10) => {
+    const user = auth.currentUser;
+    if (!user) throw new Error("Sign in to read saved drill sessions.");
+
+    const sessionsRef = collection(db, "users", user.uid, "solo_sessions");
+    const snapshot = await getDocs(sessionsRef);
+    const sessions = [];
+    snapshot.forEach((entry) => sessions.push(entry.data()));
+    // Newest first; the collection is small enough that sorting here needs no index.
+    sessions.sort((left, right) => String(right.startedAt || "").localeCompare(String(left.startedAt || "")));
+    return sessions.slice(0, limit);
+};

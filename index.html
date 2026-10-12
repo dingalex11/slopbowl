@@ -1213,6 +1213,56 @@
             <button type="button" id="solo-next-tossup" class="px-5 py-3.5 bg-black border border-neonCyan text-neonCyan hover:bg-neonCyan/10 text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Next Tossup &rarr;</button>
           </div>
         </div>
+
+        <!-- SESSION TELEMETRY -->
+        <div class="mt-6 bg-panel border border-borderDark rounded-2xl p-6">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-borderDark pb-3 mb-4">
+            <h3 class="text-sm font-black font-mono text-neonPurple tracking-widest uppercase">Session Telemetry</h3>
+            <div class="flex flex-wrap items-center gap-2">
+              <button type="button" id="solo-save-session" class="px-3.5 py-2 bg-black border border-neonCyan/70 text-neonCyan hover:bg-neonCyan/10 text-[10px] font-mono font-bold uppercase rounded-lg active:scale-95 transition">Save Session</button>
+              <button type="button" id="solo-load-sessions" class="px-3.5 py-2 bg-black border border-borderDark text-slate-300 hover:text-white text-[10px] font-mono font-bold uppercase rounded-lg active:scale-95 transition">Saved Sessions</button>
+            </div>
+          </div>
+
+          <p id="solo-save-status" class="text-[11px] font-mono text-slate-500 mb-4">Sessions are kept on this device until you save them to your account.</p>
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+            <div class="bg-black border border-borderDark rounded-xl px-4 py-3">
+              <div class="text-[9px] text-slate-500 font-mono font-bold tracking-widest">QUESTIONS</div>
+              <div id="solo-stat-asked" class="text-xl font-black font-mono text-white">0</div>
+            </div>
+            <div class="bg-black border border-borderDark rounded-xl px-4 py-3">
+              <div class="text-[9px] text-slate-500 font-mono font-bold tracking-widest">ACCURACY</div>
+              <div id="solo-stat-accuracy" class="text-xl font-black font-mono text-neonGreen">--%</div>
+            </div>
+            <div class="bg-black border border-borderDark rounded-xl px-4 py-3">
+              <div class="text-[9px] text-slate-500 font-mono font-bold tracking-widest">CELERITY</div>
+              <div id="solo-stat-celerity" class="text-xl font-black font-mono text-neonCyan">-- S</div>
+            </div>
+            <div class="bg-black border border-borderDark rounded-xl px-4 py-3">
+              <div class="text-[9px] text-slate-500 font-mono font-bold tracking-widest">FASTEST</div>
+              <div id="solo-stat-fastest" class="text-xl font-black font-mono text-neonAmber">-- S</div>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto custom-scrollbar">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="text-[9px] text-slate-500 font-mono font-bold tracking-widest uppercase">
+                  <th class="py-2 pr-3">Subject</th>
+                  <th class="py-2 px-3 text-center">Asked</th>
+                  <th class="py-2 px-3 text-center">Correct</th>
+                  <th class="py-2 px-3 text-center">Accuracy</th>
+                  <th class="py-2 pl-3 text-center">Celerity</th>
+                </tr>
+              </thead>
+              <tbody id="solo-subject-stats"></tbody>
+            </table>
+            <p id="solo-subject-stats-empty" class="text-[11px] text-slate-500 font-mono mt-2">No questions asked yet.</p>
+          </div>
+
+          <div id="solo-saved-list" class="hidden mt-5 border-t border-borderDark pt-4 space-y-1"></div>
+        </div>
       </div>
     </section>
 

@@ -51,11 +51,17 @@ const SOLO_DEFAULT_OPTIONS = {
   mutedPackets: [],
 };
 
+const SOLO_SESSION_STORAGE_KEY = 'slopbowl.solo.sessions';
+const SOLO_SESSION_KEEP = 20;
+// Firestore documents are capped at 1 MiB; a session's per-question detail is trimmed.
+const SOLO_SESSION_MAX_QUESTIONS = 200;
+
 let soloOptions = null;
 let soloMicChecked = false;
 let soloPackets = [];
 let soloSampleRequested = false;
 let soloDrill = null;
+let soloSession = null;
 
 function soloLoadOptions() {
   const options = JSON.parse(JSON.stringify(SOLO_DEFAULT_OPTIONS));
@@ -440,6 +446,7 @@ function openSoloSetup() {
   soloEnsureOptions();
   navigateTo(11);
   soloRenderSetup();
+  soloRefreshSaveHint();
   if (!soloPackets.length && !soloSampleRequested) {
     soloSampleRequested = true;
     soloLoadSamplePacket().then(soloRenderSetup);
@@ -568,9 +575,16 @@ function startSoloDrill() {
     showToast('Load a question packet before starting a drill');
     return;
   }
+  soloSession = {
+    id: `solo-${new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)}-${Math.random().toString(36).slice(2, 7)}`,
+    startedAt: new Date().toISOString(),
+    questions: [],
+    streakBest: 0,
+  };
   soloDrill = {
     queue,
     index: 0,
+    entryIndex: null,
     score: 0,
     streak: 0,
     bestReaction: null,
@@ -593,6 +607,7 @@ function startSoloDrill() {
   navigateTo(12);
   soloRenderStats();
   soloRenderQuestion({ ready: true });
+  soloRenderTelemetry();
   playSound('click');
 }
 
@@ -654,6 +669,8 @@ function soloStartQuestion() {
   if (!entry) return;
   soloStopDelivery();
   const question = entry.question;
+  soloRecordAsked(question);
+  soloRenderTelemetry();
   const words = soloQuestionWords(question.tossup_text);
   soloDrill.totalWords = words.length;
   soloDrill.wordsShown = 0;
@@ -662,6 +679,7 @@ function soloStartQuestion() {
   soloDrill.delivering = true;
   soloDrill.startedAt = performance.now();
   soloDrill.lastReaction = null;
+  soloRecordAsked(question);
 
   const text = soloElement('solo-question-text');
   const counter = soloElement('solo-word-count');
@@ -831,6 +849,7 @@ function soloSpeak(source, onDone) {
 // Called by every delivery channel; the read ends only when none is still running.
 function soloFinishDelivery() {
   if (!soloDrill || soloDrill.answered) return;
+  // Readiness is tracked per channel, so this only runs once both are done.
   if (!soloDrill.streamDone || !soloDrill.speechDone) return;
   const status = soloElement('solo-drill-status');
   const bar = soloElement('solo-progress-bar');
@@ -856,6 +875,8 @@ function soloExpireQuestion(message) {
   soloStopDelivery();
   soloDrill.answered = true;
   soloDrill.streak = 0;
+  soloResolveEntry('expired', false);
+  soloRenderTelemetry();
   const buzz = soloElement('solo-buzz-btn');
   if (buzz) buzz.disabled = true;
   const status = soloElement('solo-drill-status');
@@ -873,6 +894,8 @@ function soloBuzz() {
   if (!soloDrill.windowOpen && !soloDrill.delivering) return false;
   if (!soloElement('slide-12') || soloElement('slide-12').classList.contains('hidden')) return false;
   soloDrill.lastReaction = (performance.now() - soloDrill.startedAt) / 1000;
+  const entry = soloCurrentEntry();
+  if (entry && typeof entry.reaction !== 'number') entry.reaction = soloDrill.lastReaction;
   soloStopDelivery();
   soloDrill.answered = true;
   soloDrill.windowOpen = false;
@@ -985,7 +1008,7 @@ function soloSubmitAnswer(response) {
   soloRecordResult(correct, correct ? `Correct — "${entry.question.tossup_answer}"` : `Incorrect — answer: "${entry.question.tossup_answer}"`);
 }
 
-function soloRecordResult(correct, message) {
+function soloRecordResult(correct, message, outcome = 'answered') {
   if (!soloDrill) return;
   if (soloDrill.lockoutTimer) {
     clearInterval(soloDrill.lockoutTimer);
@@ -1003,6 +1026,8 @@ function soloRecordResult(correct, message) {
   }
   soloDrill.answered = true;
   soloDrill.windowOpen = false;
+  soloResolveEntry(outcome, correct);
+  soloRenderTelemetry();
   const feedback = soloElement('solo-feedback');
   if (feedback) {
     feedback.className = `mt-4 text-sm font-mono font-bold ${correct ? 'text-neonGreen' : 'text-neonPink'}`;
@@ -1025,8 +1050,10 @@ function soloRevealAnswer() {
   soloDrill.windowOpen = false;
   if (!wasAnswered) {
     soloDrill.streak = 0;
+    soloResolveEntry('revealed', false);
     soloRenderStats();
   }
+  soloRenderTelemetry();
   const feedback = soloElement('solo-feedback');
   if (feedback) {
     feedback.className = 'mt-4 text-sm font-mono font-bold text-neonAmber';
@@ -1054,7 +1081,308 @@ function soloNextTossup() {
     return;
   }
   soloDrill.answered = false;
+  soloDrill.entryIndex = null;
   soloRenderQuestion({ ready: true });
+  soloRenderTelemetry();
+}
+
+// =========================================================
+// SESSION TELEMETRY (celerity, accuracy, per-subject detail)
+// =========================================================
+function soloCurrentEntry() {
+  if (!soloDrill || soloDrill.entryIndex == null || !soloSession) return null;
+  return soloSession.questions[soloDrill.entryIndex] || null;
+}
+
+// One entry per toss-up asked: re-reading a question trains it again but is not a new
+// question, so the accuracy of a subject is never diluted by second attempts.
+function soloRecordAsked(question) {
+  if (!soloDrill || !soloSession) return;
+  const existing = soloCurrentEntry();
+  if (existing) {
+    existing.reReads += 1;
+    return;
+  }
+  soloSession.questions.push({
+    n: soloSession.questions.length + 1,
+    subject: soloSubjectFor(question.category),
+    category: String(question.category || ''),
+    type: String(question.type || 'SA').toUpperCase(),
+    answer: String(question.tossup_answer || ''),
+    outcome: 'pending',
+    correct: null,
+    reaction: null,
+    reReads: 0,
+  });
+  soloDrill.entryIndex = soloSession.questions.length - 1;
+}
+
+function soloResolveEntry(outcome, correct) {
+  const entry = soloCurrentEntry();
+  if (!entry || entry.outcome !== 'pending') return;
+  entry.outcome = outcome;
+  entry.correct = Boolean(correct);
+  if (soloSession && soloDrill.streak > soloSession.streakBest) soloSession.streakBest = soloDrill.streak;
+}
+
+// Pure aggregation behind the telemetry card and every saved session.
+function soloSessionStats(session = soloSession) {
+  const questions = (session && session.questions) || [];
+  const resolved = questions.filter((entry) => entry.outcome !== 'pending');
+  const correct = resolved.filter((entry) => entry.correct === true);
+  const reactions = questions.filter((entry) => typeof entry.reaction === 'number').map((entry) => entry.reaction);
+  const mean = (values) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null);
+  const subjects = new Map();
+  questions.forEach((entry) => {
+    const row = subjects.get(entry.subject) || { subject: entry.subject, asked: 0, resolved: 0, correct: 0, reactions: [] };
+    row.asked += 1;
+    if (entry.outcome !== 'pending') row.resolved += 1;
+    if (entry.correct === true) row.correct += 1;
+    if (typeof entry.reaction === 'number') row.reactions.push(entry.reaction);
+    subjects.set(entry.subject, row);
+  });
+  return {
+    asked: questions.length,
+    resolved: resolved.length,
+    correct: correct.length,
+    accuracy: resolved.length ? (correct.length / resolved.length) * 100 : null,
+    // Celerity is the buzz-to-lockout reaction; the per-subject figure uses every buzz so
+    // a subject cannot look fast just by being answered correctly.
+    celerity: mean(reactions),
+    celerityCorrect: mean(correct.filter((entry) => typeof entry.reaction === 'number').map((entry) => entry.reaction)),
+    fastest: reactions.length ? Math.min(...reactions) : null,
+    subjects: [...subjects.values()]
+      .sort((left, right) => right.asked - left.asked || left.subject.localeCompare(right.subject))
+      .map((row) => ({
+        subject: row.subject,
+        asked: row.asked,
+        resolved: row.resolved,
+        correct: row.correct,
+        accuracy: row.resolved ? (row.correct / row.resolved) * 100 : null,
+        celerity: mean(row.reactions),
+      })),
+  };
+}
+
+function soloSecondsText(value) {
+  return typeof value === 'number' ? `${value.toFixed(2)} S` : '-- S';
+}
+
+function soloPercentText(value) {
+  return typeof value === 'number' ? `${Math.round(value)}%` : '--%';
+}
+
+function soloRenderTelemetry() {
+  const stats = soloSessionStats();
+  const tiles = {
+    'solo-stat-asked': String(stats.asked),
+    'solo-stat-accuracy': soloPercentText(stats.accuracy),
+    'solo-stat-celerity': soloSecondsText(stats.celerity),
+    'solo-stat-fastest': soloSecondsText(stats.fastest),
+  };
+  Object.entries(tiles).forEach(([id, value]) => {
+    const node = soloElement(id);
+    if (node) node.innerText = value;
+  });
+
+  const tbody = soloElement('solo-subject-stats');
+  const empty = soloElement('solo-subject-stats-empty');
+  if (empty) empty.classList.toggle('hidden', stats.subjects.length > 0);
+  if (!tbody) return;
+  tbody.replaceChildren();
+  stats.subjects.forEach((row) => {
+    const tr = document.createElement('tr');
+    tr.className = 'border-t border-borderDark text-[11px] font-mono';
+    const cells = [
+      { text: row.subject, className: 'py-2 pr-3 font-bold', color: soloSubjectColor(row.subject) },
+      { text: String(row.asked), className: 'py-2 px-3 text-center text-slate-300' },
+      { text: String(row.correct), className: 'py-2 px-3 text-center text-neonGreen' },
+      { text: soloPercentText(row.accuracy), className: 'py-2 px-3 text-center text-slate-200' },
+      { text: soloSecondsText(row.celerity), className: 'py-2 pl-3 text-center text-neonCyan' },
+    ];
+    cells.forEach((cell) => {
+      const td = document.createElement('td');
+      td.className = cell.className;
+      td.textContent = cell.text;
+      if (cell.color) td.style.color = cell.color;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+function soloSaveStatus(message, tone = 'slate') {
+  const status = soloElement('solo-save-status');
+  if (!status) return;
+  const tones = { slate: 'text-slate-500', green: 'text-neonGreen', amber: 'text-neonAmber', pink: 'text-neonPink' };
+  status.className = `text-[11px] font-mono mb-4 ${tones[tone] || tones.slate}`;
+  status.innerText = message;
+}
+
+function soloCloudUser() {
+  return typeof window.getFirebaseUser === 'function' ? window.getFirebaseUser() : null;
+}
+
+// Sessions are always kept on the device first, so a signed-out trainee still owns the
+// data; saving to the account is an explicit second step.
+function soloSessionPayload() {
+  const stats = soloSessionStats();
+  return {
+    id: soloSession.id,
+    startedAt: soloSession.startedAt,
+    endedAt: new Date().toISOString(),
+    options: {
+      output: soloOptions.output,
+      input: soloOptions.input,
+      voice: soloOptions.voice,
+      rate: soloOptions.rate,
+      wpm: soloOptions.wpm,
+    },
+    score: soloDrill ? soloDrill.score : 0,
+    streakBest: soloSession.streakBest,
+    stats: {
+      asked: stats.asked,
+      resolved: stats.resolved,
+      correct: stats.correct,
+      accuracy: stats.accuracy,
+      celerity: stats.celerity,
+      celerityCorrect: stats.celerityCorrect,
+      fastest: stats.fastest,
+    },
+    subjects: stats.subjects,
+    questions: soloSession.questions.slice(0, SOLO_SESSION_MAX_QUESTIONS),
+  };
+}
+
+function soloLocalSessions() {
+  try {
+    const stored = window.localStorage ? JSON.parse(window.localStorage.getItem(SOLO_SESSION_STORAGE_KEY) || '[]') : [];
+    return Array.isArray(stored) ? stored : [];
+  } catch (error) {
+    console.warn('Stored drill sessions could not be read.', error);
+    return [];
+  }
+}
+
+function soloKeepLocalSession(payload) {
+  const sessions = soloLocalSessions().filter((entry) => entry.id !== payload.id);
+  sessions.unshift(payload);
+  const trimmed = sessions.slice(0, SOLO_SESSION_KEEP);
+  try {
+    if (window.localStorage) window.localStorage.setItem(SOLO_SESSION_STORAGE_KEY, JSON.stringify(trimmed));
+  } catch (error) {
+    console.warn('Drill session could not be stored on this device.', error);
+  }
+  return trimmed;
+}
+
+function soloRefreshSaveHint() {
+  if (typeof window.saveSoloSessionToCloud !== 'function') {
+    soloSaveStatus('Sessions are kept on this device. Saving to an account needs a configured Firebase page.', 'slate');
+    return;
+  }
+  const user = soloCloudUser();
+  if (!user) {
+    soloSaveStatus('Sessions are kept on this device — sign in to save them to your account.', 'slate');
+    return;
+  }
+  soloSaveStatus(`Sessions can be saved to ${user.email || 'your account'}.`, 'slate');
+}
+
+async function soloSaveSession() {
+  if (!soloSession || !soloSession.questions.length) {
+    soloSaveStatus('Nothing to save yet — run a few toss-ups first.', 'amber');
+    return;
+  }
+  const payload = soloSessionPayload();
+  soloKeepLocalSession(payload);
+  const kept = 'Kept on this device.';
+  if (typeof window.saveSoloSessionToCloud !== 'function') {
+    soloSaveStatus(`${kept} Cloud saving is unavailable on this page (Firebase is not configured).`, 'amber');
+    return;
+  }
+  const user = soloCloudUser();
+  if (!user) {
+    soloSaveStatus(`${kept} Sign in to save it to your account.`, 'amber');
+    return;
+  }
+  soloSaveStatus('Saving session...');
+  try {
+    await window.saveSoloSessionToCloud(payload);
+    soloSaveStatus(`Saved to ${user.email || 'your account'}.`, 'green');
+    playSound('correct');
+  } catch (error) {
+    const reason = (error && error.message) || 'unknown error';
+    // A session that is still local-only because nobody is signed in is guidance, not a
+    // failure — the store is doing what it was asked.
+    if (/sign in/i.test(reason)) soloSaveStatus(`${kept} Sign in to save it to your account.`, 'amber');
+    else soloSaveStatus(`Cloud save failed: ${reason} — kept on this device.`, 'pink');
+  }
+}
+
+function soloDescribeSession(session) {
+  const stats = (session && session.stats) || {};
+  const asked = Number(stats.asked) || 0;
+  const accuracy = typeof stats.accuracy === 'number' ? `${Math.round(stats.accuracy)}%` : '--%';
+  const celerity = typeof stats.celerity === 'number' ? `${stats.celerity.toFixed(2)} S` : '-- S';
+  const when = String((session && session.startedAt) || '').replace('T', ' ').slice(0, 16) || 'unknown date';
+  return `${when} · ${asked} q · ${accuracy} · ${celerity}`;
+}
+
+async function soloToggleSavedSessions() {
+  const list = soloElement('solo-saved-list');
+  if (!list) return;
+  if (!list.classList.contains('hidden')) {
+    list.classList.add('hidden');
+    return;
+  }
+  list.classList.remove('hidden');
+  list.replaceChildren();
+  const note = (message, tone) => {
+    const line = document.createElement('p');
+    line.className = `text-[11px] font-mono ${tone}`;
+    line.textContent = message;
+    list.appendChild(line);
+  };
+
+  const user = soloCloudUser();
+  let sessions = [];
+  let source = 'on this device';
+  if (typeof window.loadSoloSessionsFromCloud !== 'function') {
+    sessions = soloLocalSessions();
+    source = 'on this device (no cloud on this page)';
+  } else if (!user) {
+    sessions = soloLocalSessions();
+    source = 'on this device — sign in to sync';
+  } else {
+    note('Loading saved sessions...', 'text-slate-500');
+    try {
+      sessions = await window.loadSoloSessionsFromCloud(8);
+      source = user.email || 'your account';
+    } catch (error) {
+      sessions = soloLocalSessions();
+      source = 'on this device (cloud read failed)';
+    }
+  }
+
+  list.replaceChildren();
+  if (!sessions.length) {
+    note('No saved sessions yet.', 'text-slate-500');
+    return;
+  }
+  const heading = document.createElement('p');
+  heading.className = 'text-[10px] font-mono font-bold tracking-widest text-slate-400 uppercase mb-2';
+  heading.textContent = `Saved sessions — ${source}`;
+  list.appendChild(heading);
+  sessions.forEach((session) => {
+    const row = document.createElement('div');
+    row.className = 'bg-black border border-borderDark rounded-lg px-3 py-2';
+    const text = document.createElement('span');
+    text.className = 'text-[11px] font-mono text-slate-300';
+    text.textContent = soloDescribeSession(session);
+    row.appendChild(text);
+    list.appendChild(row);
+  });
 }
 
 // =========================================================
@@ -1166,7 +1494,7 @@ function soloBindSetup() {
         soloSubmitAnswer(answerInput.value);
       } else if (event.key === 'Escape') {
         event.preventDefault();
-        soloRecordResult(false, 'Answer forfeited.');
+        soloRecordResult(false, 'Answer forfeited.', 'forfeit');
       }
     });
   }
@@ -1174,6 +1502,15 @@ function soloBindSetup() {
   if (reveal) reveal.addEventListener('click', () => { soloRevealAnswer(); playSound('click'); });
   const next = soloElement('solo-next-tossup');
   if (next) next.addEventListener('click', () => { soloNextTossup(); playSound('click'); });
+  const saveSession = soloElement('solo-save-session');
+  if (saveSession) saveSession.addEventListener('click', () => { soloSaveSession(); playSound('click'); });
+  const savedSessions = soloElement('solo-load-sessions');
+  if (savedSessions) savedSessions.addEventListener('click', () => { soloToggleSavedSessions(); playSound('click'); });
+  if (window.firebaseAuthReady && typeof window.firebaseAuthReady.then === 'function') {
+    window.firebaseAuthReady.then(() => soloRefreshSaveHint());
+  } else {
+    soloRefreshSaveHint();
+  }
 
   document.addEventListener('keydown', (event) => {
     const tag = (document.activeElement && document.activeElement.tagName) || '';

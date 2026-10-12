@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SOLO_SOURCE = (ROOT / "static/js/solo.js").read_text(encoding="utf-8")
 INDEX_SOURCE = (ROOT / "index.html").read_text(encoding="utf-8")
 SHELL_SOURCE = (ROOT / "static/js/slopbowl_ui.js").read_text(encoding="utf-8")
+AUTH_SOURCE = (ROOT / "static/js/auth.js").read_text(encoding="utf-8")
+RULES_SOURCE = (ROOT / "firestore.rules").read_text(encoding="utf-8")
 
 
 class SoloModeTests(unittest.TestCase):
@@ -100,6 +102,66 @@ class SoloModeTests(unittest.TestCase):
     def test_leaving_the_drill_slides_releases_speech_and_timers(self):
         self.assertIn("if (typeof soloLeavePractice === 'function') soloLeavePractice(slideNum);", SHELL_SOURCE)
         self.assertIn("soloStopRecognition();", SOLO_SOURCE)
+
+    def test_the_telemetry_card_exposes_session_statistics(self):
+        for control in (
+            'id="solo-stat-asked"',
+            'id="solo-stat-accuracy"',
+            'id="solo-stat-celerity"',
+            'id="solo-stat-fastest"',
+            'id="solo-subject-stats"',
+            'id="solo-subject-stats-empty"',
+        ):
+            self.assertIn(control, INDEX_SOURCE, f"the telemetry card is missing {control}")
+        for column in ("Subject", "Asked", "Correct", "Accuracy", "Celerity"):
+            self.assertIn(f"{column}</th>", INDEX_SOURCE, f"the subject table is missing the {column} column")
+
+    def test_accuracy_is_measured_over_resolved_questions_and_celerity_over_buzzes(self):
+        """Accuracy must ignore toss-ups still in flight, and celerity is the mean buzz."""
+        self.assertIn("const resolved = questions.filter((entry) => entry.outcome !== 'pending');", SOLO_SOURCE)
+        self.assertIn("accuracy: resolved.length ? (correct.length / resolved.length) * 100 : null,", SOLO_SOURCE)
+        self.assertIn("celerity: mean(reactions),", SOLO_SOURCE)
+        self.assertIn("fastest: reactions.length ? Math.min(...reactions) : null,", SOLO_SOURCE)
+        # Per-subject rows carry their own accuracy and celerity, keyed by the subject the
+        # toss-up belongs to rather than its raw category string.
+        self.assertIn("accuracy: row.resolved ? (row.correct / row.resolved) * 100 : null,", SOLO_SOURCE)
+        self.assertIn("celerity: mean(row.reactions),", SOLO_SOURCE)
+        self.assertIn("subject: soloSubjectFor(question.category),", SOLO_SOURCE)
+
+    def test_a_re_read_question_stays_one_question(self):
+        """Re-drilling a toss-up adds an attempt, not a second question to the accuracy."""
+        self.assertIn("existing.reReads += 1;", SOLO_SOURCE)
+        self.assertIn("if (!entry || entry.outcome !== 'pending') return;", SOLO_SOURCE)
+        self.assertIn("soloDrill.entryIndex = soloSession.questions.length - 1;", SOLO_SOURCE)
+        self.assertIn("soloDrill.entryIndex = null;", SOLO_SOURCE)
+
+    def test_every_outcome_is_recorded_once(self):
+        for outcome in ("soloResolveEntry('expired', false);", "soloResolveEntry('revealed', false);"):
+            self.assertIn(outcome, SOLO_SOURCE)
+        self.assertIn("soloResolveEntry(outcome, correct);", SOLO_SOURCE)
+        self.assertIn("if (entry && typeof entry.reaction !== 'number') entry.reaction = soloDrill.lastReaction;", SOLO_SOURCE)
+
+    def test_a_session_is_kept_on_the_device_and_can_be_saved_to_the_account(self):
+        self.assertIn('id="solo-save-session"', INDEX_SOURCE)
+        self.assertIn('id="solo-save-status"', INDEX_SOURCE)
+        self.assertIn('id="solo-load-sessions"', INDEX_SOURCE)
+        self.assertIn('id="solo-saved-list"', INDEX_SOURCE)
+        self.assertIn("soloKeepLocalSession(payload);", SOLO_SOURCE)
+        self.assertIn("window.saveSoloSessionToCloud = async (session) => {", AUTH_SOURCE)
+        self.assertIn("window.loadSoloSessionsFromCloud = async (limit = 10) => {", AUTH_SOURCE)
+        # Sessions are the signed-in owner's documents, and the existing rules already
+        # cover every collection under /users/{uid}.
+        self.assertIn('doc(db, "users", user.uid, "solo_sessions", session.id)', AUTH_SOURCE)
+        self.assertIn('collection(db, "users", user.uid, "solo_sessions")', AUTH_SOURCE)
+        self.assertIn("match /{document=**}", RULES_SOURCE)
+
+    def test_practice_still_works_signed_out_and_without_firebase(self):
+        """A bare page with no Firebase configured must keep the session, not fail."""
+        self.assertIn("typeof window.saveSoloSessionToCloud !== 'function'", SOLO_SOURCE)
+        self.assertIn("Kept on this device.", SOLO_SOURCE)
+        self.assertIn("soloSaveStatus(`Saved to ${user.email || 'your account'}.`, 'green');", SOLO_SOURCE)
+        # Being signed out keeps the session local and says so; it is not reported as a failure.
+        self.assertIn("if (/sign in/i.test(reason))", SOLO_SOURCE)
 
     def test_sample_packet_is_public_so_practice_can_start_immediately(self):
         response = TestClient(ui_service.app).get("/api/sample-bank")
