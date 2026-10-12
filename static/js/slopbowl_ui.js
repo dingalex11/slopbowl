@@ -98,6 +98,9 @@ function navigateTo(slideNum) {
     activeBtn.classList.add('bg-neonCyan', 'text-black', 'shadow-neon-cyan');
   }
 
+  // A live drill owns speech and timers: leaving its slides must release them.
+  if (typeof soloLeavePractice === 'function') soloLeavePractice(slideNum);
+
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -116,10 +119,6 @@ function closeModal(id) {
   if (!el) return;
   el.classList.add('hidden');
   el.classList.remove('flex');
-}
-
-function openWipModal() {
-  openModal('wipModal');
 }
 
 let toastTimer = null;
@@ -198,7 +197,7 @@ function loadConvertedToMatch() {
 // Close modals with Escape
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    ['auth-modal', 'converterModal', 'analyticsModal', 'wipModal'].forEach(closeModal);
+    ['auth-modal', 'converterModal', 'analyticsModal'].forEach(closeModal);
   }
 });
 

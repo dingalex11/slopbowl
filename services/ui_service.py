@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from core.config import APP_ENV, INBOUND_QUEUE_SIZE, MAX_ROOMS, MAX_WEBSOCKET_MESSAGE_BYTES, OUTBOUND_QUEUE_SIZE, PROJECT_ROOT, ROOM_IDLE_TTL_SECONDS, ROOM_REAP_INTERVAL_SECONDS
 from core.events import Event
-from core.validation import validate_client_event, validate_room_id
+from core.validation import validate_client_event, validate_question_bank, validate_room_id
 from services.auth_service import create_online_room, delete_room, get_room_info, get_room_participant, join_online_room, verify_id_token
 
 logger = logging.getLogger(__name__)
@@ -325,6 +325,22 @@ async def get_index():
 @app.get("/legacy")
 async def get_legacy_index():
     return _render_index("index_legacy.html")
+
+
+@app.get("/api/sample-bank")
+async def get_sample_bank():
+    """Serve the bundled sample packet so solo practice needs no upload or account.
+
+    This is public, read-only packaged content: the same file ships in the repository and
+    practice is deliberately usable without signing in.
+    """
+    sample_path = PROJECT_ROOT / "questions" / "m_round01_bank.json"
+    try:
+        bank = json.loads(sample_path.read_text(encoding="utf-8"))
+        return validate_question_bank(bank)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("Sample packet unavailable: %s", exc)
+        raise HTTPException(status_code=404, detail="Sample packet unavailable") from exc
 
 
 def _bearer_token(request: Request) -> str:

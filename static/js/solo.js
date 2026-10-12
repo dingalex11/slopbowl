@@ -1,0 +1,1235 @@
+// SLOPBOWL SOLO PRACTICE DRILL ENGINE
+// Single-player buzz training that runs entirely in this page: no room, no sign-in and
+// no server round trip is required, so practice is always available. It reuses the app's
+// converter (parseScienceBowlText) for packet loading and the shell's sounds/toasts.
+//
+// The design separates stimulus delivery (spoken / typed / hybrid) from response capture
+// (typed terminal / microphone), because either can be trained independently.
+
+// =========================================================
+// OPTIONS
+// =========================================================
+const SOLO_STORAGE_KEY = 'slopbowl.solo.options';
+const SOLO_TOSS_UP_POINTS = 4;
+const SOLO_LOCKOUT_SECONDS = 5.0;
+// The drill's six design subjects. Packet categories are folded onto them so a packet's
+// own labels ("Life Science") still land in a drill subject ("Biology").
+const SOLO_SUBJECT_ALIASES = {
+  'life science': 'Biology',
+  'biology': 'Biology',
+  'physical science': 'Physics',
+  'physics': 'Physics',
+  'chemistry': 'Chemistry',
+  'earth science': 'Earth and Space',
+  'earth and space': 'Earth and Space',
+  'math': 'Math',
+  'mathematics': 'Math',
+  'energy': 'Energy',
+  'general science': 'General Science',
+};
+const SOLO_SUBJECT_COLORS = {
+  'Biology': '#00ff66',
+  'Chemistry': '#ffaa00',
+  'Physics': '#00f3ff',
+  'Earth and Space': '#2dd4bf',
+  'Math': '#b026ff',
+  'Energy': '#ff0055',
+  'General Science': '#94a3b8',
+};
+// Spoken progress is drawn from a realistic pace and corrected by the engine's own state,
+// because a guessed duration must never be treated as the read being over.
+const SOLO_SPOKEN_CHARS_PER_SECOND = 12.0;
+
+const SOLO_DEFAULT_OPTIONS = {
+  output: 'hybrid',
+  input: 'typed',
+  voice: '',
+  rate: 1.1,
+  wpm: 260,
+  subjects: {},
+  packets: null,  // null = every loaded packet
+  mutedPackets: [],
+};
+
+let soloOptions = null;
+let soloMicChecked = false;
+let soloPackets = [];
+let soloSampleRequested = false;
+let soloDrill = null;
+
+function soloLoadOptions() {
+  const options = JSON.parse(JSON.stringify(SOLO_DEFAULT_OPTIONS));
+  try {
+    const stored = window.localStorage ? JSON.parse(window.localStorage.getItem(SOLO_STORAGE_KEY) || 'null') : null;
+    if (stored && typeof stored === 'object') {
+      if (['spoken', 'typed', 'hybrid'].includes(stored.output)) options.output = stored.output;
+      if (['typed', 'audio'].includes(stored.input)) options.input = stored.input;
+      if (typeof stored.voice === 'string') options.voice = stored.voice;
+      if (Number.isFinite(stored.rate)) options.rate = Math.min(1.6, Math.max(0.6, stored.rate));
+      if (Number.isFinite(stored.wpm)) options.wpm = Math.min(1200, Math.max(120, stored.wpm));
+      if (stored.subjects && typeof stored.subjects === 'object') options.subjects = stored.subjects;
+      if (Array.isArray(stored.packets)) options.packets = stored.packets;
+      if (Array.isArray(stored.mutedPackets)) options.mutedPackets = stored.mutedPackets;
+    }
+  } catch (error) {
+    console.warn('Solo practice options could not be read; using defaults.', error);
+  }
+  return options;
+}
+
+function soloSaveOptions() {
+  try {
+    if (window.localStorage) window.localStorage.setItem(SOLO_STORAGE_KEY, JSON.stringify(soloOptions));
+  } catch (error) {
+    console.warn('Solo practice options could not be stored.', error);
+  }
+}
+
+function soloEnsureOptions() {
+  if (!soloOptions) soloOptions = soloLoadOptions();
+  return soloOptions;
+}
+
+// =========================================================
+// PACKETS AND SUBJECTS
+// =========================================================
+function soloSubjectFor(category) {
+  const raw = String(category || '').trim();
+  if (!raw) return 'General Science';
+  const alias = SOLO_SUBJECT_ALIASES[raw.toLowerCase()];
+  return alias || raw;
+}
+
+function soloSubjectColor(subject) {
+  return SOLO_SUBJECT_COLORS[subject] || '#94a3b8';
+}
+
+// Packets arrive from the solo loader, from a packet already loaded for a match, or from
+// the bundled sample. Each keeps its own identity so packet selection can be remembered.
+function soloAddPacket(name, questions, { announce = true } = {}) {
+  if (!Array.isArray(questions) || !questions.length) {
+    if (announce) showToast('That packet has no questions');
+    return null;
+  }
+  const usable = questions.filter((question) => question && typeof question === 'object' && String(question.tossup_text || '').trim());
+  if (!usable.length) {
+    if (announce) showToast('That packet has no readable toss-ups');
+    return null;
+  }
+  const id = `packet-${soloPackets.length + 1}`;
+  const packet = { id, name: String(name || `Packet ${soloPackets.length + 1}`), questions: usable };
+  const duplicate = soloPackets.find((entry) => entry.name === packet.name && entry.questions.length === packet.questions.length);
+  if (duplicate) {
+    duplicate.questions = usable;
+    soloRenderPacketList();
+    soloRenderSubjects();
+    if (announce) showToast(`Refreshed ${packet.name} (${usable.length} toss-ups)`);
+    return duplicate;
+  }
+  soloPackets.push(packet);
+  if (soloOptions) {
+    soloOptions.mutedPackets = soloOptions.mutedPackets.filter((entry) => entry !== id);
+    soloSaveOptions();
+  }
+  soloRenderPacketList();
+  soloRenderSubjects();
+  if (announce) showToast(`Loaded ${packet.name} — ${usable.length} toss-ups`);
+  return packet;
+}
+
+function soloSelectedQuestions() {
+  soloEnsureOptions();
+  const usable = soloPackets.filter((packet) => !soloOptions.mutedPackets.includes(packet.id));
+  if (!usable.length) return [];  // Every packet muted means no drill, not every packet.
+  return usable.flatMap((packet) => packet.questions.map((question) => ({ question, packet: packet.name })));
+}
+
+function soloSubjectUniverse() {
+  const counts = new Map();
+  soloSelectedQuestions().forEach(({ question }) => {
+    const subject = soloSubjectFor(question.category);
+    counts.set(subject, (counts.get(subject) || 0) + 1);
+  });
+  return counts;
+}
+
+function soloSubjectWeights() {
+  soloEnsureOptions();
+  const counts = soloSubjectUniverse();
+  const weights = new Map();
+  let total = 0;
+  counts.forEach((_count, subject) => {
+    const raw = Number(soloOptions.subjects[subject]);
+    const value = Number.isFinite(raw) && raw > 0 ? raw : 0;
+    weights.set(subject, value);
+    total += value;
+  });
+  if (total < 100) {
+    // A subject the user never touched starts even with the rest, so a new packet's
+    // subjects are always drillable without visiting the setup screen.
+    const untuned = [...weights.keys()].filter((subject) => !soloOptions.subjects[subject]);
+    const share = (100 - total) / (untuned.length || 1);
+    untuned.forEach((subject) => weights.set(subject, share));
+  }
+  return weights;
+}
+
+function soloEvenSplit() {
+  const subjects = [...soloSubjectUniverse().keys()];
+  const split = {};
+  if (!subjects.length) return split;
+  const base = Math.floor(100 / subjects.length);
+  subjects.forEach((subject) => { split[subject] = base; });
+  let remainder = 100 - base * subjects.length;
+  for (let index = 0; index < remainder; index += 1) split[subjects[index]] += 1;
+  return split;
+}
+
+function soloResetSubjects() {
+  soloEnsureOptions();
+  soloOptions.subjects = soloEvenSplit();
+  soloSaveOptions();
+  soloRenderSubjects();
+  playSound('click');
+}
+
+function soloNormalizeSubjects() {
+  soloEnsureOptions();
+  const weights = soloSubjectWeights();
+  const total = [...weights.values()].reduce((sum, value) => sum + value, 0);
+  if (!total) {
+    soloOptions.subjects = soloEvenSplit();
+    return;
+  }
+  const normalized = {};
+  weights.forEach((value, subject) => { normalized[subject] = Math.round((value / total) * 100); });
+  const drift = 100 - Object.values(normalized).reduce((sum, value) => sum + value, 0);
+  const first = Object.keys(normalized)[0];
+  if (first) normalized[first] += drift;
+  soloOptions.subjects = normalized;
+}
+
+// =========================================================
+// SETUP SCREEN
+// =========================================================
+// Selection state is the accent colour of the section: cyan for output, amber for input.
+function soloMarkCards(selector, chosen, accent) {
+  document.querySelectorAll(selector).forEach((card) => {
+    const value = card.dataset.soloOutput || card.dataset.soloInput;
+    const dot = card.querySelector('[data-solo-dot]');
+    const isActive = value === chosen;
+    const border = accent === 'cyan' ? 'border-neonCyan' : 'border-neonAmber';
+    const shadow = accent === 'cyan' ? 'shadow-neon-cyan' : 'shadow-neon-amber';
+    const fill = accent === 'cyan' ? 'bg-neonCyan' : 'bg-neonAmber';
+    card.classList.toggle(border, isActive);
+    card.classList.toggle(shadow, isActive);
+    card.classList.toggle('border-borderDark', !isActive);
+    card.classList.toggle('bg-panelHover', isActive);
+    if (dot) {
+      dot.classList.toggle(fill, isActive);
+      dot.classList.toggle(border, isActive);
+      dot.classList.toggle('border-slate-600', !isActive);
+    }
+    if (isActive) card.setAttribute('aria-pressed', 'true'); else card.removeAttribute('aria-pressed');
+  });
+}
+
+function soloRenderSetup() {
+  soloEnsureOptions();
+  soloMarkCards('.solo-output-card', soloOptions.output, 'cyan');
+  soloMarkCards('.solo-input-card', soloOptions.input, 'amber');
+
+  const rate = document.getElementById('solo-rate-slider');
+  const rateValue = document.getElementById('solo-rate-value');
+  if (rate) rate.value = String(soloOptions.rate);
+  if (rateValue) rateValue.innerText = `${soloOptions.rate.toFixed(2).replace(/0$/, '')}X`;
+
+  const wpm = document.getElementById('solo-wpm-slider');
+  const wpmValue = document.getElementById('solo-wpm-value');
+  if (wpm) wpm.value = String(soloOptions.wpm);
+  if (wpmValue) wpmValue.innerText = `${soloOptions.wpm} WPM`;
+
+  soloRenderVoiceOptions();
+  soloRenderSubjects();
+  soloRenderPacketList();
+  soloRenderMicStatus();
+}
+
+// The microphone card must state its availability before anything is clicked: a trainee
+// who picks audio input and finds out later that the browser cannot transcribe has
+// already lost a drill.
+function soloRenderMicStatus() {
+  if (soloMicChecked) return;
+  const status = soloElement('solo-mic-status');
+  if (!status) return;
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) {
+    status.innerText = 'Speech recognition unavailable — use typed input';
+    status.className = 'text-[10px] font-mono font-bold text-neonAmber';
+    return;
+  }
+  status.innerText = 'Speech Recognition Ready';
+  status.className = 'text-[10px] font-mono font-bold text-neonGreen';
+}
+
+function soloSpeechAvailable() {
+  return !!(window.speechSynthesis && window.SpeechSynthesisUtterance);
+}
+
+function soloPopulateVoices() {
+  const select = document.getElementById('solo-voice-select');
+  if (!select || !soloSpeechAvailable()) return;
+  const voices = window.speechSynthesis.getVoices() || [];
+  const previous = soloEnsureOptions().voice;
+  select.replaceChildren();
+  const auto = document.createElement('option');
+  auto.value = '';
+  auto.textContent = 'System Default (English)';
+  select.appendChild(auto);
+  voices.forEach((voice) => {
+    const option = document.createElement('option');
+    option.value = voice.name;
+    option.textContent = `${voice.name} (${voice.lang})`;
+    select.appendChild(option);
+  });
+  select.value = voices.some((voice) => voice.name === previous) ? previous : '';
+}
+
+function soloRenderVoiceOptions() {
+  if (!soloSpeechAvailable()) {
+    const status = document.getElementById('solo-test-voice');
+    if (status) {
+      status.disabled = true;
+      status.innerText = 'No speech engine';
+    }
+    return;
+  }
+  soloPopulateVoices();
+}
+
+function soloRenderSubjects() {
+  const holder = document.getElementById('solo-subject-list');
+  const empty = document.getElementById('solo-subject-empty');
+  if (!holder) return;
+  const counts = soloSubjectUniverse();
+  holder.replaceChildren();
+  if (empty) empty.classList.toggle('hidden', counts.size > 0);
+  if (!counts.size) {
+    soloUpdateSubjectTotal();
+    return;
+  }
+  const weights = soloSubjectWeights();
+  const alphabet = /^[a-z]/;
+  counts.forEach((count, subject) => {
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-3';
+    row.dataset.subject = subject;
+
+    const label = document.createElement('span');
+    label.className = 'w-36 shrink-0 text-[11px] font-mono font-bold';
+    label.style.color = soloSubjectColor(subject);
+    label.style.letterSpacing = alphabet.test(subject) ? '0.02em' : '0';
+    label.textContent = subject;
+    row.appendChild(label);
+
+    const countBadge = document.createElement('span');
+    countBadge.className = 'w-10 shrink-0 text-[10px] font-mono text-slate-500';
+    countBadge.textContent = `${count} q`;
+    row.appendChild(countBadge);
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';
+    slider.step = '1';
+    slider.value = String(Math.round(weights.get(subject) || 0));
+    slider.className = 'solo-range flex-1';
+    row.appendChild(slider);
+
+    const number = document.createElement('input');
+    number.type = 'number';
+    number.min = '0';
+    number.max = '100';
+    number.value = slider.value;
+    number.className = 'w-16 bg-black border border-borderDark rounded-lg px-2 py-1 text-xs text-slate-200 font-mono text-right focus:outline-none focus:border-neonCyan';
+    row.appendChild(number);
+
+    const suffix = document.createElement('span');
+    suffix.className = 'text-[10px] text-slate-500 font-mono';
+    suffix.textContent = '%';
+    row.appendChild(suffix);
+
+    const apply = (value) => {
+      const next = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+      slider.value = String(next);
+      number.value = String(next);
+      soloEnsureOptions().subjects[subject] = next;
+      soloSaveOptions();
+      soloUpdateSubjectTotal();
+    };
+    slider.addEventListener('input', () => apply(slider.value));
+    number.addEventListener('change', () => apply(number.value));
+    holder.appendChild(row);
+  });
+  soloUpdateSubjectTotal();
+}
+
+function soloUpdateSubjectTotal() {
+  const badge = document.getElementById('solo-subject-total');
+  if (!badge) return;
+  const weights = soloSubjectWeights();
+  const total = Math.round([...weights.values()].reduce((sum, value) => sum + value, 0));
+  badge.innerText = `TOTAL ${total}%`;
+  const complete = Math.abs(total - 100) < 1;
+  badge.className = complete ? 'text-[10px] font-mono font-bold text-neonGreen' : 'text-[10px] font-mono font-bold text-neonAmber';
+}
+
+function soloRenderPacketList() {
+  const list = document.getElementById('solo-packet-list');
+  const label = document.getElementById('solo-packet-label');
+  soloEnsureOptions();
+  const active = soloPackets.filter((packet) => !soloOptions.mutedPackets.includes(packet.id));
+  if (label) {
+    label.innerText = !soloPackets.length
+      ? 'No packets loaded'
+      : (active.length === soloPackets.length ? 'All packets (random)' : `${active.length} of ${soloPackets.length} packets`);
+  }
+  if (!list) return;
+  list.replaceChildren();
+  if (!soloPackets.length) {
+    const note = document.createElement('p');
+    note.className = 'text-[11px] text-slate-500 font-mono';
+    note.textContent = 'Add a .json or .txt packet to drill from your own question sets.';
+    list.appendChild(note);
+    return;
+  }
+  soloPackets.forEach((packet) => {
+    const row = document.createElement('label');
+    row.className = 'flex items-center gap-2 text-[11px] font-mono text-slate-300 cursor-pointer';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = !soloOptions.mutedPackets.includes(packet.id);
+    box.className = 'accent-neonCyan';
+    box.addEventListener('change', () => {
+      const muted = new Set(soloOptions.mutedPackets);
+      if (box.checked) muted.delete(packet.id); else muted.add(packet.id);
+      soloOptions.mutedPackets = [...muted];
+      soloSaveOptions();
+      soloRenderPacketList();
+      soloRenderSubjects();
+    });
+    const text = document.createElement('span');
+    text.textContent = `${packet.name} · ${packet.questions.length} toss-ups`;
+    row.append(box, text);
+    list.appendChild(row);
+  });
+}
+
+async function soloLoadSamplePacket() {
+  try {
+    const response = await fetch('/api/sample-bank');
+    if (!response.ok) return;
+    const bank = await response.json();
+    if (Array.isArray(bank) && bank.length) soloAddPacket('Sample packet', bank, { announce: false });
+  } catch (error) {
+    console.warn('Sample packet unavailable; add your own packet to drill.', error);
+  }
+}
+
+function openSoloSetup() {
+  soloEnsureOptions();
+  navigateTo(11);
+  soloRenderSetup();
+  if (!soloPackets.length && !soloSampleRequested) {
+    soloSampleRequested = true;
+    soloLoadSamplePacket().then(soloRenderSetup);
+  }
+}
+
+// Packets loaded for a match are reusable for practice without another upload.
+function soloRegisterPacketFromApp(name, questions) {
+  soloEnsureOptions();
+  return soloAddPacket(name, questions, { announce: false });
+}
+
+// =========================================================
+// DRILL: SUBJECT-WEIGHTED QUESTION ORDER
+// =========================================================
+function soloDrawSubject(weights) {
+  const entries = [...weights.entries()].filter(([, value]) => value > 0);
+  if (!entries.length) return null;
+  const total = entries.reduce((sum, [, value]) => sum + value, 0);
+  let roll = Math.random() * total;
+  for (const [subject, value] of entries) {
+    roll -= value;
+    if (roll <= 0) return subject;
+  }
+  return entries[entries.length - 1][0];
+}
+
+function soloBuildQueue(size = 12) {
+  const pool = soloSelectedQuestions();
+  if (!pool.length) return [];
+  const weights = soloSubjectWeights();
+  const bySubject = new Map();
+  pool.forEach((entry) => {
+    const subject = soloSubjectFor(entry.question.category);
+    if (!bySubject.has(subject)) bySubject.set(subject, []);
+    bySubject.get(subject).push(entry);
+  });
+  const queue = [];
+  let lastKey = null;
+  for (let index = 0; index < size; index += 1) {
+    let candidates = bySubject.get(soloDrawSubject(weights)) || [];
+    if (!candidates.length) candidates = pool;
+    const available = candidates.filter((entry) => `${entry.packet}|${entry.question.tossup_text}` !== lastKey);
+    const pick = (available.length ? available : candidates)[Math.floor(Math.random() * (available.length ? available.length : candidates.length))];
+    queue.push(pick);
+    lastKey = `${pick.packet}|${pick.question.tossup_text}`;
+  }
+  return queue;
+}
+
+function soloQuestionWords(text) {
+  return String(text || '').split(/\s+/).filter(Boolean);
+}
+
+function soloQuestionLabel(question) {
+  const type = String(question.type || 'SA').toUpperCase();
+  return type === 'MC' ? 'MULTIPLE CHOICE' : 'SHORT ANSWER';
+}
+
+// =========================================================
+// DRILL: RUNTIME
+// =========================================================
+function soloDrillState() {
+  return soloDrill;
+}
+
+function soloElement(id) {
+  return document.getElementById(id);
+}
+
+function soloClearTimers() {
+  if (!soloDrill) return;
+  soloDrill.timers.forEach((timer) => clearTimeout(timer));
+  soloDrill.timers = [];
+  soloDrill.intervals.forEach((timer) => clearInterval(timer));
+  soloDrill.intervals = [];
+  if (soloDrill.wordTimer) {
+    clearInterval(soloDrill.wordTimer);
+    soloDrill.wordTimer = null;
+  }
+  if (soloDrill.speechPoll) {
+    clearInterval(soloDrill.speechPoll);
+    soloDrill.speechPoll = null;
+  }
+  if (soloDrill.lockoutTimer) {
+    clearInterval(soloDrill.lockoutTimer);
+    soloDrill.lockoutTimer = null;
+  }
+}
+
+function soloStopSpeech() {
+  if (!soloSpeechAvailable()) return;
+  try { window.speechSynthesis.cancel(); } catch (error) { /* engine already idle */ }
+}
+
+// An abandoned recognition session keeps the microphone open and can submit a second
+// answer, so every path that ends a question closes it.
+function soloStopRecognition() {
+  if (!soloDrill || !soloDrill.recognition) return;
+  try { soloDrill.recognition.abort(); } catch (error) { /* already stopped */ }
+  soloDrill.recognition = null;
+}
+
+function soloStopDelivery() {
+  if (!soloDrill) return;
+  soloClearTimers();
+  soloStopSpeech();
+  soloStopRecognition();
+  soloDrill.delivering = false;
+  soloDrill.windowOpen = false;
+}
+
+// Leaving the drill slides must never leave speech or timers running.
+function soloLeavePractice(slideNum) {
+  if (slideNum === 11 || slideNum === 12) return;
+  if (!soloDrill) return;
+  soloStopDelivery();
+}
+
+function startSoloDrill() {
+  soloEnsureOptions();
+  soloNormalizeSubjects();
+  soloSaveOptions();
+  const queue = soloBuildQueue();
+  if (!queue.length) {
+    showToast('Load a question packet before starting a drill');
+    return;
+  }
+  soloDrill = {
+    queue,
+    index: 0,
+    score: 0,
+    streak: 0,
+    bestReaction: null,
+    lastReaction: null,
+    answered: false,
+    delivering: false,
+    windowOpen: false,
+    streamDone: false,
+    speechDone: false,
+    wordsShown: 0,
+    totalWords: 0,
+    startedAt: 0,
+    timers: [],
+    intervals: [],
+    wordTimer: null,
+    speechPoll: null,
+    lockoutTimer: null,
+    recognition: null,
+  };
+  navigateTo(12);
+  soloRenderStats();
+  soloRenderQuestion({ ready: true });
+  playSound('click');
+}
+
+function soloRenderStats() {
+  if (!soloDrill) return;
+  const score = soloElement('solo-score');
+  const streak = soloElement('solo-streak');
+  const reaction = soloElement('solo-reaction');
+  if (score) score.innerText = String(soloDrill.score);
+  if (streak) streak.innerText = String(soloDrill.streak);
+  if (reaction) reaction.innerText = soloDrill.lastReaction == null ? '-- S' : `${soloDrill.lastReaction.toFixed(2)} S`;
+  const badge = soloElement('solo-scope-badge');
+  const weights = soloSubjectWeights();
+  const active = [...weights.entries()].filter(([, value]) => value > 0).map(([subject]) => subject);
+  if (badge) badge.innerText = active.length === 1 ? active[0].toUpperCase() : 'ALL';
+  const line = soloElement('solo-mode-line');
+  if (line) {
+    line.textContent = `OUTPUT: ${soloOptions.output.toUpperCase()} \u2022 INPUT: ${soloOptions.input.toUpperCase()} \u2022 ${soloOptions.wpm} WPM`;
+  }
+}
+
+function soloRenderQuestion({ ready = false } = {}) {
+  if (!soloDrill) return;
+  const entry = soloDrill.queue[soloDrill.index];
+  if (!entry) return;
+  const question = entry.question;
+  const label = soloElement('solo-q-label');
+  if (label) label.innerText = `Toss-up #${soloDrill.index + 1} (${soloQuestionLabel(question)})`;
+  const text = soloElement('solo-question-text');
+  const words = soloQuestionWords(question.tossup_text);
+  soloDrill.totalWords = words.length;
+  soloDrill.wordsShown = 0;
+  const counter = soloElement('solo-word-count');
+  if (counter) counter.innerText = `Word 0 of ${words.length}`;
+  const lockout = soloElement('solo-lockout');
+  if (lockout) lockout.innerText = `Lockout: ${SOLO_LOCKOUT_SECONDS.toFixed(1)}s`;
+  const bar = soloElement('solo-progress-bar');
+  if (bar) bar.style.width = '0%';
+  const status = soloElement('solo-drill-status');
+  const feedback = soloElement('solo-feedback');
+  if (feedback) { feedback.className = 'hidden mt-4 text-sm font-mono font-bold'; feedback.innerText = ''; }
+  const answerPanel = soloElement('solo-answer-panel');
+  if (answerPanel) answerPanel.classList.add('hidden');
+  const answerInput = soloElement('solo-answer-input');
+  if (answerInput) answerInput.value = '';
+  const buzz = soloElement('solo-buzz-btn');
+  if (buzz) buzz.disabled = true;
+  if (status) status.innerText = ready ? 'Standby' : 'Delivery complete';
+  if (text) {
+    text.className = 'min-h-[132px] bg-black border border-borderDark rounded-xl p-5 text-lg md:text-xl text-slate-200 font-sans leading-relaxed';
+    text.textContent = ready ? 'Ready. Hit "START QUESTION DRILL" to launch delivery.' : words.join(' ');
+  }
+}
+
+function soloStartQuestion() {
+  if (!soloDrill) return;
+  if (soloDrill.delivering) return;
+  const entry = soloDrill.queue[soloDrill.index];
+  if (!entry) return;
+  soloStopDelivery();
+  const question = entry.question;
+  const words = soloQuestionWords(question.tossup_text);
+  soloDrill.totalWords = words.length;
+  soloDrill.wordsShown = 0;
+  soloDrill.answered = false;
+  soloDrill.windowOpen = true;
+  soloDrill.delivering = true;
+  soloDrill.startedAt = performance.now();
+  soloDrill.lastReaction = null;
+
+  const text = soloElement('solo-question-text');
+  const counter = soloElement('solo-word-count');
+  const status = soloElement('solo-drill-status');
+  const bar = soloElement('solo-progress-bar');
+  const buzz = soloElement('solo-buzz-btn');
+  const feedback = soloElement('solo-feedback');
+  const answerPanel = soloElement('solo-answer-panel');
+  if (feedback) { feedback.className = 'hidden mt-4 text-sm font-mono font-bold'; feedback.innerText = ''; }
+  if (answerPanel) answerPanel.classList.add('hidden');
+  if (bar) bar.style.width = '0%';
+  if (counter) counter.innerText = `Word 0 of ${words.length}`;
+  if (buzz) buzz.disabled = false;
+  if (status) {
+    status.innerText = soloOptions.output === 'spoken'
+      ? 'Delivering: spoken only'
+      : (soloOptions.output === 'typed' ? 'Delivering: typed stream' : 'Delivering: hybrid voice + stream');
+  }
+  if (text) {
+    if (soloOptions.output === 'spoken') {
+      // Spoken delivery is audio-only by design: the question is never written to the page.
+      text.className = 'min-h-[132px] bg-black border border-neonCyan/40 rounded-xl p-5 flex flex-col items-center justify-center text-center';
+      const speaker = document.createElement('span');
+      speaker.className = 'text-4xl';
+      speaker.textContent = '\uD83D\uDD08';
+      const caption = document.createElement('span');
+      caption.className = 'text-[11px] text-neonCyan font-mono font-bold tracking-widest mt-3 uppercase';
+      caption.textContent = 'Audio-only delivery — no visible text';
+      text.replaceChildren(speaker, caption);
+    } else {
+      text.className = 'min-h-[132px] bg-black border border-borderDark rounded-xl p-5 text-lg md:text-xl text-slate-200 font-sans leading-relaxed';
+      text.textContent = '';
+    }
+  }
+
+  // A hybrid read is over only when both channels are: the spoken question and the
+  // teleprompter run at their own paces, and the buzz window must not open before the
+  // last of them has finished.
+  const streamsText = soloOptions.output !== 'spoken';
+  const speaksText = soloOptions.output !== 'typed';
+  soloDrill.streamDone = !streamsText;
+  soloDrill.speechDone = !speaksText;
+  if (streamsText) soloStartWordStream(words);
+  if (soloOptions.output === 'spoken') {
+    // Progress for a spoken-only read follows the estimate until the engine confirms.
+    soloAnimateSpokenProgress(question.tossup_text);
+  }
+  if (speaksText) {
+    soloSpeak(question.tossup_text, (spoke) => {
+      if (!soloDrill || !soloDrill.delivering) return;
+      if (!spoke && status) {
+        status.innerText = 'Speech engine did not start — check the voice, or use typed delivery.';
+      }
+      if (!streamsText) soloDrill.wordsShown = words.length;
+      soloDrill.speechDone = true;
+      soloFinishDelivery();
+    });
+  }
+}
+
+// Packet text is untrusted content: it is streamed as text nodes, never as markup.
+function soloStartWordStream(words) {
+  const msPerWord = Math.max(50, Math.round(60000 / Math.max(120, soloOptions.wpm)));
+  const text = soloElement('solo-question-text');
+  const counter = soloElement('solo-word-count');
+  const bar = soloElement('solo-progress-bar');
+  let index = 0;
+  if (text) text.replaceChildren();
+  const caret = document.createElement('span');
+  caret.className = 'text-neonCyan animate-pulse';
+  caret.textContent = '\u258c';
+  soloDrill.wordTimer = setInterval(() => {
+    if (!soloDrill || !soloDrill.delivering) {
+      clearInterval(soloDrill.wordTimer);
+      soloDrill.wordTimer = null;
+      return;
+    }
+    index += 1;
+    soloDrill.wordsShown = index;
+    if (text && caret.parentNode === text) {
+      const shown = document.createElement('span');
+      shown.textContent = `${words[index - 1]} `;
+      text.insertBefore(shown, caret);
+    }
+    if (counter) counter.innerText = `Word ${index} of ${words.length}`;
+    // In hybrid delivery the spoken read outlasts the stream, so the bar only completes
+    // when the read itself is over.
+    if (bar) {
+      const share = Math.round((index / words.length) * 100);
+      bar.style.width = `${soloOptions.output === 'hybrid' ? Math.min(99, share) : share}%`;
+    }
+    if (index >= words.length) {
+      clearInterval(soloDrill.wordTimer);
+      soloDrill.wordTimer = null;
+      if (text && caret.parentNode === text) caret.remove();
+      if (counter) counter.innerText = `Word ${words.length} of ${words.length}`;
+      soloDrill.streamDone = true;
+      soloFinishDelivery();
+    }
+  }, msPerWord);
+  if (text) text.appendChild(caret);
+}
+
+function soloAnimateSpokenProgress(source) {
+  const bar = soloElement('solo-progress-bar');
+  if (!bar) return;
+  const estimate = Math.max(1.2, source.length / (SOLO_SPOKEN_CHARS_PER_SECOND * soloOptions.rate));
+  const begin = performance.now();
+  const timer = setInterval(() => {
+    if (!soloDrill || !soloDrill.delivering) {
+      clearInterval(timer);
+      return;
+    }
+    const share = Math.min(0.95, (performance.now() - begin) / 1000 / estimate);
+    bar.style.width = `${Math.round(share * 100)}%`;
+    if (share >= 0.95) clearInterval(timer);
+  }, 120);
+  soloDrill.intervals.push(timer);
+}
+
+// Speech completion cannot rely on the 'end' event alone: the engine sometimes never
+// delivers it, and the drill must not wait forever for a read that already stopped.
+function soloSpeak(source, onDone) {
+  if (!soloSpeechAvailable()) {
+    onDone(false);
+    return;
+  }
+  soloStopSpeech();
+  const utterance = new SpeechSynthesisUtterance(source);
+  utterance.rate = soloOptions.rate;
+  const voices = window.speechSynthesis.getVoices() || [];
+  const voice = voices.find((entry) => entry.name === soloOptions.voice);
+  if (voice) utterance.voice = voice;
+  let settled = false;
+  let spoke = false;
+  let pollTimer = null;
+  const settle = () => {
+    if (settled) return;
+    settled = true;
+    if (pollTimer) clearInterval(pollTimer);
+    if (soloDrill && soloDrill.speechPoll === pollTimer) soloDrill.speechPoll = null;
+    onDone(spoke);
+  };
+  utterance.onstart = () => { spoke = true; };
+  utterance.onend = settle;
+  utterance.onerror = () => {
+    // A read the browser refused (or another page interrupted) must still release the drill.
+    settle();
+  };
+  const begin = performance.now();
+  pollTimer = setInterval(() => {
+    if (settled) {
+      clearInterval(pollTimer);
+      return;
+    }
+    if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+      spoke = true;
+      return;
+    }
+    // The engine stopped without an 'end' event, or never took the utterance at all.
+    if (spoke || performance.now() - begin > 1500) settle();
+  }, 200);
+  if (soloDrill) soloDrill.speechPoll = pollTimer;
+  window.speechSynthesis.speak(utterance);
+}
+
+// Called by every delivery channel; the read ends only when none is still running.
+function soloFinishDelivery() {
+  if (!soloDrill || soloDrill.answered) return;
+  if (!soloDrill.streamDone || !soloDrill.speechDone) return;
+  const status = soloElement('solo-drill-status');
+  const bar = soloElement('solo-progress-bar');
+  if (bar) bar.style.width = '100%';
+  if (status) status.innerText = 'Read complete — buzz window open (5.0s)';
+  soloDrill.delivering = false;
+  soloDrill.windowOpen = true;
+  soloStartWindowCountdown();
+}
+
+function soloStartWindowCountdown() {
+  const timer = setTimeout(() => {
+    if (!soloDrill || soloDrill.answered) return;
+    soloExpireQuestion('No buzz — question expired.');
+  }, SOLO_LOCKOUT_SECONDS * 1000);
+  soloDrill.timers.push(timer);
+}
+
+// The drill stops at the end of a window; moving on is the trainee's call, exactly as a
+// moderator would start the next toss-up.
+function soloExpireQuestion(message) {
+  if (!soloDrill) return;
+  soloStopDelivery();
+  soloDrill.answered = true;
+  soloDrill.streak = 0;
+  const buzz = soloElement('solo-buzz-btn');
+  if (buzz) buzz.disabled = true;
+  const status = soloElement('solo-drill-status');
+  if (status) status.innerText = message;
+  const feedback = soloElement('solo-feedback');
+  if (feedback) {
+    feedback.className = 'mt-4 text-sm font-mono font-bold text-slate-400';
+    feedback.innerText = 'No points — press NEXT TOSSUP to keep training.';
+  }
+  soloRenderStats();
+}
+
+function soloBuzz() {
+  if (!soloDrill || soloDrill.answered) return false;
+  if (!soloDrill.windowOpen && !soloDrill.delivering) return false;
+  if (!soloElement('slide-12') || soloElement('slide-12').classList.contains('hidden')) return false;
+  soloDrill.lastReaction = (performance.now() - soloDrill.startedAt) / 1000;
+  soloStopDelivery();
+  soloDrill.answered = true;
+  soloDrill.windowOpen = false;
+  soloRenderStats();
+  playSound('buzz');
+
+  const buzz = soloElement('solo-buzz-btn');
+  if (buzz) buzz.disabled = true;
+  const status = soloElement('solo-drill-status');
+  if (status) status.innerText = `Locked out at ${soloDrill.lastReaction.toFixed(2)}s — answer now`;
+  const panel = soloElement('solo-answer-panel');
+  if (panel) panel.classList.remove('hidden');
+
+  soloStartLockoutCountdown();
+  if (soloOptions.input === 'audio') soloStartRecognition();
+  else {
+    const input = soloElement('solo-answer-input');
+    if (input) input.focus();
+  }
+  return true;
+}
+
+function soloStartLockoutCountdown() {
+  const label = soloElement('solo-answer-timer');
+  const header = soloElement('solo-lockout');
+  const deadline = performance.now() + SOLO_LOCKOUT_SECONDS * 1000;
+  soloDrill.lockoutTimer = setInterval(() => {
+    const remaining = Math.max(0, (deadline - performance.now()) / 1000);
+    if (label) label.innerText = `${remaining.toFixed(1)}s`;
+    if (header) header.innerText = `Lockout: ${remaining.toFixed(1)}s`;
+    if (remaining <= 0) {
+      clearInterval(soloDrill.lockoutTimer);
+      soloDrill.lockoutTimer = null;
+      soloRecordResult(false, 'Lockout expired before an answer arrived.');
+    }
+  }, 100);
+}
+
+function soloStartRecognition() {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const status = soloElement('solo-drill-status');
+  if (!Recognition) {
+    if (status) status.innerText = 'Speech recognition unavailable here — type the answer instead.';
+    const input = soloElement('solo-answer-input');
+    if (input) input.focus();
+    return;
+  }
+  try {
+    const recognition = new Recognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 3;
+    recognition.onresult = (event) => {
+      const transcript = [...event.results].map((result) => result[0].transcript).join(' ').trim();
+      if (status) status.innerText = `Heard: "${transcript}"`;
+      if (event.results[event.results.length - 1].isFinal && transcript) {
+        soloStopDelivery();
+        soloSubmitAnswer(transcript);
+      }
+    };
+    recognition.onerror = (event) => {
+      if (status) status.innerText = `Microphone capture failed (${event.error}) — type the answer instead.`;
+      const input = soloElement('solo-answer-input');
+      if (input) input.focus();
+    };
+    recognition.start();
+    soloDrill.recognition = recognition;
+    if (status) status.innerText = 'Listening for your answer...';
+  } catch (error) {
+    if (status) status.innerText = 'Microphone capture could not start — type the answer instead.';
+  }
+}
+
+// =========================================================
+// JUDGING / SCORING
+// =========================================================
+function soloNormalizeText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u201c\u201d]/g, "'")
+    .replace(/[^a-z0-9'\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Instant keyword matcher: the response must contain the answer, or every significant
+// word of it. A single long answer also accepts a 5-character opening, so a fast typist's
+// "mitocondria" is not scored as a miss.
+function soloJudgeAnswer(question, response) {
+  const answer = soloNormalizeText(question.tossup_answer);
+  const reply = soloNormalizeText(response);
+  if (!reply || !answer) return false;
+  if (reply === answer) return true;
+  if (` ${reply} `.includes(` ${answer} `)) return true;
+  const answerWords = answer.split(' ').filter(Boolean);
+  const replyWords = reply.split(' ').filter(Boolean);
+  if (answerWords.length === 1) {
+    return answer.length >= 6 && replyWords.some((word) => word.length >= 5 && word.startsWith(answer.slice(0, 5)));
+  }
+  const significant = answerWords.filter((word) => word.length >= 4);
+  if (!significant.length) return answerWords.every((word) => replyWords.includes(word));
+  return significant.every((word) => replyWords.includes(word));
+}
+
+function soloSubmitAnswer(response) {
+  if (!soloDrill || !soloDrill.answered) return;
+  const entry = soloDrill.queue[soloDrill.index];
+  if (!entry) return;
+  const correct = soloJudgeAnswer(entry.question, response);
+  soloRecordResult(correct, correct ? `Correct — "${entry.question.tossup_answer}"` : `Incorrect — answer: "${entry.question.tossup_answer}"`);
+}
+
+function soloRecordResult(correct, message) {
+  if (!soloDrill) return;
+  if (soloDrill.lockoutTimer) {
+    clearInterval(soloDrill.lockoutTimer);
+    soloDrill.lockoutTimer = null;
+  }
+  soloStopSpeech();
+  soloStopRecognition();
+  if (correct) {
+    soloDrill.score += SOLO_TOSS_UP_POINTS;
+    soloDrill.streak += 1;
+    playSound('correct');
+  } else {
+    soloDrill.streak = 0;
+    playSound('buzz');
+  }
+  soloDrill.answered = true;
+  soloDrill.windowOpen = false;
+  const feedback = soloElement('solo-feedback');
+  if (feedback) {
+    feedback.className = `mt-4 text-sm font-mono font-bold ${correct ? 'text-neonGreen' : 'text-neonPink'}`;
+    feedback.innerText = `${correct ? '✅' : '❌'} ${message}`;
+  }
+  const status = soloElement('solo-drill-status');
+  if (status) status.innerText = correct ? 'Point awarded — press NEXT TOSSUP' : 'No points — press NEXT TOSSUP';
+  const header = soloElement('solo-lockout');
+  if (header) header.innerText = `Lockout: ${SOLO_LOCKOUT_SECONDS.toFixed(1)}s`;
+  soloRenderStats();
+}
+
+function soloRevealAnswer() {
+  if (!soloDrill) return;
+  const entry = soloDrill.queue[soloDrill.index];
+  if (!entry) return;
+  const wasAnswered = soloDrill.answered;
+  soloStopDelivery();
+  soloDrill.answered = true;
+  soloDrill.windowOpen = false;
+  if (!wasAnswered) {
+    soloDrill.streak = 0;
+    soloRenderStats();
+  }
+  const feedback = soloElement('solo-feedback');
+  if (feedback) {
+    feedback.className = 'mt-4 text-sm font-mono font-bold text-neonAmber';
+    feedback.innerText = `💡 Answer: ${entry.question.tossup_answer}`;
+  }
+  const text = soloElement('solo-question-text');
+  if (text && soloOptions.output === 'spoken') {
+    text.className = 'min-h-[132px] bg-black border border-borderDark rounded-xl p-5 text-lg md:text-xl text-slate-200 font-sans leading-relaxed';
+    text.textContent = soloQuestionWords(entry.question.tossup_text).join(' ');
+  }
+  const status = soloElement('solo-drill-status');
+  if (status) status.innerText = 'Answer revealed';
+}
+
+function soloNextTossup() {
+  if (!soloDrill) return;
+  soloStopDelivery();
+  soloDrill.index += 1;
+  if (soloDrill.index >= soloDrill.queue.length) {
+    soloDrill.queue = soloBuildQueue();
+    soloDrill.index = 0;
+  }
+  if (!soloDrill.queue.length) {
+    showToast('No questions left — load another packet');
+    return;
+  }
+  soloDrill.answered = false;
+  soloRenderQuestion({ ready: true });
+}
+
+// =========================================================
+// WIRING
+// =========================================================
+function soloBindSetup() {
+  document.querySelectorAll('.solo-output-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      soloEnsureOptions().output = card.dataset.soloOutput;
+      soloSaveOptions();
+      soloRenderSetup();
+      playSound('click');
+    });
+  });
+  document.querySelectorAll('.solo-input-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      soloEnsureOptions().input = card.dataset.soloInput;
+      soloSaveOptions();
+      soloRenderSetup();
+      playSound('click');
+    });
+  });
+
+  const rate = soloElement('solo-rate-slider');
+  if (rate) {
+    rate.addEventListener('input', () => {
+      soloEnsureOptions().rate = Number(rate.value);
+      soloSaveOptions();
+      const label = soloElement('solo-rate-value');
+      if (label) label.innerText = `${soloOptions.rate.toFixed(2).replace(/0$/, '')}X`;
+      if (soloDrill) soloRenderStats();
+    });
+  }
+  const wpm = soloElement('solo-wpm-slider');
+  if (wpm) {
+    wpm.addEventListener('input', () => {
+      soloEnsureOptions().wpm = Number(wpm.value);
+      soloSaveOptions();
+      const label = soloElement('solo-wpm-value');
+      if (label) label.innerText = `${soloOptions.wpm} WPM`;
+      // A drill already running follows the new pace on its next read, and its header
+      // must not keep advertising the old one.
+      if (soloDrill) soloRenderStats();
+    });
+  }
+  const voice = soloElement('solo-voice-select');
+  if (voice) {
+    voice.addEventListener('change', () => {
+      soloEnsureOptions().voice = voice.value;
+      soloSaveOptions();
+    });
+  }
+  const testVoice = soloElement('solo-test-voice');
+  if (testVoice) {
+    testVoice.addEventListener('click', () => {
+      if (!soloSpeechAvailable()) {
+        showToast('This browser has no speech engine');
+        return;
+      }
+      soloSpeak('Solo practice ready. Ten seconds, buzzer armed.', () => {});
+    });
+  }
+  const micTest = soloElement('solo-test-mic');
+  if (micTest) {
+    micTest.addEventListener('click', soloTestMic);
+  }
+  const packetInput = soloElement('solo-packet-input');
+  if (packetInput) {
+    packetInput.addEventListener('change', async (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      try {
+        if (file.size > 5 * 1024 * 1024) throw new Error('Choose a packet no larger than 5 MB.');
+        let bank;
+        if (file.name.toLowerCase().endsWith('.json')) bank = JSON.parse(await file.text());
+        else bank = parseScienceBowlText(await file.text());
+        if (!Array.isArray(bank) || !bank.length) throw new Error('That packet has no questions.');
+        soloAddPacket(file.name.replace(/\.(json|txt)$/i, ''), bank);
+      } catch (error) {
+        showToast(`Packet rejected — ${error.message}`);
+      }
+    });
+  }
+  const toggle = soloElement('solo-toggle-packets');
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      const list = soloElement('solo-packet-list');
+      if (list) list.classList.toggle('hidden');
+      playSound('click');
+    });
+  }
+  const start = soloElement('solo-start-drill');
+  if (start) start.addEventListener('click', startSoloDrill);
+
+  const startQuestion = soloElement('solo-start-question');
+  if (startQuestion) startQuestion.addEventListener('click', () => { soloStartQuestion(); playSound('click'); });
+  const buzz = soloElement('solo-buzz-btn');
+  if (buzz) buzz.addEventListener('click', () => soloBuzz());
+  const submit = soloElement('solo-answer-submit');
+  if (submit) submit.addEventListener('click', () => {
+    const input = soloElement('solo-answer-input');
+    soloSubmitAnswer(input ? input.value : '');
+  });
+  const answerInput = soloElement('solo-answer-input');
+  if (answerInput) {
+    answerInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        soloSubmitAnswer(answerInput.value);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        soloRecordResult(false, 'Answer forfeited.');
+      }
+    });
+  }
+  const reveal = soloElement('solo-reveal-answer');
+  if (reveal) reveal.addEventListener('click', () => { soloRevealAnswer(); playSound('click'); });
+  const next = soloElement('solo-next-tossup');
+  if (next) next.addEventListener('click', () => { soloNextTossup(); playSound('click'); });
+
+  document.addEventListener('keydown', (event) => {
+    const tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (event.code === 'Space' || event.key === ' ') {
+      if (soloBuzz()) event.preventDefault();
+    }
+  });
+
+  window.addEventListener('focus', () => { if (soloDrill) soloRenderStats(); });
+}
+
+async function soloTestMic() {
+  const status = soloElement('solo-mic-status');
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  soloMicChecked = true;
+  if (!Recognition) {
+    if (status) {
+      status.innerText = 'Speech recognition unavailable — use typed input';
+      status.className = 'text-[10px] font-mono font-bold text-neonAmber';
+    }
+    showToast('This browser cannot recognize speech; typed input still works');
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((track) => track.stop());
+    if (status) {
+      status.innerText = 'Speech Recognition Active';
+      status.className = 'text-[10px] font-mono font-bold text-neonGreen';
+    }
+    showToast('Microphone ready');
+  } catch (error) {
+    if (status) {
+      status.innerText = 'Microphone blocked — use typed input';
+      status.className = 'text-[10px] font-mono font-bold text-neonPink';
+    }
+    showToast('Microphone permission denied');
+  }
+}
+
+function soloResetOptions() {
+  soloOptions = JSON.parse(JSON.stringify(SOLO_DEFAULT_OPTIONS));
+  soloSaveOptions();
+  soloRenderSetup();
+  showToast('Solo drill options reset');
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', soloBindSetup);
+} else {
+  soloBindSetup();
+}
+
+if (soloSpeechAvailable() && typeof window.speechSynthesis.addEventListener === 'function') {
+  window.speechSynthesis.addEventListener('voiceschanged', () => {
+    if (soloElement('slide-11') && !soloElement('slide-11').classList.contains('hidden')) soloPopulateVoices();
+  });
+}

@@ -116,6 +116,8 @@ async function handleSettingsPacket(file) {
             throw new Error('Not connected to the match room — the packet was not sent. Reopen the room and try again.');
         }
         sendEvent('LOAD_BANK', { bank: bankJson });
+        // A packet loaded for a match is also useful for solo practice, with no re-upload.
+        if (typeof soloRegisterPacketFromApp === 'function') soloRegisterPacketFromApp(file.name.replace(/\.(json|txt)$/i, ''), bankJson);
         if (status) {
             status.innerText = `Sending ${file.name} to the room — waiting for confirmation...`;
             status.className = 'mt-4 text-center text-xs font-mono font-bold text-neonAmber min-h-5';
@@ -151,6 +153,7 @@ if (bankFileInput) {
                 throw new Error("Not connected to the match room — the packet was not sent.");
             }
             sendEvent('LOAD_BANK', { bank: bankJson });
+            if (typeof soloRegisterPacketFromApp === 'function') soloRegisterPacketFromApp(file.name.replace(/\.(json|txt)$/i, ''), bankJson);
             if (bankFileName) {
                 bankFileName.innerText = `Sending ${file.name} (${bankJson.length} questions) — waiting for confirmation...`;
                 bankFileName.className = "text-xs text-neonAmber font-mono font-bold animate-pulse";

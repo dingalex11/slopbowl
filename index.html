@@ -122,6 +122,34 @@
     .buzz-active-anim {
       animation: buzzRipple 0.6s cubic-bezier(0.25, 1, 0.5, 1);
     }
+    /* Solo drill sliders: a neon thumb on a dark rail, matching the HUD. */
+    .solo-range {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 9999px;
+      background: #162238;
+      outline: none;
+      cursor: pointer;
+    }
+    .solo-range::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 9999px;
+      background: #00f3ff;
+      border: 2px solid #000000;
+      box-shadow: 0 0 10px rgba(0, 243, 255, 0.75);
+    }
+    .solo-range::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 9999px;
+      background: #00f3ff;
+      border: 2px solid #000000;
+    }
   </style>
 
   <link rel="stylesheet" href="/static/css/style.css">
@@ -161,7 +189,7 @@
 
     <!-- Right Header Action Buttons -->
     <div class="flex items-center space-x-2 sm:space-x-2.5">
-      <button onclick="openWipModal(); playSound('click');" class="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-mono font-black text-black bg-neonGreen hover:bg-emerald-400 active:scale-95 rounded-lg shadow-neon-green transition">
+      <button onclick="openSoloSetup(); playSound('click');" class="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-mono font-black text-black bg-neonGreen hover:bg-emerald-400 active:scale-95 rounded-lg shadow-neon-green transition">
         <span>&#9889; SOLO</span>
       </button>
 
@@ -271,18 +299,18 @@
           </div>
         </div>
 
-        <!-- Card 3: Singleplayer Practice (work in progress) -->
-        <div onclick="openWipModal(); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonGreen rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-green hover:-translate-y-1 active:scale-95 relative overflow-hidden">
+        <!-- Card 3: Solo practice drill -->
+        <div onclick="openSoloSetup(); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonGreen rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-green hover:-translate-y-1 active:scale-95 relative overflow-hidden">
           <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonGreen/10 rounded-full blur-xl group-hover:bg-neonGreen/20 transition"></div>
           <div class="w-16 h-16 rounded-2xl bg-black border border-neonGreen/50 flex items-center justify-center text-neonGreen mb-5 group-hover:scale-110 transition shadow-inner">
             <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
           </div>
           <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonGreen transition font-display">Singleplayer Practice</h3>
           <p class="text-xs text-slate-400 leading-relaxed font-sans">
-            Solo buzz-speed training with audio prompts. Currently under construction.
+            Solo buzz-speed training: spoken, typed or hybrid delivery, subject weighting and instant answer lockout.
           </p>
           <div class="mt-6 flex items-center text-xs font-mono text-neonGreen group-hover:translate-x-1 transition font-bold">
-            <span class="px-2 py-0.5 bg-neonGreen/10 border border-neonGreen/50 rounded-full mr-2">WORK IN PROGRESS</span>
+            Enter the drill engine &rarr;
           </div>
         </div>
       </div>
@@ -949,6 +977,245 @@
       </div>
     </section>
 
+    <!-- ========================================== -->
+    <!-- SLIDE 11: SOLO PRACTICE SETUP              -->
+    <!-- ========================================== -->
+    <section id="slide-11" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-4xl mx-auto w-full">
+
+        <div class="flex flex-wrap items-start justify-between gap-4 border-b border-borderDark pb-4 mb-6">
+          <div class="flex items-center space-x-4">
+            <div class="w-14 h-14 rounded-2xl bg-black border border-neonGreen/60 flex items-center justify-center text-neonGreen text-2xl shadow-neon-green">&#9889;</div>
+            <div>
+              <div class="flex items-center space-x-3">
+                <h2 class="text-2xl md:text-3xl font-black font-display text-white">Solo Practice Setup</h2>
+                <span class="px-2.5 py-0.5 rounded-full bg-black border border-neonGreen/60 text-neonGreen text-[10px] font-mono font-bold tracking-widest">DRILL ENGINE</span>
+              </div>
+              <p class="text-xs text-slate-400 font-mono mt-1">Configure stimulus delivery modes and response capture mechanisms.</p>
+            </div>
+          </div>
+          <button onclick="navigateTo(1); playSound('click');" class="px-4 py-2 bg-panel border border-borderDark text-slate-300 hover:text-white text-xs font-mono font-bold rounded-xl active:scale-95 transition">&larr; Hub</button>
+        </div>
+
+        <!-- 1. QUESTION OUTPUT MODE -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-6 mb-6">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+            <h3 class="text-sm font-black font-mono text-neonCyan tracking-widest uppercase">1. Question Output Mode <span class="text-slate-500">(stimulus delivery)</span></h3>
+            <span class="text-[10px] text-slate-500 font-mono">Audio Synth / Teleprompter</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <button type="button" data-solo-output="spoken" class="solo-output-card text-left bg-black border border-borderDark rounded-2xl p-4 transition hover:border-neonCyan/60 active:scale-[0.99]">
+              <div class="flex items-start justify-between mb-3">
+                <span class="text-xl">&#128264;</span>
+                <span data-solo-dot class="w-4 h-4 rounded-full border-2 border-slate-600 transition"></span>
+              </div>
+              <b class="block text-sm font-bold text-white font-display">Spoken Output</b>
+              <span class="block text-[11px] text-slate-400 font-mono leading-relaxed mt-1">Voice synthesizes the question aloud with zero visible text. Auditory interrupt practice.</span>
+            </button>
+
+            <button type="button" data-solo-output="typed" class="solo-output-card text-left bg-black border border-borderDark rounded-2xl p-4 transition hover:border-neonCyan/60 active:scale-[0.99]">
+              <div class="flex items-start justify-between mb-3">
+                <span class="text-xl">&#128220;</span>
+                <span data-solo-dot class="w-4 h-4 rounded-full border-2 border-slate-600 transition"></span>
+              </div>
+              <b class="block text-sm font-bold text-white font-display">Typed Text Output</b>
+              <span class="block text-[11px] text-slate-400 font-mono leading-relaxed mt-1">Silent high-speed word-by-word streaming teleprompter. Perfect for fast speed-reading drills.</span>
+            </button>
+
+            <button type="button" data-solo-output="hybrid" class="solo-output-card text-left bg-black border border-borderDark rounded-2xl p-4 transition hover:border-neonCyan/60 active:scale-[0.99]">
+              <div class="flex items-start justify-between mb-3">
+                <span class="text-xl">&#9889;</span>
+                <span data-solo-dot class="w-4 h-4 rounded-full border-2 border-slate-600 transition"></span>
+              </div>
+              <b class="block text-sm font-bold text-white font-display">Hybrid Mode</b>
+              <span class="block text-[11px] text-slate-400 font-mono leading-relaxed mt-1">Simultaneous spoken voice plus synchronized word highlighting. Full competition emulation.</span>
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 items-end mt-5">
+            <div>
+              <label for="solo-voice-select" class="block text-[10px] text-slate-500 font-mono font-bold tracking-widest uppercase mb-2">Synthesizer Voice</label>
+              <select id="solo-voice-select" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-neonCyan">
+                <option value="">System Default (English)</option>
+              </select>
+            </div>
+            <div>
+              <label for="solo-rate-slider" class="flex items-center justify-between text-[10px] text-slate-500 font-mono font-bold tracking-widest uppercase mb-2">
+                <span>Speech Rate</span><span id="solo-rate-value" class="text-neonCyan">1.1X</span>
+              </label>
+              <input id="solo-rate-slider" type="range" min="0.6" max="1.6" step="0.05" value="1.1" class="solo-range w-full">
+            </div>
+            <button type="button" id="solo-test-voice" onclick="playSound('click')" class="px-5 py-2.5 bg-black border border-neonCyan/70 text-neonCyan hover:bg-neonCyan/10 text-xs font-mono font-bold rounded-xl active:scale-95 transition">&#128266; Test Voice Synth</button>
+          </div>
+        </div>
+
+        <!-- 2. ANSWER INPUT MODE -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-6 mb-6">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+            <h3 class="text-sm font-black font-mono text-neonAmber tracking-widest uppercase">2. Answer Input Mode <span class="text-slate-500">(response capture)</span></h3>
+            <span class="text-[10px] text-slate-500 font-mono">Microphone / Keyboard</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button type="button" data-solo-input="audio" class="solo-input-card text-left bg-black border border-borderDark rounded-2xl p-4 transition hover:border-neonAmber/60 active:scale-[0.99]">
+              <div class="flex items-start justify-between mb-3">
+                <span class="text-xl">&#127908;</span>
+                <span data-solo-dot class="w-4 h-4 rounded-full border-2 border-slate-600 transition"></span>
+              </div>
+              <b class="block text-sm font-bold text-white font-display">Audio Input (Microphone Speech)</b>
+              <span class="block text-[11px] text-slate-400 font-mono leading-relaxed mt-1">Buzz in and speak your answer directly into the mic. Speech recognition transcribes the answer.</span>
+              <div class="flex items-center justify-between mt-3">
+                <span id="solo-mic-status" class="text-[10px] font-mono font-bold text-slate-500">Checking microphone...</span>
+                <span id="solo-test-mic" role="button" class="px-3 py-1 bg-panel border border-borderDark text-slate-300 hover:text-white text-[10px] font-mono font-bold rounded-lg">Test Mic</span>
+              </div>
+            </button>
+
+            <button type="button" data-solo-input="typed" class="solo-input-card text-left bg-black border border-borderDark rounded-2xl p-4 transition hover:border-neonAmber/60 active:scale-[0.99]">
+              <div class="flex items-start justify-between mb-3">
+                <span class="text-xl">&#9000;</span>
+                <span data-solo-dot class="w-4 h-4 rounded-full border-2 border-slate-600 transition"></span>
+              </div>
+              <b class="block text-sm font-bold text-white font-display">Typed Input (High-Speed Terminal)</b>
+              <span class="block text-[11px] text-slate-400 font-mono leading-relaxed mt-1">Buzz in and immediately type the answer in a neon terminal with an urgent 5.0s countdown.</span>
+              <div class="flex items-center justify-between mt-3">
+                <span class="text-[10px] font-mono font-bold text-slate-500">Instant Keyword Matcher</span>
+                <span class="text-[10px] font-mono font-bold text-neonAmber">Standard</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- 3. DRILL OPTIONS -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-6 mb-6">
+          <h3 class="text-sm font-black font-mono text-neonGreen tracking-widest uppercase mb-4">3. Drill Options</h3>
+
+          <div class="flex items-center justify-between mb-2">
+            <label for="solo-wpm-slider" class="text-[10px] text-slate-500 font-mono font-bold tracking-widest uppercase">Reading Speed</label>
+            <span id="solo-wpm-value" class="text-xs font-mono font-bold text-neonGreen">260 WPM</span>
+          </div>
+          <input id="solo-wpm-slider" type="range" min="120" max="1200" step="10" value="260" class="solo-range w-full mb-6">
+
+          <div class="border-t border-borderDark pt-4">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <h4 class="text-[10px] text-slate-400 font-mono font-bold tracking-widest uppercase">Subject Distribution</h4>
+              <div class="flex items-center space-x-3">
+                <span id="solo-subject-total" class="text-[10px] font-mono font-bold text-slate-500">TOTAL 0%</span>
+                <button type="button" onclick="soloResetSubjects(); playSound('click');" class="text-[10px] font-mono font-bold text-slate-400 hover:text-neonCyan">Even split</button>
+              </div>
+            </div>
+            <div id="solo-subject-list" class="space-y-2"></div>
+            <p id="solo-subject-empty" class="text-[11px] text-slate-500 font-mono">Load a packet to choose subjects.</p>
+          </div>
+
+          <div class="border-t border-borderDark pt-4 mt-4">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <h4 class="text-[10px] text-slate-400 font-mono font-bold tracking-widest uppercase">Packet Selection</h4>
+              <span id="solo-packet-label" class="text-[11px] font-mono font-bold text-slate-400">All packets (random)</span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" onclick="document.getElementById('solo-packet-input').click(); playSound('click');" class="px-3 py-1.5 bg-black border border-borderDark text-slate-300 hover:text-white text-[10px] font-mono font-bold rounded-lg active:scale-95">Add packet</button>
+              <button type="button" id="solo-toggle-packets" class="px-3 py-1.5 bg-black border border-borderDark text-slate-300 hover:text-white text-[10px] font-mono font-bold rounded-lg active:scale-95">Edit Packets</button>
+            </div>
+            <input type="file" id="solo-packet-input" accept=".json,.txt" class="hidden">
+            <div id="solo-packet-list" class="hidden mt-3 space-y-1"></div>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <button type="button" onclick="soloResetOptions(); playSound('click');" class="px-4 py-2.5 bg-black border border-borderDark text-slate-400 hover:text-white text-xs font-mono font-bold rounded-xl active:scale-95 transition">Reset to defaults</button>
+          <button type="button" id="solo-start-drill" class="px-8 py-3.5 bg-neonGreen hover:bg-emerald-400 text-black font-mono font-black text-sm uppercase rounded-xl shadow-neon-green active:scale-95 transition flex items-center space-x-2">
+            <span>&#9654;</span><span>Start Drill</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 12: SOLO PRACTICE DOJO               -->
+    <!-- ========================================== -->
+    <section id="slide-12" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-5xl mx-auto w-full">
+
+        <div class="flex flex-wrap items-center justify-between gap-4 border-b border-borderDark pb-4 mb-5">
+          <div class="flex items-center space-x-4">
+            <div class="w-12 h-12 rounded-2xl bg-black border border-neonGreen/60 flex items-center justify-center text-neonGreen text-xl shadow-neon-green">&#9889;</div>
+            <div>
+              <div class="flex items-center space-x-2">
+                <h2 class="text-2xl font-black font-display text-white">Solo Practice Dojo</h2>
+                <span id="solo-scope-badge" class="px-2 py-0.5 rounded-full bg-neonGreen/10 border border-neonGreen/60 text-neonGreen text-[10px] font-mono font-bold tracking-widest">ALL</span>
+              </div>
+              <p id="solo-mode-line" class="text-[11px] text-slate-400 font-mono font-bold mt-1 uppercase">OUTPUT: HYBRID &bull; INPUT: TYPED &bull; 260 WPM</p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 sm:gap-3">
+            <div class="bg-black border border-borderDark rounded-xl px-3 py-2 text-center min-w-[70px]">
+              <div class="text-[9px] text-slate-500 font-mono font-bold tracking-widest">SCORE</div>
+              <div id="solo-score" class="text-lg font-black font-mono text-neonGreen">0</div>
+            </div>
+            <div class="bg-black border border-borderDark rounded-xl px-3 py-2 text-center min-w-[70px]">
+              <div class="text-[9px] text-slate-500 font-mono font-bold tracking-widest">STREAK</div>
+              <div id="solo-streak" class="text-lg font-black font-mono text-neonAmber">0</div>
+            </div>
+            <div class="bg-black border border-borderDark rounded-xl px-3 py-2 text-center min-w-[84px]">
+              <div class="text-[9px] text-slate-500 font-mono font-bold tracking-widest">REACTION</div>
+              <div id="solo-reaction" class="text-lg font-black font-mono text-neonCyan">-- S</div>
+            </div>
+            <button type="button" onclick="openSoloSetup(); playSound('click');" class="px-4 py-2.5 bg-panel border border-borderDark text-slate-300 hover:text-white text-xs font-mono font-bold rounded-xl active:scale-95 transition">&#9881; Reconfig</button>
+          </div>
+        </div>
+
+        <div class="bg-panel border border-borderDark rounded-2xl p-6 mb-5">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+            <span id="solo-q-label" class="text-xs font-black font-mono text-neonAmber tracking-widest uppercase">Toss-up #1</span>
+            <div class="flex items-center space-x-4 text-[11px] font-mono font-bold">
+              <span id="solo-word-count" class="text-slate-500">Word 0 of 0</span>
+              <span id="solo-lockout" class="text-slate-500">Lockout: 5.0s</span>
+            </div>
+          </div>
+
+          <div id="solo-question-text" class="min-h-[132px] bg-black border border-borderDark rounded-xl p-5 text-lg md:text-xl text-slate-200 font-sans leading-relaxed">
+            Ready. Hit "START QUESTION DRILL" to launch delivery.
+          </div>
+
+          <div class="mt-4 h-1.5 bg-black rounded-full overflow-hidden border border-borderDark">
+            <div id="solo-progress-bar" class="h-full w-0 bg-gradient-to-r from-neonCyan to-neonGreen transition-all duration-100"></div>
+          </div>
+          <p id="solo-drill-status" class="text-[11px] text-slate-500 font-mono font-bold mt-3 uppercase">Standby</p>
+        </div>
+
+        <button type="button" id="solo-buzz-btn" class="w-full py-7 bg-black border-2 border-borderDark hover:border-neonCyan rounded-2xl transition active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed">
+          <span class="text-2xl md:text-4xl font-black font-display text-white tracking-wide">&#9889; BUZZ NOW (SPACEBAR)</span>
+        </button>
+        <p class="text-center text-[11px] text-slate-500 font-mono mt-3">Press <span class="text-neonCyan font-bold">[SPACEBAR]</span> at any time during reading to lock out.</p>
+
+        <div id="solo-answer-panel" class="hidden mt-5 bg-black border border-neonAmber/60 rounded-2xl p-5">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span class="text-[10px] font-mono font-bold tracking-widest text-neonAmber uppercase">Answer Locked Out</span>
+            <span id="solo-answer-timer" class="text-xs font-mono font-bold text-neonAmber">5.0s</span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <input id="solo-answer-input" type="text" autocomplete="off" placeholder="Type your answer and press Enter..." class="flex-1 min-w-[240px] bg-panel border border-borderDark rounded-xl px-4 py-3 text-sm text-neonCyan font-mono focus:outline-none focus:border-neonCyan">
+            <button type="button" id="solo-answer-submit" class="px-5 py-3 bg-neonAmber hover:bg-amber-400 text-black text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Submit</button>
+          </div>
+          <p class="text-[11px] text-slate-500 font-mono mt-3" id="solo-answer-hint">Keyword matcher armed. Enter submits, Escape forfeits.</p>
+        </div>
+
+        <p id="solo-feedback" class="hidden mt-4 text-sm font-mono font-bold"></p>
+
+        <div class="flex flex-wrap items-center justify-between gap-3 mt-5">
+          <button type="button" id="solo-start-question" class="px-7 py-3.5 bg-neonGreen hover:bg-emerald-400 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-green active:scale-95 transition flex items-center space-x-2">
+            <span>&#9654;</span><span>Start Question Drill</span>
+          </button>
+          <div class="flex flex-wrap gap-3">
+            <button type="button" id="solo-reveal-answer" class="px-5 py-3.5 bg-panel border border-borderDark text-slate-300 hover:text-white text-xs font-mono font-bold rounded-xl active:scale-95 transition">Reveal Answer</button>
+            <button type="button" id="solo-next-tossup" class="px-5 py-3.5 bg-black border border-neonCyan text-neonCyan hover:bg-neonCyan/10 text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Next Tossup &rarr;</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <!-- ============ MODALS ============ -->
@@ -1083,21 +1350,6 @@
     </div>
   </div>
 
-  <!-- SOLO PRACTICE — WORK IN PROGRESS -->
-  <div id="wipModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
-    <div class="bg-panel border border-neonGreen rounded-3xl max-w-sm w-full p-6 shadow-neon-green text-center">
-      <div class="w-16 h-16 mx-auto rounded-2xl bg-black border border-neonGreen/60 flex items-center justify-center text-neonGreen text-3xl mb-4">
-        &#9889;
-      </div>
-      <h3 class="text-lg font-bold text-white font-display mb-2">Solo Practice</h3>
-      <span class="inline-block px-3 py-1 bg-neonGreen/10 border border-neonGreen/60 rounded-full text-neonGreen text-[10px] font-mono font-bold tracking-widest uppercase mb-4">WORK IN PROGRESS</span>
-      <p class="text-xs text-slate-400 font-mono leading-relaxed mb-5">The singleplayer isolation drill is still being built. It will let you train buzz speed solo with audio prompts — check back in a later release.</p>
-      <button onclick="closeModal('wipModal'); playSound('click');" class="w-full py-2.5 bg-black border border-borderDark text-slate-300 hover:text-white text-xs font-mono rounded-xl active:scale-95">
-        Close
-      </button>
-    </div>
-  </div>
-
   <!-- Notification Toast Banner -->
   <div id="toastAlertBanner" class="fixed top-16 right-4 z-50 bg-black border border-neonCyan text-neonCyan text-xs font-mono px-4 py-3 rounded-2xl shadow-neon-cyan hidden transition-all duration-300 flex items-center space-x-2">
     <span class="w-2 h-2 rounded-full bg-neonCyan animate-ping"></span>
@@ -1116,6 +1368,7 @@
   <script src="/static/js/camera.js"></script>
   <script src="/static/js/pdf_parser.js"></script>
   <script src="/static/js/analytics.js"></script>
+  <script src="/static/js/solo.js"></script>
   <script>
     window.FIREBASE_CONFIG = {
       apiKey: "__FIREBASE_API_KEY__",
