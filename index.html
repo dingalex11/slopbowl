@@ -245,6 +245,9 @@
       <button id="nav-btn-8" data-slide="8" data-roles="player" onclick="navigateTo(8)" class="nav-dock-btn player-nav-control hidden items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonPink">
         <span>&#9889;</span><span>BUZZER</span>
       </button>
+      <button id="nav-btn-13" data-slide="13" data-roles="all" onclick="navigateTo(13)" class="nav-dock-btn flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonAmber">
+        <span>&#9783;</span><span>BOARD</span>
+      </button>
     </div>
   </nav>
 
@@ -1266,6 +1269,93 @@
       </div>
     </section>
 
+      <!-- ========================================== -->
+    <!-- SLIDE 13: BUZZPOINT BOARD                  -->
+    <!-- ========================================== -->
+    <section id="slide-13" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-5xl mx-auto w-full">
+        <div class="mb-4">
+          <h2 class="text-2xl font-black text-slate-100 tracking-tight">BUZZPOINT BOARD</h2>
+          <p class="text-[11px] font-mono text-slate-500 uppercase tracking-widest">A packet challenge compiled into buzz-word comparison</p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4">
+          <!-- Captain -->
+          <div class="bg-black border border-borderDark rounded-2xl p-5">
+            <p class="text-xs font-mono font-black text-neonCyan uppercase tracking-widest mb-3">Captain &bull; create a challenge</p>
+            <label class="block text-[10px] font-mono text-slate-500 uppercase mb-1">Title</label>
+            <input id="buk-captain-title" type="text" class="w-full bg-panel border border-borderDark rounded-xl px-3 py-2 text-sm text-slate-200 font-mono mb-3 focus:outline-none focus:border-neonCyan" placeholder="Tuesday scrimmage packet">
+            <label class="block text-[10px] font-mono text-slate-500 uppercase mb-1">Packet (.json)</label>
+            <button type="button" onclick="document.getElementById('buk-captain-packet').click(); playSound('click');" class="px-3 py-1.5 bg-black border border-borderDark text-slate-300 hover:text-white text-[10px] font-mono font-bold rounded-lg active:scale-95">Add packet</button>
+            <input type="file" id="buk-captain-packet" accept=".json,.txt" class="hidden">
+            <button type="button" id="buk-captain-create" class="mt-3 w-full py-3 bg-neonCyan text-black text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Create challenge</button>
+            <p class="mt-2 text-[11px] font-mono text-slate-400">Code: <span id="buk-captain-code" class="text-neonAmber font-black"></span></p>
+            <p id="buk-captain-status" class="mt-1 text-[11px] font-mono text-slate-500"></p>
+
+            <div class="mt-5 pt-4 border-t border-borderDark">
+              <p class="text-xs font-mono font-black text-neonAmber uppercase tracking-widest mb-2">Captain &bull; the board</p>
+              <div class="flex gap-2">
+                <input id="buk-board-code" type="text" class="flex-1 bg-panel border border-borderDark rounded-xl px-3 py-2 text-sm text-neonCyan font-mono focus:outline-none focus:border-neonCyan" placeholder="challenge code">
+                <button type="button" id="buk-board-load" class="px-4 py-2 bg-black border border-neonAmber text-neonAmber text-xs font-mono font-black rounded-xl active:scale-95">Load</button>
+                <button type="button" id="buk-board-seed" class="px-3 py-2 bg-black border border-borderDark text-slate-400 text-xs font-mono font-bold rounded-xl active:scale-95" title="Dev only: fabricate two demo runs">Seed</button>
+              </div>
+              <p id="buk-board-status" class="mt-1 text-[11px] font-mono text-slate-500"></p>
+            </div>
+          </div>
+
+          <!-- Member -->
+          <div class="bg-black border border-borderDark rounded-2xl p-5">
+            <p class="text-xs font-mono font-black text-neonGreen uppercase tracking-widest mb-3">Member &bull; play the packet</p>
+            <label class="block text-[10px] font-mono text-slate-500 uppercase mb-1">Challenge code</label>
+            <input id="buk-member-code" type="text" class="w-full bg-panel border border-borderDark rounded-xl px-3 py-2 text-sm text-neonCyan font-mono mb-3 focus:outline-none focus:border-neonCyan" placeholder="abc123">
+            <label class="block text-[10px] font-mono text-slate-500 uppercase mb-1">Display name</label>
+            <input id="buk-member-name" type="text" class="w-full bg-panel border border-borderDark rounded-xl px-3 py-2 text-sm text-slate-200 font-mono mb-3 focus:outline-none focus:border-neonCyan" placeholder="Your name">
+            <button type="button" id="buk-member-join" class="w-full py-3 bg-neonGreen text-black text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Join and play</button>
+            <p id="buk-member-status" class="mt-2 text-[11px] font-mono text-slate-500"></p>
+            <p class="mt-3 text-[10px] font-mono text-slate-600 leading-relaxed">One attempt per member. Buzz during the read to lock the word you were on; 5s to type. A correct toss-up earns the bonus (20s).</p>
+          </div>
+        </div>
+
+        <!-- Run -->
+        <div id="buk-run" class="hidden mt-4 bg-black border border-borderDark rounded-2xl p-5">
+          <div class="flex items-center justify-between">
+            <p id="buk-run-progress" class="text-xs font-mono font-black text-neonCyan uppercase tracking-widest"></p>
+            <p id="buk-run-category" class="text-[10px] font-mono text-slate-500 uppercase"></p>
+          </div>
+          <div id="buk-question-text" class="min-h-[120px] mt-3 bg-black border border-borderDark rounded-xl p-4 text-lg text-slate-200 font-sans leading-relaxed"></div>
+          <div class="flex items-center justify-between mt-2">
+            <p id="buk-word-count" class="text-[10px] font-mono text-slate-500"></p>
+            <div class="flex-1 mx-3 h-1 bg-panel rounded-full overflow-hidden"><div id="buk-progress-bar" class="h-full bg-neonCyan" style="width:0%"></div></div>
+          </div>
+          <button type="button" id="buk-buzz-btn" class="w-full mt-4 py-6 bg-black border-2 border-borderDark hover:border-neonCyan rounded-2xl text-neonCyan text-lg font-mono font-black uppercase active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed">BUZZ</button>
+          <div class="flex items-center gap-3 mt-2">
+            <p class="text-[10px] font-mono text-slate-500">Buzzed on:</p>
+            <p id="buk-buzz-word" class="text-sm font-mono font-black text-neonAmber"></p>
+            <p id="buk-buzz-source" class="text-[10px] font-mono text-slate-500"></p>
+          </div>
+
+          <div id="buk-answer-panel" class="hidden mt-4 bg-black border border-neonAmber/60 rounded-2xl p-4">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-xs font-mono font-black text-neonAmber uppercase tracking-widest">Type your answer</p>
+              <span id="buk-answer-timer" class="text-xs font-mono font-black text-neonAmber">5.0s</span>
+            </div>
+            <div class="flex gap-2">
+              <input id="buk-answer-input" type="text" autocomplete="off" class="flex-1 bg-panel border border-borderDark rounded-xl px-4 py-3 text-sm text-neonCyan font-mono focus:outline-none focus:border-neonCyan" placeholder="Type your answer and press Enter...">
+              <button type="button" id="buk-answer-submit" class="px-5 py-3 bg-neonAmber text-black text-xs font-mono font-black uppercase rounded-xl active:scale-95">Submit</button>
+            </div>
+            <p class="text-[10px] font-mono text-slate-500 mt-2">Enter submits.</p>
+          </div>
+
+          <p id="buk-feedback" class="mt-4 text-sm font-mono font-bold"></p>
+          <p id="buk-run-status" class="mt-2 text-[11px] font-mono text-slate-500 uppercase"></p>
+          <button type="button" id="buk-next-btn" class="hidden mt-4 px-6 py-3 bg-black border border-neonCyan text-neonCyan text-xs font-mono font-black uppercase rounded-xl active:scale-95">Next &rarr;</button>
+          <div id="buk-own-summary" class="mt-4"></div>
+        </div>
+
+        <!-- Board -->
+        <div id="buk-board" class="mt-4"></div>
+      </div>
+    </section>
   </main>
 
   <!-- ============ MODALS ============ -->
@@ -1419,6 +1509,7 @@
   <script src="/static/js/pdf_parser.js"></script>
   <script src="/static/js/analytics.js"></script>
   <script src="/static/js/solo.js"></script>
+  <script src="/static/js/buzzpoint.js"></script>
   <script>
     window.FIREBASE_CONFIG = {
       apiKey: "__FIREBASE_API_KEY__",

@@ -22,5 +22,33 @@ service cloud.firestore {
         allow read, write: if false;
       }
     }
+
+    // ---- Buzzpoint Board -------------------------------------------------
+    // challenge_banks holds the packet INCLUDING the answers. It is server-only:
+    // clients may never read or write it. The API serves one question at a time
+    // with the answer stripped, so a member's browser never holds the answer key.
+    match /challenge_banks/{code} {
+      allow read, write: if false;
+    }
+
+    // challenges/{code} is the readable metadata (ownerUid, title, counts, rules).
+    // Members read it to see what they joined; the captain owns it.
+    match /challenges/{code} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid;
+
+      // One run per member: the doc id is the member's uid. A member may read their
+      // own run; the captain's compile is assembled server-side, so no one reads
+      // another member's run here. Writes are server-authoritative (firebase-admin
+      // bypasses these rules) — a modified client cannot forge a result or spend a
+      // second attempt, and these rules deny client writes as defense-in-depth.
+      match /runs/{uid} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
+      }
+    }
   }
 }

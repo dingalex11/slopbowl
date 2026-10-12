@@ -3,6 +3,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { 
     getAuth, 
+    signInAnonymously,
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
     signOut, 
@@ -165,6 +166,22 @@ btnSaveSettings?.addEventListener('click', async () => {
 window.getUserApiKey = async () => window.sessionGroqApiKey || null;
 window.getFirebaseIdToken = async () => auth.currentUser ? auth.currentUser.getIdToken() : null;
 window.getFirebaseUser = () => auth.currentUser;
+
+// Buzzpoint Board members sign in anonymously so a teammate can play without an account.
+// If Anonymous sign-in is off in the Firebase console, say so plainly rather than fail
+// silently or fall back to a fake identity.
+window.signInAnonymouslyForBoard = async () => {
+    try {
+        const credential = await signInAnonymously(auth);
+        return credential.user;
+    } catch (err) {
+        const code = err && err.code;
+        if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+            throw new Error('Anonymous sign-in is not enabled (Firebase console -> Authentication -> Sign-in method).');
+        }
+        throw err;
+    }
+};
 
 window.joinOnlineRoomApi = async (roomId, name, team, captain) => {
     const user = auth.currentUser;

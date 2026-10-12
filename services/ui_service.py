@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, List
 from urllib.parse import urlparse
+import re
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -17,6 +18,7 @@ from core.config import APP_ENV, INBOUND_QUEUE_SIZE, MAX_ROOMS, MAX_WEBSOCKET_ME
 from core.events import Event
 from core.validation import validate_client_event, validate_question_bank, validate_room_id
 from services.auth_service import create_online_room, delete_room, get_room_info, get_room_participant, join_online_room, verify_id_token
+from services import challenge_service
 
 logger = logging.getLogger(__name__)
 app = FastAPI()
@@ -433,6 +435,136 @@ async def join_online_room_api(room_id: str, request: Request):
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail="Room service unavailable") from exc
     return participant
+
+
+# ============================================================
+# BUZZPOINT BOARD — captain-created packet challenges
+# Mirrors the /api/rooms style: Bearer ID token, asyncio.to_thread, honest HTTP codes.
+# ============================================================
+
+_CHALLENGE_CODE_RE = re.compile(r"^[a-z0-9]{4,8}$")
+
+
+def _challenge_code(code: str) -> str:
+    if not isinstance(code, str) or not _CHALLENGE_CODE_RE.fullmatch(code):
+        raise HTTPException(status_code=400, detail="Invalid challenge code")
+    return code
+
+
+@app.get("/api/challenges/{code}")
+async def challenge_meta_endpoint(code: str, request: Request):
+    code = _challenge_code(code)
+    await _authenticated_user(request)
+    try:
+        return await asyncio.to_thread(challenge_service.get_challenge_meta, code)
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to read a challenge: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/challenges")
+async def create_challenge_endpoint(request: Request):
+    user = await _authenticated_user(request)
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("Invalid challenge setup")
+        return await asyncio.to_thread(
+            challenge_service.create_challenge, user.uid, data.get("title"), data.get("bank")
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to create a challenge: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/challenges/{code}/join")
+async def join_challenge_endpoint(code: str, request: Request):
+    code = _challenge_code(code)
+    user = await _authenticated_user(request)
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("Invalid join request")
+        return await asyncio.to_thread(
+            challenge_service.join_challenge, code, user.uid, data.get("displayName")
+        )
+    except PermissionError as exc:
+        # A spent attempt is a conflict, not a bad request: the member played already.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to join a challenge: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/challenges/{code}/next")
+async def next_challenge_question(code: str, request: Request):
+    code = _challenge_code(code)
+    user = await _authenticated_user(request)
+    try:
+        return await asyncio.to_thread(challenge_service.next_question, code, user.uid)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to read the next question: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/challenges/{code}/answer")
+async def submit_challenge_answer(code: str, request: Request):
+    code = _challenge_code(code)
+    user = await _authenticated_user(request)
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("Invalid answer submission")
+        return await asyncio.to_thread(
+            challenge_service.submit_answer, code, user.uid,
+            data.get("qIndex"), data.get("phase"),
+            data.get("typedAnswer", ""), data.get("buzz"), data.get("timing"),
+            bool(data.get("expired", False)), data.get("outcome", "answered"),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to record an answer: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/challenges/{code}/board")
+async def challenge_board_endpoint(code: str, request: Request):
+    code = _challenge_code(code)
+    user = await _authenticated_user(request)
+    try:
+        return await asyncio.to_thread(challenge_service.get_board, code, user.uid)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to read the board: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/challenges/{code}/seed")
+async def seed_challenge_board_endpoint(code: str, request: Request):
+    """Development only: fabricate demo runs so the board is verifiable without accounts."""
+    if APP_ENV == "production":
+        raise HTTPException(status_code=404, detail="Not found")
+    code = _challenge_code(code)
+    user = await _authenticated_user(request)
+    try:
+        return await asyncio.to_thread(challenge_service.seed_dev_runs, code, user.uid)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to seed the board: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.websocket("/ws")
