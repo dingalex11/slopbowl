@@ -162,16 +162,20 @@ async function bbxHandleFiles(files) {
 }
 
 // Every ingest ends here — a dropped file, or a board read from its code — so the badge
-// and the status line can never disagree with what is on screen.
+// and the status line can never disagree with what is on screen. A live refresh comes through
+// here too, so one function owns the badge no matter which route filled the rows.
 function bbxFinishIngest(accepted) {
   if (accepted) bbxBuildModels();
   bbxRenderAll();
-  const badge = bbxEl('bbx-count-badge');
-  if (badge) {
-    badge.style.display = 'block';
-    badge.textContent = `${bbxState.rows.length} ROWS LOADED`;
-  }
+  bbxUpdateCountBadge();
   if (accepted) bbxStatus(`BUZZBOARD ANALYTICS COMPILED \u2014 ${bbxState.rows.length} attempts`, 'good');
+}
+
+function bbxUpdateCountBadge() {
+  const badge = bbxEl('bbx-count-badge');
+  if (!badge) return;
+  badge.style.display = bbxState.rows.length ? 'block' : 'none';
+  badge.textContent = `${bbxState.rows.length} ROWS LOADED`;
 }
 
 // Read the board export into flat attempt records. The parser is the same hardened CSV
@@ -226,12 +230,18 @@ function bbxIngestCsv(csvText) {
 // and the board's own exporter turns those into the very rows a downloaded buzzboard.csv
 // holds. Both routes therefore end in the same parser, and a fetched board cannot analyse
 // differently from an uploaded one.
+//
+// A challenge is live while members are still playing it, so a board read this way is not a
+// snapshot: it is re-read on an interval and its rows are replaced in place. Rows carry the
+// code that produced them, which is what makes a refresh safe — it can neither double-count a
+// run nor disturb a CSV dropped by hand.
 
 async function bbxApi(path) {
   const token = window.getFirebaseIdToken ? await window.getFirebaseIdToken() : null;
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(path, { headers });
+  // A board is live data, never a cached document.
+  const response = await fetch(path, { headers, cache: 'no-store' });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(result.detail || 'Request failed');
@@ -255,6 +265,149 @@ function bbxBoardError(error, code) {
   return detail || 'Could not load that board.';
 }
 
+// The board's own exporter, so a fetched board is exactly the CSV the download button writes.
+function bbxBoardCsvText(board) {
+  if (typeof bukBoardCsvText !== 'function') throw new Error('The board exporter is not loaded.');
+  return bukBoardCsvText(board.runs || [], board.questions || []);
+}
+
+// Attempts the board says are still in play: what the live pill counts as "playing".
+function bbxPlayingRuns(board) {
+  return (board.runs || []).filter((run) => run.status !== 'finished').length;
+}
+
+// The rows one board contributes, tagged with the code that produced them. Tagging is what
+// makes a refresh a replacement: only this board's rows are dropped and re-read, so a board
+// that appends can never double-count a run and a hand-loaded CSV is never disturbed.
+function bbxIngestBoardCsv(code, csvText) {
+  const source = `challenge:${code}`;
+  const before = bbxState.rows.length;
+  const added = bbxIngestCsv(csvText);
+  for (let i = before; i < bbxState.rows.length; i += 1) bbxState.rows[i].source = source;
+  return added;
+}
+
+// ------------------------------------------------------------ live board
+//
+// While the captain has this station open, a board loaded by code is re-read on an interval so
+// the breakdown fills in as members play instead of waiting for a manual reload. The poll is
+// deliberately narrow — this station, a visible tab, the buzzboard page — and the pill is the
+// whole control: it says what the board is doing and stops or resumes it in one click.
+
+const BBX_LIVE_REFRESH_MS = 15000;
+const BBX_LIVE_ON = 'bg-black border border-neonGreen text-neonGreen px-2 py-1 rounded text-[10px] font-mono font-black uppercase tracking-wider transition hover:bg-neonGreen/10 active:scale-95';
+const BBX_LIVE_OFF = 'bg-black border border-neonAmber text-neonAmber px-2 py-1 rounded text-[10px] font-mono font-black uppercase tracking-wider transition hover:bg-neonAmber/10 active:scale-95';
+
+const bbxLive = {
+  timer: null,
+  paused: false,
+  updatedAt: 0,
+  // code -> { csv, playing }: the last board read, so an unchanged board redraws nothing.
+  boards: new Map(),
+};
+
+function bbxLivePill() { return bbxEl('bbx-live-toggle'); }
+
+function bbxLivePlaying() {
+  let playing = 0;
+  bbxLive.boards.forEach((entry) => { playing += entry.playing; });
+  return playing;
+}
+
+// The pill is written from the live state and nowhere else, so the text can never claim the
+// board is following the members when the poll is stopped.
+function bbxRenderLivePill() {
+  const pill = bbxLivePill();
+  if (!pill) return;
+  if (!bbxLive.boards.size) {
+    pill.classList.add('hidden');
+    return;
+  }
+  pill.classList.remove('hidden');
+  const when = bbxLive.updatedAt ? new Date(bbxLive.updatedAt).toLocaleTimeString() : '\u2014';
+  if (bbxLive.paused) {
+    pill.className = BBX_LIVE_OFF;
+    pill.textContent = `Paused \u00b7 updated ${when}`;
+    pill.title = 'This board has stopped following the challenge. Click to resume.';
+    return;
+  }
+  pill.className = BBX_LIVE_ON;
+  pill.textContent = `Live \u00b7 ${bbxLivePlaying()} playing \u00b7 ${when}`;
+  pill.title = `Re-reading the board from the challenge every ${Math.round(BBX_LIVE_REFRESH_MS / 1000)} seconds. Click to pause.`;
+}
+
+function bbxLiveStart() {
+  if (bbxLive.paused || bbxLive.timer !== null || !bbxLive.boards.size) return;
+  bbxLive.timer = setInterval(bbxLiveTick, BBX_LIVE_REFRESH_MS);
+  bbxRenderLivePill();
+}
+
+function bbxLiveStop() {
+  if (bbxLive.timer !== null) { clearInterval(bbxLive.timer); bbxLive.timer = null; }
+  bbxRenderLivePill();
+}
+
+function bbxLivePause() { bbxLive.paused = true; bbxLiveStop(); }
+
+function bbxLiveResume() {
+  bbxLive.paused = false;
+  bbxLiveStart();
+  bbxLiveTick();  // catch up at once rather than waiting out the interval
+}
+
+// Re-read one board and replace that board's own rows. The rest of the screen is left alone:
+// the captain's team draft, the open page, the filters and any hand-loaded CSVs survive, and
+// a board that has not changed is not redrawn at all.
+async function bbxRefreshChallengeBoard(code) {
+  const entry = bbxLive.boards.get(code);
+  if (!entry) return false;
+  try {
+    const board = await bbxApi(`/api/challenges/${encodeURIComponent(code)}/board`);
+    bbxLive.updatedAt = Date.now();
+    entry.playing = bbxPlayingRuns(board);
+    const csv = bbxBoardCsvText(board);
+    if (csv === entry.csv) {
+      // Nobody has played since the last read: leave the screen exactly as it is.
+      bbxRenderLivePill();
+      return false;
+    }
+    entry.csv = csv;
+    const source = `challenge:${code}`;
+    const before = bbxState.rows.length;
+    bbxState.rows = bbxState.rows.filter((row) => row.source !== source);
+    const replaced = before - bbxState.rows.length;
+    const added = bbxIngestBoardCsv(code, csv);
+    bbxBuildModels();
+    bbxRenderAll();
+    bbxUpdateCountBadge();
+    const fresh = added - replaced;
+    bbxStatus(fresh > 0
+      ? `Board ${code.toUpperCase()} updated \u2014 ${fresh} new attempt${fresh === 1 ? '' : 's'}.`
+      : `Board ${code.toUpperCase()} updated.`, 'good');
+    bbxRenderLivePill();
+    return true;
+  } catch (error) {
+    // A board that can no longer be read stops following rather than hammering the service.
+    bbxLive.paused = true;
+    bbxLiveStop();
+    bbxStatus(bbxBoardError(error, code), 'bad');
+    return false;
+  }
+}
+
+async function bbxLiveTick() {
+  // Only the station that is showing the board polls: another screen, a hidden tab, or the
+  // match tab of this same station has nothing to redraw.
+  if (bbxLive.paused || !bbxLive.boards.size) return;
+  if (document.visibilityState === 'hidden') return;
+  if (document.body.getAttribute('data-view') !== 'analytics') return;
+  const panel = bbxEl('analytics-panel-buzzboard');
+  if (panel && panel.classList.contains('hidden')) return;
+  for (const code of [...bbxLive.boards.keys()]) {
+    await bbxRefreshChallengeBoard(code);
+  }
+}
+
 async function bbxLoadChallengeBoard(code) {
   const clean = String(code || '').trim().toLowerCase();
   // The server's own rule for a challenge code (see ui_service._CHALLENGE_CODE_RE).
@@ -270,14 +423,21 @@ async function bbxLoadChallengeBoard(code) {
   bbxStatus(`FETCHING BOARD ${clean.toUpperCase()}...`, 'busy');
   try {
     const board = await bbxApi(`/api/challenges/${encodeURIComponent(clean)}/board`);
-    if (typeof bukBoardCsvText !== 'function') throw new Error('The board exporter is not loaded.');
-    const added = bbxIngestCsv(bukBoardCsvText(board.runs || [], board.questions || []));
-    if (!added) {
-      bbxStatus(`Board ${clean.toUpperCase()} has no runs yet \u2014 nobody has played it.`, 'busy');
-      return 0;
-    }
+    const csv = bbxBoardCsvText(board);
+    const added = bbxIngestBoardCsv(clean, csv);
     bbxState.files.add(key);
-    bbxFinishIngest(added);
+    // From here the board follows the challenge. The code is registered even with no runs yet,
+    // so the first member to finish appears without anyone reloading the page.
+    bbxLive.boards.set(clean, { csv: csv, playing: bbxPlayingRuns(board) });
+    bbxLive.updatedAt = Date.now();
+    bbxLiveStart();          // a no-op while the captain has the poll paused
+    bbxRenderLivePill();
+    if (!added) {
+      bbxRenderAll();
+      bbxStatus(`Board ${clean.toUpperCase()} has no runs yet \u2014 it will fill in as members play.`, 'busy');
+    } else {
+      bbxFinishIngest(added);
+    }
     // The address remembers which board is open, so the view can be linked and refreshed.
     if (typeof window.routerReplace === 'function') {
       window.routerReplace(`#/analytics/${encodeURIComponent(clean)}`);
@@ -291,6 +451,7 @@ async function bbxLoadChallengeBoard(code) {
 
 const bbxLoadBoardBtn = bbxEl('bbx-load-board');
 const bbxChallengeCode = bbxEl('bbx-challenge-code');
+const bbxLiveBtn = bbxLivePill();
 
 if (bbxLoadBoardBtn) {
   bbxLoadBoardBtn.addEventListener('click', () => {
@@ -307,16 +468,34 @@ if (bbxChallengeCode) {
   });
 }
 
+if (bbxLiveBtn) {
+  bbxLiveBtn.addEventListener('click', () => {
+    if (bbxLive.paused) bbxLiveResume(); else bbxLivePause();
+    bbxRenderLivePill();
+  });
+}
+
+// A tab that was in the background comes back current: catch up at once instead of waiting out
+// the rest of the interval.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') bbxLiveTick();
+});
+
 // The router owns the address; a link like #/analytics/ab12cd opens this page on that board,
-// which is what makes a breakdown shareable.
+// which is what makes a breakdown shareable. Leaving this station stops the polling but keeps
+// the loaded boards, so coming back resumes following them.
 document.addEventListener('app:view', (event) => {
   const detail = event.detail || {};
-  if (detail.name !== 'analytics') return;
+  if (detail.name !== 'analytics') {
+    bbxLiveStop();
+    return;
+  }
   const code = (detail.params && detail.params.code) || '';
   // The buzzboard panel (not the match tables), on its first page.
   showAnalyticsView('buzzboard');
   bbxShowPage('questions');
   if (bbxChallengeCode && code) bbxChallengeCode.value = code;
+  bbxLiveStart();
   if (!code) return;
   if (bbxState.files.has(`challenge:${code}`)) return;  // already on screen
   bbxLoadChallengeBoard(code);
@@ -503,6 +682,13 @@ function showAnalyticsView(view) {
 }
 
 function resetBuzzboardAnalytics() {
+  // Clearing the data also stops the boards being followed, so nothing re-loads behind the
+  // captain's back: a code that was cleared stays forgotten until it is loaded again.
+  bbxLiveStop();
+  bbxLive.boards.clear();
+  bbxLive.paused = false;
+  bbxLive.updatedAt = 0;
+  bbxRenderLivePill();
   bbxState.rows = [];
   bbxState.questions = new Map();
   bbxState.players = new Map();
@@ -518,7 +704,6 @@ function resetBuzzboardAnalytics() {
   bbxRenderAll();
   bbxStatus('SYSTEM READY // WAITING FOR A BUZZBOARD CSV OR CHALLENGE CODE');
 }
-
 // ------------------------------------------------------------ page 1: question buzzpoints
 
 function bbxRenderParticipantPills() {
@@ -564,7 +749,7 @@ function bbxRenderQuestions() {
   holder.replaceChildren();
   const questions = [...bbxState.questions.values()].sort((a, b) => (a.qNum - b.qNum) || a.text.localeCompare(b.text));
   if (!questions.length) {
-    bbxAppend(holder, 'p', 'text-xs font-mono text-slate-500', 'No buzzboard data loaded \u2014 drop a CSV exported from the Buzzpoint Board.');
+    bbxAppend(holder, 'p', 'text-xs font-mono text-slate-500', 'No buzzboard data yet \u2014 drop a CSV exported from the Buzzpoint Board, or load a board by its challenge code above.');
     return;
   }
   questions.forEach((question) => holder.appendChild(bbxQuestionCard(question)));

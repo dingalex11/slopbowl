@@ -346,7 +346,12 @@ class BoardByCodeTests(unittest.TestCase):
 
     def test_a_fetched_board_is_parsed_by_the_upload_parser(self):
         # The exporter the download button uses, then the parser a dropped file uses.
-        self.assertIn("bbxIngestCsv(bukBoardCsvText(board.runs || [], board.questions || []))", ANALYTICS_SOURCE)
+        self.assertIn("function bbxBoardCsvText(board)", ANALYTICS_SOURCE)
+        self.assertIn("return bukBoardCsvText(board.runs || [], board.questions || []);", ANALYTICS_SOURCE)
+        self.assertIn("const csv = bbxBoardCsvText(board);", ANALYTICS_SOURCE)
+        # A fetched board is tagged with the code that produced it on the way to the view.
+        self.assertIn("const added = bbxIngestBoardCsv(clean, csv);", ANALYTICS_SOURCE)
+        self.assertIn("const added = bbxIngestCsv(csvText);", ANALYTICS_SOURCE)
         # Both routes finish in one place, so the badge and the status cannot disagree.
         self.assertIn("bbxFinishIngest(accepted);", ANALYTICS_SOURCE)
         self.assertIn("bbxFinishIngest(added);", ANALYTICS_SOURCE)
@@ -385,6 +390,67 @@ class BoardByCodeTests(unittest.TestCase):
     def test_the_board_still_downloads_for_a_spreadsheet(self):
         self.assertIn("Download it for a spreadsheet, or read it in Analytics", BUZZPOINT_SOURCE)
         self.assertIn("btn.textContent = 'Download CSV';", BUZZPOINT_SOURCE)
+
+
+class LiveBoardTests(unittest.TestCase):
+    """A loaded board follows the challenge: members' runs land without a manual reload.
+
+    The guarantee under test: a refresh is a *replacement* of that one board's rows, not an
+    append. Rows are tagged with the code that produced them, so re-reading a board that has
+    grown cannot double-count a run, and a CSV dropped by hand is never touched by a refresh.
+    And because it is a poll, it has to know when to be quiet: off the station, in a hidden
+    tab, and whenever the captain pauses it.
+    """
+
+    def test_a_loaded_board_is_re_read_on_an_interval(self):
+        self.assertIn("const BBX_LIVE_REFRESH_MS = 15000;", ANALYTICS_SOURCE)
+        self.assertIn("bbxLive.timer = setInterval(bbxLiveTick, BBX_LIVE_REFRESH_MS);", ANALYTICS_SOURCE)
+        self.assertIn("async function bbxLiveTick()", ANALYTICS_SOURCE)
+        # Loading a board by code is what arms it.
+        self.assertIn("bbxLiveStart();          // a no-op while the captain has the poll paused",
+                      ANALYTICS_SOURCE)
+
+    def test_only_this_board_s_own_rows_are_replaced(self):
+        self.assertIn("function bbxIngestBoardCsv(code, csvText) {", ANALYTICS_SOURCE)
+        self.assertIn("bbxState.rows[i].source = source;", ANALYTICS_SOURCE)
+        self.assertIn("bbxState.rows = bbxState.rows.filter((row) => row.source !== source);",
+                      ANALYTICS_SOURCE)
+
+    def test_an_unchanged_board_is_not_redrawn(self):
+        # A poll that redrew the same board would fight the captain's draft and scroll.
+        self.assertIn("if (csv === entry.csv) {", ANALYTICS_SOURCE)
+        self.assertIn("bbxLive.boards.set(clean, { csv: csv, playing: bbxPlayingRuns(board) });",
+                      ANALYTICS_SOURCE)
+
+    def test_a_refresh_is_never_served_from_the_browser_cache(self):
+        self.assertIn("cache: 'no-store'", ANALYTICS_SOURCE)
+
+    def test_the_captain_can_pause_and_resume_the_poll(self):
+        self.assertIn('id="bbx-live-toggle"', INDEX_SOURCE)
+        self.assertIn("function bbxLivePause() { bbxLive.paused = true; bbxLiveStop(); }", ANALYTICS_SOURCE)
+        self.assertIn("function bbxLiveResume() {", ANALYTICS_SOURCE)
+        self.assertIn("if (bbxLive.paused) bbxLiveResume(); else bbxLivePause();", ANALYTICS_SOURCE)
+        # The pill reports the poll's own state, so it cannot claim to be live while stopped.
+        self.assertIn("function bbxRenderLivePill()", ANALYTICS_SOURCE)
+        self.assertIn("pill.textContent = `Live \\u00b7 ${bbxLivePlaying()} playing \\u00b7 ${when}`;",
+                      ANALYTICS_SOURCE)
+
+    def test_the_poll_is_quiet_off_the_station_and_in_a_hidden_tab(self):
+        self.assertIn("document.visibilityState === 'hidden'", ANALYTICS_SOURCE)
+        self.assertIn("document.body.getAttribute('data-view') !== 'analytics'", ANALYTICS_SOURCE)
+        self.assertIn("if (panel && panel.classList.contains('hidden')) return;", ANALYTICS_SOURCE)
+        # Leaving the station stops the interval (the boards stay loaded for the way back).
+        self.assertIn("if (detail.name !== 'analytics') {", ANALYTICS_SOURCE)
+        self.assertIn("bbxLiveStop();", ANALYTICS_SOURCE)
+        self.assertIn("bbxLiveStart();", ANALYTICS_SOURCE)
+
+    def test_a_board_that_can_no_longer_be_read_stops_being_followed(self):
+        self.assertIn("bbxLive.paused = true;", ANALYTICS_SOURCE)
+        # Clear Data forgets the boards too, so nothing re-appears behind the captain's back.
+        self.assertIn("bbxLive.boards.clear();", ANALYTICS_SOURCE)
+
+    def test_a_board_with_no_runs_is_followed_until_the_first_one_lands(self):
+        self.assertIn("it will fill in as members play", ANALYTICS_SOURCE)
 
 
 if __name__ == "__main__":

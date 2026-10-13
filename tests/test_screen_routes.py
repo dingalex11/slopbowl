@@ -90,6 +90,27 @@ class ScreenLinkTests(unittest.TestCase):
             self.assertIn(f'href="{url}"', INDEX_SOURCE, f"no link to {url}")
         self.assertIn("data-route=", INDEX_SOURCE)
 
+    def test_the_buzzboard_challenge_is_a_main_card(self):
+        """The contest is a top-level mode, not one of the small links at the bottom."""
+        grid = INDEX_SOURCE[INDEX_SOURCE.index('id="home-main-cards"')
+                            :INDEX_SOURCE.index("<!-- Every other screen")]
+        self.assertIn('href="#/board"', grid)
+        self.assertIn('data-route="board"', grid)
+        self.assertIn("Buzzboard Challenge", grid)
+        # A real link, so it is keyboard-reachable and marks the screen it opens.
+        self.assertIn("app-nav-link", grid)
+
+    def test_the_small_link_row_drops_the_link_the_card_replaced(self):
+        row = INDEX_SOURCE[INDEX_SOURCE.index("<!-- Every other screen")
+                           :INDEX_SOURCE.index("<!-- Slide 1 Footer Buttons -->")]
+        # The board is a main card now, so the row no longer duplicates it.
+        self.assertNotIn('data-route="board"', row)
+        # Everything else stays. The row cannot be dropped: the question bank and the HUD have
+        # no other door in the app, and the row is what marks the screen you are on.
+        for url in ("#/online", "#/solo", "#/analytics", "#/converter", "#/in-person",
+                    "#/hud", "#/bank", "#/settings"):
+            self.assertIn(f'href="{url}"', row, f"no link to {url}")
+
     def test_screen_links_keep_the_role_gating_the_dock_had(self):
         self.assertIn("app-nav-link moderator-nav-control", INDEX_SOURCE)
         self.assertIn("app-nav-link player-nav-control", INDEX_SOURCE)

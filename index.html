@@ -232,7 +232,8 @@
   </header>
 
   <!-- There is no bottom dock: every screen has its own URL, and the home page carries the
-       links to them (see "All screens" below), so the address bar is the navigation. -->
+       links to them (the four main cards, then the "Every other screen" index below), so the
+       address bar is the navigation. -->
 
   <main class="flex-grow max-w-7xl mx-auto w-full p-4 md:p-6 lg:p-8 flex flex-col justify-center">
 
@@ -253,8 +254,10 @@
         </p>
       </div>
 
-      <!-- Main Three Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl mb-10">
+      <!-- Main cards: the four ways in. The Buzzboard Challenge card is a real link
+           (#/board), so the contest a captain runs lives in the address bar like every
+           other screen. -->
+      <div id="home-main-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full max-w-6xl mb-10">
         <!-- Card 1: Moderate in person -->
         <div onclick="navigateTo(4); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonCyan rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-cyan hover:-translate-y-1 active:scale-95 relative overflow-hidden">
           <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonCyan/10 rounded-full blur-xl group-hover:bg-neonCyan/20 transition"></div>
@@ -299,15 +302,31 @@
             Enter the drill engine &rarr;
           </div>
         </div>
+
+        <!-- Card 4: Buzzboard Challenge -->
+        <a href="#/board" data-route="board" class="app-nav-link group bg-panel hover:bg-panelHover border border-borderDark hover:border-neonPink rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-pink hover:-translate-y-1 active:scale-95 relative overflow-hidden" onclick="playSound('click');">
+          <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonPink/10 rounded-full blur-xl group-hover:bg-neonPink/20 transition"></div>
+          <div class="w-16 h-16 rounded-2xl bg-black border border-neonPink/50 flex items-center justify-center text-neonPink mb-5 group-hover:scale-110 transition shadow-inner">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 3v18h18M7 15l3.5-4 3 2.5L21 7"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonPink transition font-display">Buzzboard Challenge</h3>
+          <p class="text-xs text-slate-400 leading-relaxed font-sans">
+            Run a packet as a challenge: share a code, each member buzzes mid-read once, and every attempt compiles into the captain's board.
+          </p>
+          <div class="mt-6 flex items-center text-xs font-mono text-neonPink group-hover:translate-x-1 transition font-bold">
+            Open the board &rarr;
+          </div>
+        </a>
       </div>
 
-      <!-- All screens. Each link is a real URL (#/board, #/analytics, ...), so a screen can
-           be bookmarked, shared, refreshed and reached with the back button. -->
+      <!-- Every other screen. The four main cards above cover the top-level modes, so this
+           row holds the screens that have no other door (the question bank, the HUD) and
+           the stations. Each link is a real URL, so a screen can be bookmarked, shared,
+           refreshed and reached with the back button. -->
       <div class="w-full max-w-5xl mb-8">
-        <p class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-3 text-center">All screens</p>
+        <p class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-3 text-center">Every other screen</p>
         <div class="flex flex-wrap items-center justify-center gap-2">
           <a href="#/online" data-route="online" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Online hub</a>
-          <a href="#/board" data-route="board" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Buzzpoint board</a>
           <a href="#/solo" data-route="solo" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonGreen transition active:scale-95">Solo practice</a>
           <a href="#/analytics" data-route="analytics" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Analytics</a>
           <a href="#/in-person" data-route="in-person" class="app-nav-link moderator-nav-control inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonCyan transition active:scale-95">In-person setup</a>
@@ -1540,6 +1559,11 @@
         <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
           <span id="bbx-status-text" class="text-xs text-slate-400 font-mono uppercase">SYSTEM READY // WAITING FOR A BUZZBOARD CSV OR CHALLENGE CODE</span>
           <div class="flex items-center gap-2">
+            <!-- The whole live control: whether the loaded board is following the members,
+                 and one click to stop or resume it. Hidden until a board is loaded. -->
+            <button type="button" id="bbx-live-toggle" class="hidden bg-black border border-neonGreen text-neonGreen px-2 py-1 rounded text-[10px] font-mono font-black uppercase tracking-wider transition hover:bg-neonGreen/10 active:scale-95">
+              Live
+            </button>
             <span id="bbx-count-badge" class="hidden bg-black text-slate-300 border border-borderDark px-2 py-1 rounded text-xs font-mono font-bold">0 ROWS LOADED</span>
             <button type="button" onclick="resetBuzzboardAnalytics()" class="bg-black border border-borderDark text-slate-300 px-3 py-1.5 rounded-xl text-xs uppercase font-bold transition hover:border-neonPink hover:text-neonPink">Clear Data</button>
           </div>
@@ -1551,7 +1575,7 @@
           <label class="text-[11px] font-mono text-slate-500 uppercase" for="bbx-challenge-code">Load a board by code</label>
           <input id="bbx-challenge-code" type="text" autocomplete="off" placeholder="challenge code" class="px-2.5 py-1 rounded border border-borderDark bg-black text-xs text-neonCyan font-mono placeholder-slate-600 focus:outline-none focus:border-neonCyan w-40">
           <button type="button" id="bbx-load-board" class="bg-black border border-neonAmber text-neonAmber hover:bg-neonAmber/10 text-[11px] font-mono font-black uppercase px-2.5 py-1 rounded transition active:scale-95">Load board</button>
-          <span class="text-[10px] font-mono text-slate-600">Your own challenge &mdash; the server sends the same rows the CSV holds.</span>
+          <span class="text-[10px] font-mono text-slate-600">Your own challenge &mdash; the server sends the same rows the CSV holds, and the board keeps itself current while you watch it.</span>
         </div>
 
         <div id="bbx-drop-zone" onclick="document.getElementById('bbx-file-input').click()" class="border-2 border-dashed border-borderDark rounded-xl flex flex-col items-center justify-center p-6 text-center cursor-pointer hover:border-neonAmber hover:bg-panelHover transition-all relative overflow-hidden min-h-[140px]">
