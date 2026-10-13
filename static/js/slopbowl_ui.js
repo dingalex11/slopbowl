@@ -76,38 +76,36 @@ function toggleAudioMute() {
 // =========================================================
 // SLIDE NAVIGATION
 // =========================================================
+// Navigation is a URL change: router.js owns which screen is visible, so this only has to
+// say where we are going. Callers keep passing slide numbers.
 function navigateTo(slideNum) {
-  // Stop voice when switching views
-  if (window.speechSynthesis) window.speechSynthesis.cancel();
-  if (typeof clearInterval === 'function') {
-    if (window._slopbowlReadInterval) clearInterval(window._slopbowlReadInterval);
+  if (typeof clearInterval === 'function' && window._slopbowlReadInterval) {
+    clearInterval(window._slopbowlReadInterval);
   }
-
+  if (typeof window.routerNavigate === 'function' && typeof window.routerHashForSlide === 'function') {
+    // The router hides every other screen, cancels speech, releases a drill and scrolls.
+    window.routerNavigate(window.routerHashForSlide(slideNum));
+    return;
+  }
+  // Fallback if router.js never loaded: the previous hide/show behaviour.
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
   document.querySelectorAll('.slide-view').forEach(s => s.classList.add('hidden'));
   const target = document.getElementById(`slide-${slideNum}`);
   if (target) target.classList.remove('hidden');
-
-  // Update nav dock buttons
-  document.querySelectorAll('.nav-dock-btn').forEach(btn => {
-    btn.classList.remove('bg-neonCyan', 'text-black', 'shadow-neon-cyan');
-    btn.classList.add('bg-panel', 'text-slate-300');
-  });
-  const activeBtn = document.getElementById(`nav-btn-${slideNum}`);
-  if (activeBtn) {
-    activeBtn.classList.remove('bg-panel', 'text-slate-300');
-    activeBtn.classList.add('bg-neonCyan', 'text-black', 'shadow-neon-cyan');
-  }
-
-  // A live drill owns speech and timers: leaving its slides must release them.
   if (typeof soloLeavePractice === 'function') soloLeavePractice(slideNum);
-
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // =========================================================
 // MODALS / TOASTS
 // =========================================================
+// The login form is the one overlay left, and it is addressed: opening it puts #/login in
+// the bar, so the back button closes it and a refresh reopens it.
 function openModal(id) {
+  if (id === 'auth-modal' && typeof window.routerNavigate === 'function') {
+    window.routerNavigate('#/login');
+    return;
+  }
   const el = document.getElementById(id);
   if (!el) return;
   el.classList.remove('hidden');
@@ -115,6 +113,10 @@ function openModal(id) {
 }
 
 function closeModal(id) {
+  if (id === 'auth-modal' && typeof window.routerCloseLogin === 'function') {
+    window.routerCloseLogin();
+    return;
+  }
   const el = document.getElementById(id);
   if (!el) return;
   el.classList.add('hidden');
@@ -190,18 +192,17 @@ function loadConvertedToMatch() {
     return;
   }
   sendEvent('LOAD_BANK', { bank: convertedBankData });
-  closeModal('converterModal');
+  if (typeof window.routerNavigate === 'function') window.routerNavigate('#/');
   showToast(`Loaded ${convertedBankData.length} question set(s) into the match`);
 }
 
-// Close modals with Escape
+// Escape closes the login overlay. The converter and the analytics are real screens now, so
+// they are left to the back button or their own Close link.
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    ['auth-modal', 'converterModal', 'analyticsModal'].forEach(closeModal);
-  }
+  if (e.key === 'Escape') closeModal('auth-modal');
 });
 
-// Default view on load
+// Default view on load: a deeper address (a shared link, a refresh) is router.js's business.
 window.addEventListener('DOMContentLoaded', () => {
-  navigateTo(1);
+  if (!window.location.hash && typeof window.routerStart !== 'function') navigateTo(1);
 });

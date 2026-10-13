@@ -158,6 +158,12 @@ async function bbxHandleFiles(files) {
       bbxStatus(`${file.name}: ${error.message}`, 'bad');
     }
   }
+  bbxFinishIngest(accepted);
+}
+
+// Every ingest ends here — a dropped file, or a board read from its code — so the badge
+// and the status line can never disagree with what is on screen.
+function bbxFinishIngest(accepted) {
   if (accepted) bbxBuildModels();
   bbxRenderAll();
   const badge = bbxEl('bbx-count-badge');
@@ -212,6 +218,109 @@ function bbxIngestCsv(csvText) {
   }
   return added;
 }
+
+// ------------------------------------------------------------ load by code
+//
+// The captain's board already exists on the server, so this station can read it straight
+// from the challenge code: GET /api/challenges/{code}/board returns the runs and the packet,
+// and the board's own exporter turns those into the very rows a downloaded buzzboard.csv
+// holds. Both routes therefore end in the same parser, and a fetched board cannot analyse
+// differently from an uploaded one.
+
+async function bbxApi(path) {
+  const token = window.getFirebaseIdToken ? await window.getFirebaseIdToken() : null;
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(path, { headers });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(result.detail || 'Request failed');
+    error.status = response.status;
+    throw error;
+  }
+  return result;
+}
+
+function bbxBoardError(error, code) {
+  const detail = String(error.message || '');
+  // The board route answers 403 for both "not the captain" and "no such code"; the server's
+  // own wording says which one it was, so it is shown as it came.
+  if (error.status === 403 || error.status === 404) {
+    return detail || `Only ${code.toUpperCase()}'s captain can load that board.`;
+  }
+  if (error.status === 401) return 'Sign in as the captain to load a board by code.';
+  // 503 covers both an unreachable challenge service and unverifiable auth: the server's
+  // wording is the more precise of the two, so it wins.
+  if (error.status === 503) return detail || 'The challenge service is unavailable right now.';
+  return detail || 'Could not load that board.';
+}
+
+async function bbxLoadChallengeBoard(code) {
+  const clean = String(code || '').trim().toLowerCase();
+  // The server's own rule for a challenge code (see ui_service._CHALLENGE_CODE_RE).
+  if (!/^[a-z0-9]{4,8}$/.test(clean)) {
+    bbxStatus('Enter a challenge code (4-8 letters or digits).', 'bad');
+    return 0;
+  }
+  const key = `challenge:${clean}`;
+  if (bbxState.files.has(key)) {
+    bbxStatus(`Board ${clean.toUpperCase()} is already loaded.`, 'busy');
+    return 0;
+  }
+  bbxStatus(`FETCHING BOARD ${clean.toUpperCase()}...`, 'busy');
+  try {
+    const board = await bbxApi(`/api/challenges/${encodeURIComponent(clean)}/board`);
+    if (typeof bukBoardCsvText !== 'function') throw new Error('The board exporter is not loaded.');
+    const added = bbxIngestCsv(bukBoardCsvText(board.runs || [], board.questions || []));
+    if (!added) {
+      bbxStatus(`Board ${clean.toUpperCase()} has no runs yet \u2014 nobody has played it.`, 'busy');
+      return 0;
+    }
+    bbxState.files.add(key);
+    bbxFinishIngest(added);
+    // The address remembers which board is open, so the view can be linked and refreshed.
+    if (typeof window.routerReplace === 'function') {
+      window.routerReplace(`#/analytics/${encodeURIComponent(clean)}`);
+    }
+    return added;
+  } catch (error) {
+    bbxStatus(bbxBoardError(error, clean), 'bad');
+    return 0;
+  }
+}
+
+const bbxLoadBoardBtn = bbxEl('bbx-load-board');
+const bbxChallengeCode = bbxEl('bbx-challenge-code');
+
+if (bbxLoadBoardBtn) {
+  bbxLoadBoardBtn.addEventListener('click', () => {
+    bbxLoadChallengeBoard(bbxChallengeCode ? bbxChallengeCode.value : '');
+  });
+}
+
+if (bbxChallengeCode) {
+  bbxChallengeCode.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      bbxLoadChallengeBoard(bbxChallengeCode.value);
+    }
+  });
+}
+
+// The router owns the address; a link like #/analytics/ab12cd opens this page on that board,
+// which is what makes a breakdown shareable.
+document.addEventListener('app:view', (event) => {
+  const detail = event.detail || {};
+  if (detail.name !== 'analytics') return;
+  const code = (detail.params && detail.params.code) || '';
+  // The buzzboard panel (not the match tables), on its first page.
+  showAnalyticsView('buzzboard');
+  bbxShowPage('questions');
+  if (bbxChallengeCode && code) bbxChallengeCode.value = code;
+  if (!code) return;
+  if (bbxState.files.has(`challenge:${code}`)) return;  // already on screen
+  bbxLoadChallengeBoard(code);
+});
 
 // ------------------------------------------------------------ models
 
@@ -407,7 +516,7 @@ function resetBuzzboardAnalytics() {
   const badge = bbxEl('bbx-count-badge');
   if (badge) badge.style.display = 'none';
   bbxRenderAll();
-  bbxStatus('SYSTEM READY // WAITING FOR BUZZBOARD CSV');
+  bbxStatus('SYSTEM READY // WAITING FOR A BUZZBOARD CSV OR CHALLENGE CODE');
 }
 
 // ------------------------------------------------------------ page 1: question buzzpoints

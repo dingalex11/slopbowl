@@ -150,6 +150,16 @@
       background: #00f3ff;
       border: 2px solid #000000;
     }
+    /* A screen link marks where you are; the URL in the address bar is the source of truth. */
+    .app-nav-link.is-active {
+      border-color: #00f3ff;
+      color: #00f3ff;
+      box-shadow: 0 0 12px rgba(0, 243, 255, 0.35);
+    }
+    /* A challenge run owns the window: no site header above it, no half-visible station. */
+    body.app-focus > header {
+      display: none;
+    }
   </style>
 
   <link rel="stylesheet" href="/static/css/style.css">
@@ -193,15 +203,15 @@
         <span>&#9889; SOLO</span>
       </button>
 
-      <button onclick="openModal('converterModal'); playSound('click');" class="moderator-nav-control flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-neonCyan bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
+      <a href="#/converter" class="moderator-nav-control flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-neonCyan bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
         <svg class="w-3.5 h-3.5 text-neonCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
         <span>Converter</span>
-      </button>
+      </a>
 
-      <button onclick="openModal('analyticsModal'); playSound('click');" class="flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-neonAmber bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
+      <a href="#/analytics" class="flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-neonAmber bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
         <svg class="w-3.5 h-3.5 text-neonAmber" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
         <span>Stats</span>
-      </button>
+      </a>
 
       <button onclick="navigateTo(2); playSound('click');" class="flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-white bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
         <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
@@ -221,37 +231,10 @@
     </div>
   </header>
 
-  <!-- Bottom Nav Dock -->
-  <nav class="fixed bottom-0 left-0 right-0 z-40 bg-black/90 backdrop-blur-xl border-t border-borderDark px-4 py-2.5">
-    <div class="max-w-7xl mx-auto flex items-center justify-center gap-2 overflow-x-auto custom-scrollbar">
-      <button id="nav-btn-1" data-slide="1" data-roles="all" onclick="navigateTo(1)" class="nav-dock-btn flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-neonCyan text-black shadow-neon-cyan">
-        <span>&#8962;</span><span>HOME</span>
-      </button>
-      <button id="nav-btn-3" data-slide="3" data-roles="all" onclick="navigateTo(3)" class="nav-dock-btn flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonAmber">
-        <span>&#9741;</span><span>ONLINE</span>
-      </button>
-      <button id="nav-btn-4" data-slide="4" data-roles="moderator" onclick="navigateTo(4)" class="nav-dock-btn moderator-nav-control flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonCyan">
-        <span>&#127909;</span><span>IN-PERSON</span>
-      </button>
-      <button id="nav-btn-5" data-slide="5" data-roles="moderator" onclick="navigateTo(5)" class="nav-dock-btn moderator-nav-control flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonGreen">
-        <span>&#9889;</span><span>MOD HUD</span>
-      </button>
-      <button id="nav-btn-6" data-slide="6" data-roles="moderator" onclick="navigateTo(6)" class="nav-dock-btn moderator-nav-control flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonAmber">
-        <span>&#128196;</span><span>BANK</span>
-      </button>
-      <button id="nav-btn-7" data-slide="7" data-roles="player" onclick="navigateTo(7)" class="nav-dock-btn player-nav-control hidden items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonAmber">
-        <span>&#128101;</span><span>LOBBY</span>
-      </button>
-      <button id="nav-btn-8" data-slide="8" data-roles="player" onclick="navigateTo(8)" class="nav-dock-btn player-nav-control hidden items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonPink">
-        <span>&#9889;</span><span>BUZZER</span>
-      </button>
-      <button id="nav-btn-13" data-slide="13" data-roles="all" onclick="navigateTo(13)" class="nav-dock-btn flex items-center space-x-1.5 px-4 py-2 text-xs font-mono font-black rounded-lg transition bg-panel text-slate-300 border border-borderDark hover:text-white hover:border-neonAmber">
-        <span>&#9783;</span><span>BOARD</span>
-      </button>
-    </div>
-  </nav>
+  <!-- There is no bottom dock: every screen has its own URL, and the home page carries the
+       links to them (see "All screens" below), so the address bar is the navigation. -->
 
-  <main class="flex-grow max-w-7xl mx-auto w-full p-4 md:p-6 lg:p-8 pb-24 flex flex-col justify-center">
+  <main class="flex-grow max-w-7xl mx-auto w-full p-4 md:p-6 lg:p-8 flex flex-col justify-center">
 
     <!-- ========================================== -->
     <!-- SLIDE 1: HOME DASHBOARD                    -->
@@ -318,17 +301,36 @@
         </div>
       </div>
 
+      <!-- All screens. Each link is a real URL (#/board, #/analytics, ...), so a screen can
+           be bookmarked, shared, refreshed and reached with the back button. -->
+      <div class="w-full max-w-5xl mb-8">
+        <p class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-3 text-center">All screens</p>
+        <div class="flex flex-wrap items-center justify-center gap-2">
+          <a href="#/online" data-route="online" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Online hub</a>
+          <a href="#/board" data-route="board" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Buzzpoint board</a>
+          <a href="#/solo" data-route="solo" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonGreen transition active:scale-95">Solo practice</a>
+          <a href="#/analytics" data-route="analytics" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Analytics</a>
+          <a href="#/in-person" data-route="in-person" class="app-nav-link moderator-nav-control inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonCyan transition active:scale-95">In-person setup</a>
+          <a href="#/hud" data-route="hud" class="app-nav-link moderator-nav-control inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonGreen transition active:scale-95">Moderator HUD</a>
+          <a href="#/bank" data-route="bank" class="app-nav-link moderator-nav-control inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Question bank</a>
+          <a href="#/converter" data-route="converter" class="app-nav-link moderator-nav-control inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonCyan transition active:scale-95">Packet converter</a>
+          <a href="#/lobby" data-route="lobby" class="app-nav-link player-nav-control hidden items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Lobby</a>
+          <a href="#/buzzer" data-route="buzzer" class="app-nav-link player-nav-control hidden items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonPink transition active:scale-95">Buzz station</a>
+          <a href="#/settings" data-route="settings" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonCyan transition active:scale-95">Settings</a>
+        </div>
+      </div>
+
       <!-- Slide 1 Footer Buttons -->
       <div class="flex flex-wrap items-center justify-center gap-6 text-sm font-mono">
-        <button onclick="openModal('converterModal'); playSound('click');" class="moderator-nav-control flex items-center space-x-2 text-slate-300 hover:text-neonCyan transition py-2.5 px-5 rounded-xl bg-panel border border-borderDark hover:border-neonCyan active:scale-95 shadow-sm">
+        <a href="#/converter" class="moderator-nav-control flex items-center space-x-2 text-slate-300 hover:text-neonCyan transition py-2.5 px-5 rounded-xl bg-panel border border-borderDark hover:border-neonCyan active:scale-95 shadow-sm">
           <svg class="w-4 h-4 text-neonCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
           <span>Packet converter</span>
-        </button>
+        </a>
 
-        <button onclick="openModal('analyticsModal'); playSound('click');" class="flex items-center space-x-2 text-slate-300 hover:text-neonAmber transition py-2.5 px-5 rounded-xl bg-panel border border-borderDark hover:border-neonAmber active:scale-95 shadow-sm">
+        <a href="#/analytics" class="flex items-center space-x-2 text-slate-300 hover:text-neonAmber transition py-2.5 px-5 rounded-xl bg-panel border border-borderDark hover:border-neonAmber active:scale-95 shadow-sm">
           <svg class="w-4 h-4 text-neonAmber" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
           <span>Match analytics</span>
-        </button>
+        </a>
       </div>
     </section>
 
@@ -778,9 +780,9 @@
           <button id="btn-copy-json" disabled onclick="copyJSON()" class="bg-black border border-borderDark text-slate-300 px-4 py-2 rounded-xl text-xs uppercase font-bold disabled:opacity-50 transition hover:border-neonCyan">Copy to Clipboard</button>
           <button id="btn-download-json" disabled onclick="downloadJSON()" class="bg-neonCyan hover:bg-cyan-300 text-black px-4 py-2 rounded-xl text-xs uppercase font-bold disabled:opacity-50 transition">Download JSON</button>
           <button id="btn-save-cloud" disabled class="hidden bg-neonGreen text-black px-4 py-2 rounded-xl text-xs uppercase font-bold disabled:opacity-50 transition"></button>
-          <button onclick="openModal('converterModal'); playSound('click');" class="bg-black border border-neonGreen text-neonGreen px-4 py-2 rounded-xl text-xs uppercase font-bold transition hover:bg-neonGreen/10">
+          <a href="#/converter" class="bg-black border border-neonGreen text-neonGreen px-4 py-2 rounded-xl text-xs uppercase font-bold transition hover:bg-neonGreen/10">
             Raw Packet Converter
-          </button>
+          </a>
         </div>
       </div>
 
@@ -1302,7 +1304,10 @@
             </select>
 
             <button type="button" id="buk-captain-create" class="mt-3 w-full py-3 bg-neonCyan text-black text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Create challenge</button>
-            <p class="mt-2 text-[11px] font-mono text-slate-400">Code: <span id="buk-captain-code" class="text-neonAmber font-black"></span></p>
+            <div class="mt-2 flex items-center gap-2">
+              <p class="text-[11px] font-mono text-slate-400">Code: <span id="buk-captain-code" class="text-neonAmber font-black"></span></p>
+              <button type="button" id="buk-captain-link" class="hidden px-2.5 py-1 bg-black border border-borderDark text-slate-400 hover:text-neonCyan hover:border-neonCyan text-[10px] font-mono font-black uppercase rounded-lg active:scale-95 transition">Copy link</button>
+            </div>
             <p id="buk-captain-status" class="mt-1 text-[11px] font-mono text-slate-500"></p>
 
             <div class="mt-5 pt-4 border-t border-borderDark">
@@ -1323,14 +1328,68 @@
             <input id="buk-member-code" type="text" class="w-full bg-panel border border-borderDark rounded-xl px-3 py-2 text-sm text-neonCyan font-mono mb-3 focus:outline-none focus:border-neonCyan" placeholder="abc123">
             <label class="block text-[10px] font-mono text-slate-500 uppercase mb-1">Display name</label>
             <input id="buk-member-name" type="text" class="w-full bg-panel border border-borderDark rounded-xl px-3 py-2 text-sm text-slate-200 font-mono mb-3 focus:outline-none focus:border-neonCyan" placeholder="Your name">
-            <button type="button" id="buk-member-join" class="w-full py-3 bg-neonGreen text-black text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Join and play</button>
+            <button type="button" id="buk-member-join" class="w-full py-3 bg-neonGreen text-black text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Join challenge</button>
             <p id="buk-member-status" class="mt-2 text-[11px] font-mono text-slate-500"></p>
-            <p class="mt-3 text-[10px] font-mono text-slate-600 leading-relaxed">One attempt per member. Buzz during the read to lock the word you were on; 5s to type. A correct toss-up earns the bonus (20s).</p>
+            <p class="mt-3 text-[10px] font-mono text-slate-600 leading-relaxed">Joining opens the challenge screen (#/challenge/CODE) with a Start button &mdash; nothing else. There you buzz during the read to lock the word you were on, then type your answer in 5 seconds. A correct toss-up earns the bonus (20s). A shared link prefills the code.</p>
           </div>
         </div>
 
-        <!-- Run -->
-        <div id="buk-run" class="hidden mt-4 bg-black border border-borderDark rounded-2xl p-5">
+        <!-- Board -->
+        <div id="buk-board" class="mt-4"></div>
+      </div>
+    </section>
+    <!-- ========================================== -->
+    <!-- SCREEN: CHALLENGE (its own URL: #/challenge/CODE) -->
+    <!-- Join, then Start, then the play area alone, then your buzz words. -->
+    <!-- ========================================== -->
+    <section id="screen-challenge" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-2xl mx-auto w-full">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Challenge</span>
+            <span id="buk-screen-code" class="text-xs font-mono font-black text-neonAmber"></span>
+          </div>
+          <button type="button" id="buk-exit" class="px-3 py-1.5 bg-black border border-borderDark text-slate-400 hover:text-neonPink hover:border-neonPink text-[10px] font-mono font-black uppercase rounded-lg active:scale-95 transition">Exit</button>
+        </div>
+
+        <!-- Join: only when the link was opened without a claimed attempt -->
+        <div id="challenge-stage-join" class="hidden bg-black border border-borderDark rounded-2xl p-5">
+          <p class="text-xs font-mono font-black text-neonGreen uppercase tracking-widest mb-3">Member &bull; join this challenge</p>
+          <label class="block text-[10px] font-mono text-slate-500 uppercase mb-1">Display name</label>
+          <input id="buk-join-name" type="text" class="w-full bg-panel border border-borderDark rounded-xl px-3 py-2 text-sm text-slate-200 font-mono mb-3 focus:outline-none focus:border-neonGreen" placeholder="Your name">
+          <button type="button" id="buk-join-submit" class="w-full py-3 bg-neonGreen text-black text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Join challenge</button>
+          <p id="buk-join-status" class="mt-2 text-[11px] font-mono text-slate-500"></p>
+        </div>
+
+        <!-- Start: everything worth knowing before the packet begins -->
+        <div id="challenge-stage-start" class="hidden bg-black border border-borderDark rounded-2xl p-6">
+          <h2 id="buk-start-title" class="text-2xl font-black text-white tracking-tight">Challenge</h2>
+          <p class="mt-1 text-[11px] font-mono text-slate-500 uppercase tracking-widest">Code <span id="buk-start-code" class="text-neonAmber font-black"></span></p>
+          <div class="grid grid-cols-3 gap-3 mt-5">
+            <div class="bg-panel border border-borderDark rounded-xl p-3">
+              <p class="text-[10px] font-mono text-slate-500 uppercase">Questions</p>
+              <p id="buk-start-count" class="text-sm font-mono font-black text-slate-200">&mdash;</p>
+            </div>
+            <div class="bg-panel border border-borderDark rounded-xl p-3">
+              <p class="text-[10px] font-mono text-slate-500 uppercase">Bonuses</p>
+              <p id="buk-start-bonuses" class="text-sm font-mono font-black text-slate-200">&mdash;</p>
+            </div>
+            <div class="bg-panel border border-borderDark rounded-xl p-3">
+              <p class="text-[10px] font-mono text-slate-500 uppercase">Display</p>
+              <p id="buk-start-display" class="text-sm font-mono font-black text-slate-200">&mdash;</p>
+            </div>
+          </div>
+          <div id="buk-start-subjects" class="mt-3 flex flex-wrap gap-1.5"></div>
+          <div class="mt-4 border-t border-borderDark pt-3 text-[11px] font-mono text-slate-400 leading-relaxed">
+            <p>One attempt per member. Buzz during the read to lock the word you were on, then type your answer within 5 seconds.</p>
+            <p class="mt-1 text-slate-500">Space buzzes &bull; Enter submits &bull; N goes to the next question.</p>
+          </div>
+          <button type="button" id="buk-start-btn" class="mt-5 w-full py-4 bg-neonGreen text-black text-sm font-mono font-black uppercase rounded-xl active:scale-95 transition shadow-neon-green">Start challenge</button>
+          <p id="buk-start-status" class="mt-2 text-[11px] font-mono text-slate-500"></p>
+        </div>
+
+        <!-- Run: the play area and nothing else -->
+        <div id="buk-run" class="hidden bg-black border border-borderDark rounded-2xl p-5">
           <div class="flex items-center justify-between">
             <p id="buk-run-progress" class="text-xs font-mono font-black text-neonCyan uppercase tracking-widest"></p>
             <p id="buk-run-category" class="text-[10px] font-mono text-slate-500 uppercase"></p>
@@ -1362,52 +1421,26 @@
           <p id="buk-feedback" class="mt-4 text-sm font-mono font-bold"></p>
           <p id="buk-run-status" class="mt-2 text-[11px] font-mono text-slate-500 uppercase"></p>
           <button type="button" id="buk-next-btn" class="hidden mt-4 px-6 py-3 bg-black border border-neonCyan text-neonCyan text-xs font-mono font-black uppercase rounded-xl active:scale-95">Next &rarr;</button>
-          <div id="buk-own-summary" class="mt-4"></div>
         </div>
 
-        <!-- Board -->
-        <div id="buk-board" class="mt-4"></div>
+        <!-- Done: your own buzz words, then back to the board -->
+        <div id="challenge-stage-done" class="hidden bg-black border border-neonGreen/60 rounded-2xl p-5">
+          <p class="text-xs font-mono font-black text-neonGreen uppercase tracking-widest">Packet complete</p>
+          <div id="buk-own-summary" class="mt-4"></div>
+          <a href="#/board" class="mt-4 flex items-center justify-center w-full py-3 bg-black border border-neonGreen text-neonGreen text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Done &mdash; back to the board</a>
+        </div>
       </div>
     </section>
-  </main>
-
-  <!-- ============ MODALS ============ -->
-
-  <!-- AUTH (Firebase email/password — real) -->
-  <div id="auth-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
-    <div class="bg-panel border border-neonCyan rounded-3xl max-w-sm w-full p-6 shadow-neon-cyan">
-      <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
-        <h3 class="text-base font-bold text-white font-display">Competitor Authorization</h3>
-        <button onclick="closeModal('auth-modal'); playSound('click');" class="text-slate-400 hover:text-white text-xl">&times;</button>
-      </div>
-      <div id="auth-error" class="hidden text-xs text-neonPink bg-black border border-neonPink p-2 rounded-lg font-mono mb-3"></div>
-      <div class="space-y-3">
-        <div>
-          <label class="block text-[11px] font-mono text-slate-400 uppercase mb-1">Email</label>
-          <input type="email" id="auth-email" placeholder="you@example.com" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2 text-sm text-neonCyan font-mono focus:outline-none focus:border-neonCyan">
-        </div>
-        <div>
-          <label class="block text-[11px] font-mono text-slate-400 uppercase mb-1">Password</label>
-          <input type="password" id="auth-password" placeholder="••••••••" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2 text-sm text-slate-300 font-mono focus:outline-none focus:border-neonCyan">
-        </div>
-        <div class="flex gap-3 pt-2">
-          <button id="btn-sign-in" class="flex-1 py-2.5 bg-neonCyan hover:bg-cyan-300 text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-cyan">Sign In</button>
-          <button id="btn-sign-up" class="flex-1 py-2.5 bg-black border border-borderDark text-slate-300 hover:text-white font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition">Sign Up</button>
-        </div>
-        <button onclick="closeModal('auth-modal'); playSound('click');" class="w-full py-2 bg-black border border-borderDark text-slate-400 text-xs font-mono rounded-xl active:scale-95">Cancel</button>
-      </div>
-    </div>
-  </div>
 
   <!-- PACKET CONVERTER (real: parses raw packet text into the question bank schema) -->
-  <div id="converterModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
-    <div class="bg-panel border border-neonCyan rounded-3xl max-w-2xl w-full p-6 shadow-neon-cyan">
+  <section id="screen-converter" class="slide-view hidden w-full max-w-3xl mx-auto p-4 md:p-6 lg:p-8">
+    <div class="bg-panel border border-neonCyan rounded-3xl p-6 shadow-neon-cyan">
       <div class="flex items-center justify-between border-b border-borderDark pb-4 mb-4">
         <div class="flex items-center space-x-2">
           <span class="text-xl">&#128196;</span>
           <h3 class="text-lg font-bold text-white font-display">Packet Converter &amp; JSON Validator</h3>
         </div>
-        <button onclick="closeModal('converterModal'); playSound('click');" class="text-slate-400 hover:text-white p-1 text-xl">&times;</button>
+        <a href="#/" class="text-slate-400 hover:text-white p-1 text-xl">&times;</a>
       </div>
       <p class="text-xs text-slate-400 mb-3 font-mono">Paste raw packet text (e.g. DOCX / PDF export) to convert into Slopbowl competition schema.</p>
       <textarea id="converterRawInput" rows="6" placeholder="TOSS-UP 1) PHYSICS Multiple Choice: What physical constant corresponds to approximately 6.626 x 10^-34 joule-seconds?&#10;W) Boltzmann constant&#10;X) Planck's constant&#10;ANSWER: X) PLANCK'S CONSTANT" class="w-full bg-black border border-borderDark rounded-xl p-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-neonCyan custom-scrollbar"></textarea>
@@ -1422,22 +1455,22 @@
             Load to Match
           </button>
         </div>
-        <button onclick="closeModal('converterModal'); playSound('click');" class="px-4 py-2 text-xs font-mono text-slate-400 hover:text-white">
+        <a href="#/" class="px-4 py-2 text-xs font-mono text-slate-400 hover:text-white">
           Close
-        </button>
+        </a>
       </div>
     </div>
-  </div>
+  </section>
 
   <!-- MATCH ANALYTICS (real: backed by analytics.js CSV engine) -->
-  <div id="analyticsModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
-    <div class="bg-panel border border-neonAmber rounded-3xl max-w-5xl w-full p-6 shadow-neon-amber max-h-[90vh] overflow-y-auto custom-scrollbar">
+  <section id="screen-analytics" class="slide-view hidden w-full max-w-6xl mx-auto p-4 md:p-6 lg:p-8">
+    <div class="bg-panel border border-neonAmber rounded-3xl p-6 shadow-neon-amber">
       <div class="flex items-center justify-between border-b border-borderDark pb-4 mb-4">
         <div class="flex items-center space-x-2">
           <span class="text-xl">&#128202;</span>
           <h3 class="text-lg font-bold text-white font-display">Match Analytics &amp; Speed Telemetry</h3>
         </div>
-        <button onclick="closeModal('analyticsModal'); playSound('click');" class="text-slate-400 hover:text-white p-1 text-xl">&times;</button>
+        <a href="#/" class="text-slate-400 hover:text-white p-1 text-xl">&times;</a>
       </div>
 
       <div class="flex flex-wrap items-center gap-2 mb-4">
@@ -1505,16 +1538,25 @@
       <!-- ============ BUZZBOARD CSV — two pages: question buzzpoints + numerical data ============ -->
       <div id="analytics-panel-buzzboard" class="hidden">
         <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <span id="bbx-status-text" class="text-xs text-slate-400 font-mono uppercase">SYSTEM READY // WAITING FOR BUZZBOARD CSV</span>
+          <span id="bbx-status-text" class="text-xs text-slate-400 font-mono uppercase">SYSTEM READY // WAITING FOR A BUZZBOARD CSV OR CHALLENGE CODE</span>
           <div class="flex items-center gap-2">
             <span id="bbx-count-badge" class="hidden bg-black text-slate-300 border border-borderDark px-2 py-1 rounded text-xs font-mono font-bold">0 ROWS LOADED</span>
             <button type="button" onclick="resetBuzzboardAnalytics()" class="bg-black border border-borderDark text-slate-300 px-3 py-1.5 rounded-xl text-xs uppercase font-bold transition hover:border-neonPink hover:text-neonPink">Clear Data</button>
           </div>
         </div>
 
+        <!-- The board is already on the server under its code, so a captain never has to
+             download the CSV and hand it back just to read it here. -->
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <label class="text-[11px] font-mono text-slate-500 uppercase" for="bbx-challenge-code">Load a board by code</label>
+          <input id="bbx-challenge-code" type="text" autocomplete="off" placeholder="challenge code" class="px-2.5 py-1 rounded border border-borderDark bg-black text-xs text-neonCyan font-mono placeholder-slate-600 focus:outline-none focus:border-neonCyan w-40">
+          <button type="button" id="bbx-load-board" class="bg-black border border-neonAmber text-neonAmber hover:bg-neonAmber/10 text-[11px] font-mono font-black uppercase px-2.5 py-1 rounded transition active:scale-95">Load board</button>
+          <span class="text-[10px] font-mono text-slate-600">Your own challenge &mdash; the server sends the same rows the CSV holds.</span>
+        </div>
+
         <div id="bbx-drop-zone" onclick="document.getElementById('bbx-file-input').click()" class="border-2 border-dashed border-borderDark rounded-xl flex flex-col items-center justify-center p-6 text-center cursor-pointer hover:border-neonAmber hover:bg-panelHover transition-all relative overflow-hidden min-h-[140px]">
           <b class="text-slate-200 font-mono text-xs uppercase">Drop Buzzboard CSVs</b>
-          <span class="text-[10px] text-slate-500 mt-2 font-mono">Download one from the Buzzpoint Board, then drop it here</span>
+          <span class="text-[10px] text-slate-500 mt-2 font-mono">Download one from the Buzzpoint Board, or load a board by code above</span>
         </div>
         <input type="file" id="bbx-file-input" accept=".csv" multiple class="hidden">
 
@@ -1560,9 +1602,39 @@
       <div id="bbx-tooltip" class="hidden fixed z-[60] w-[250px] bg-black/95 border border-borderDark rounded-lg p-3 text-xs shadow-2xl pointer-events-none"></div>
 
       <div class="flex items-center justify-end mt-4">
-        <button onclick="closeModal('analyticsModal'); playSound('click');" class="px-4 py-2 bg-black border border-borderDark text-xs font-mono text-slate-400 hover:text-white rounded-xl">
+        <a href="#/" class="px-4 py-2 bg-black border border-borderDark text-xs font-mono text-slate-400 hover:text-white rounded-xl">
           Close
-        </button>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  </main>
+
+  <!-- ============ MODALS ============ -->
+
+  <!-- AUTH (Firebase email/password — real) -->
+  <div id="auth-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="bg-panel border border-neonCyan rounded-3xl max-w-sm w-full p-6 shadow-neon-cyan">
+      <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
+        <h3 class="text-base font-bold text-white font-display">Competitor Authorization</h3>
+        <button onclick="closeModal('auth-modal'); playSound('click');" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+      <div id="auth-error" class="hidden text-xs text-neonPink bg-black border border-neonPink p-2 rounded-lg font-mono mb-3"></div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-[11px] font-mono text-slate-400 uppercase mb-1">Email</label>
+          <input type="email" id="auth-email" placeholder="you@example.com" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2 text-sm text-neonCyan font-mono focus:outline-none focus:border-neonCyan">
+        </div>
+        <div>
+          <label class="block text-[11px] font-mono text-slate-400 uppercase mb-1">Password</label>
+          <input type="password" id="auth-password" placeholder="••••••••" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2 text-sm text-slate-300 font-mono focus:outline-none focus:border-neonCyan">
+        </div>
+        <div class="flex gap-3 pt-2">
+          <button id="btn-sign-in" class="flex-1 py-2.5 bg-neonCyan hover:bg-cyan-300 text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-cyan">Sign In</button>
+          <button id="btn-sign-up" class="flex-1 py-2.5 bg-black border border-borderDark text-slate-300 hover:text-white font-mono font-bold text-xs uppercase rounded-xl active:scale-95 transition">Sign Up</button>
+        </div>
+        <button onclick="closeModal('auth-modal'); playSound('click');" class="w-full py-2 bg-black border border-borderDark text-slate-400 text-xs font-mono rounded-xl active:scale-95">Cancel</button>
       </div>
     </div>
   </div>
@@ -1579,6 +1651,8 @@
     <select id="cloud-packet-select" class="hidden"></select>
   </div>
 
+  <!-- The router loads first: everything after it navigates by URL. -->
+  <script src="/static/js/router.js"></script>
   <script src="/static/js/slopbowl_ui.js"></script>
   <script src="/static/js/ui.js"></script>
   <script src="/static/js/websocket.js"></script>

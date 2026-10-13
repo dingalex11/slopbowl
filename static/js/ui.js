@@ -314,7 +314,9 @@ async function copyRoomCode() {
 async function copyInviteLink() {
     const code = window.activeRoomId || currentRoomId || '';
     if (!code) return;
-    const link = `${location.origin}${location.pathname}?room=${code}`;
+    // The hash form is the screen's own address, so the link lands on the online hub with
+    // the room code already filled in rather than jumping straight into a seat.
+    const link = `${location.origin}${location.pathname}#/join/${code}`;
     try {
         await navigator.clipboard.writeText(link);
         showToast('Invite link copied');
@@ -466,4 +468,15 @@ window.addEventListener('DOMContentLoaded', () => {
             joinRoom();
         }
     }
+});
+
+// --- SCREEN LINKS ---
+// #/join/CODE is the shareable room link: it opens the online hub with the code ready.
+document.addEventListener('app:view', (event) => {
+    const detail = event.detail || {};
+    if (detail.name !== 'online') return;
+    const room = detail.params && detail.params.room;
+    if (!room) return;
+    const input = document.getElementById('room-id-input');
+    if (input && !input.value) input.value = room;
 });

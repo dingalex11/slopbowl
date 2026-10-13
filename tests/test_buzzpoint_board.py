@@ -19,6 +19,8 @@ from services import ui_service
 
 ROOT = Path(__file__).resolve().parents[1]
 BUZZPOINT_SOURCE = (ROOT / "static/js/buzzpoint.js").read_text(encoding="utf-8")
+ANALYTICS_SOURCE = (ROOT / "static/js/buzzboard_analytics.js").read_text(encoding="utf-8")
+ROUTER_SOURCE = (ROOT / "static/js/router.js").read_text(encoding="utf-8")
 INDEX_SOURCE = (ROOT / "index.html").read_text(encoding="utf-8")
 AUTH_SOURCE = (ROOT / "static/js/auth.js").read_text(encoding="utf-8")
 RULES_SOURCE = (ROOT / "firestore.rules").read_text(encoding="utf-8")
@@ -308,14 +310,81 @@ class ChallengeRouteContractTests(unittest.TestCase):
 
     def test_the_fourth_station_is_wired_into_the_shell(self):
         self.assertIn('id="slide-13"', INDEX_SOURCE)
-        self.assertIn('id="nav-btn-13"', INDEX_SOURCE)
-        self.assertIn('data-roles="all"', INDEX_SOURCE)
+        # The board is reached by its own address from the home page. The bottom dock that
+        # used to carry the link is gone — screens are links now — so the shell test pins the
+        # link and its URL rather than a dock button.
+        self.assertIn('href="#/board"', INDEX_SOURCE)
+        self.assertIn('data-route="board"', INDEX_SOURCE)
         self.assertIn('<script src="/static/js/buzzpoint.js"></script>', INDEX_SOURCE)
 
     def test_members_sign_in_anonymously_and_are_told_if_it_is_disabled(self):
         self.assertIn("signInAnonymously", AUTH_SOURCE)
         self.assertIn("window.signInAnonymouslyForBoard", AUTH_SOURCE)
         self.assertIn("Anonymous sign-in is not enabled", AUTH_SOURCE)
+
+
+class BoardByCodeTests(unittest.TestCase):
+    """The captain's board already exists on the server, so Analytics reads it by code.
+
+    The guarantee under test: a board fetched by code and a board uploaded as CSV are fed by
+    the same two pieces — the board's own exporter and the file parser — so the two routes
+    cannot analyse the same runs differently. And because the board is captain-only, the
+    failure has to say so rather than look like an empty board.
+    """
+
+    def test_the_station_offers_a_load_by_code_control(self):
+        self.assertIn('id="bbx-challenge-code"', INDEX_SOURCE)
+        self.assertIn('id="bbx-load-board"', INDEX_SOURCE)
+        self.assertIn("async function bbxLoadChallengeBoard(code)", ANALYTICS_SOURCE)
+        self.assertIn("bbxLoadBoardBtn.addEventListener('click'", ANALYTICS_SOURCE)
+        self.assertIn("if (event.key === 'Enter')", ANALYTICS_SOURCE)
+
+    def test_the_board_is_fetched_as_the_captain(self):
+        self.assertIn("await bbxApi(`/api/challenges/${encodeURIComponent(clean)}/board`)", ANALYTICS_SOURCE)
+        self.assertIn("if (token) headers.Authorization = `Bearer ${token}`;", ANALYTICS_SOURCE)
+        self.assertIn('@app.get("/api/challenges/{code}/board")', UI_SERVICE_SOURCE)
+
+    def test_a_fetched_board_is_parsed_by_the_upload_parser(self):
+        # The exporter the download button uses, then the parser a dropped file uses.
+        self.assertIn("bbxIngestCsv(bukBoardCsvText(board.runs || [], board.questions || []))", ANALYTICS_SOURCE)
+        # Both routes finish in one place, so the badge and the status cannot disagree.
+        self.assertIn("bbxFinishIngest(accepted);", ANALYTICS_SOURCE)
+        self.assertIn("bbxFinishIngest(added);", ANALYTICS_SOURCE)
+        self.assertIn("function bbxFinishIngest(accepted)", ANALYTICS_SOURCE)
+
+    def test_the_code_is_validated_the_way_the_server_validates_it(self):
+        self.assertIn("/^[a-z0-9]{4,8}$/", ANALYTICS_SOURCE)
+        self.assertIn('_CHALLENGE_CODE_RE = re.compile(r"^[a-z0-9]{4,8}$")', UI_SERVICE_SOURCE)
+
+    def test_an_unauthorised_or_unknown_board_says_which_it_was(self):
+        self.assertIn("if (error.status === 403 || error.status === 404)", ANALYTICS_SOURCE)
+        self.assertIn("if (error.status === 401) return 'Sign in as the captain to load a board by code.';", ANALYTICS_SOURCE)
+        self.assertIn("if (error.status === 503) return detail ||", ANALYTICS_SOURCE)
+        # The server answers 403 for "not the captain", and the client shows its wording.
+        self.assertIn('raise HTTPException(status_code=403, detail=str(exc))', UI_SERVICE_SOURCE)
+
+    def test_a_board_with_no_runs_says_so_instead_of_claiming_success(self):
+        self.assertIn("if (!added) {", ANALYTICS_SOURCE)
+        self.assertIn("has no runs yet", ANALYTICS_SOURCE)
+
+    def test_the_same_board_is_not_loaded_twice(self):
+        self.assertIn("const key = `challenge:${clean}`;", ANALYTICS_SOURCE)
+        self.assertIn("if (bbxState.files.has(key)) {", ANALYTICS_SOURCE)
+        # The router re-dispatching the same address must not fetch it again.
+        self.assertIn("if (bbxState.files.has(`challenge:${code}`)) return;", ANALYTICS_SOURCE)
+
+    def test_the_address_remembers_which_board_is_open(self):
+        self.assertIn("window.routerReplace(`#/analytics/${encodeURIComponent(clean)}`)", ANALYTICS_SOURCE)
+        self.assertIn("if (name === 'analytics' && p.code) return `#/analytics/${encodeURIComponent(p.code)}`;", ROUTER_SOURCE)
+        self.assertIn("params.code = String(parts[1] || '').toLowerCase();", ROUTER_SOURCE)
+        self.assertIn("document.addEventListener('app:view'", ANALYTICS_SOURCE)
+        # The URL must open the buzzboard panel, not just switch the page inside it.
+        self.assertIn("showAnalyticsView('buzzboard');", ANALYTICS_SOURCE)
+        self.assertIn("bbxShowPage('questions');", ANALYTICS_SOURCE)
+
+    def test_the_board_still_downloads_for_a_spreadsheet(self):
+        self.assertIn("Download it for a spreadsheet, or read it in Analytics", BUZZPOINT_SOURCE)
+        self.assertIn("btn.textContent = 'Download CSV';", BUZZPOINT_SOURCE)
 
 
 if __name__ == "__main__":

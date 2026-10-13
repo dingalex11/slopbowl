@@ -217,6 +217,9 @@ async function bukCreateChallenge() {
     });
     const codeEl = bukEl('buk-captain-code');
     if (codeEl) codeEl.textContent = result.code;
+    // The share link is the same address the member's screen uses, so the code is enough.
+    const linkBtn = bukEl('buk-captain-link');
+    if (linkBtn) linkBtn.classList.remove('hidden');
     bukStatus('buk-captain-status', `Challenge ready — share code ${result.code}.`, '#00ff66');
   } catch (err) {
     bukStatus('buk-captain-status', err.message || 'Could not create the challenge.', '#ff4d4d');
@@ -237,6 +240,8 @@ const bukRun = {
   sawBoundary: false, fallbackTimer: null, fallbackInterval: null,
   answering: false, awaitingNext: false,
   records: [], finished: false,
+  // The challenge screen: which stage is showing, and which attempt this browser claimed.
+  stage: null, claimedCode: null, joinStatus: null, displayName: '',
 };
 
 const BUK_TOSSUP_WINDOW_S = 5.0;
@@ -566,6 +571,8 @@ function bukFinishRun() {
   bukRun.finished = true;
   bukStopDelivery();
   bukStatus('buk-run-status', 'Packet complete \u2014 your buzz words are below.', '#00ff66');
+  // The play area gives way to your own summary; the captain's compile stays on the board.
+  bukShowStage('done');
   bukRenderOwnSummary();
 }
 
@@ -574,6 +581,14 @@ function bukRenderOwnSummary() {
   const holder = bukEl('buk-own-summary');
   if (!holder) return;
   holder.replaceChildren();
+  if (!bukRun.records.length) {
+    // A finished attempt reopened from a link: the buzz words live on the board, not here.
+    const empty = document.createElement('p');
+    empty.className = 'text-xs font-mono text-slate-500';
+    empty.textContent = 'This attempt is already complete — the board holds every run.';
+    holder.appendChild(empty);
+    return;
+  }
   const title = document.createElement('p');
   title.className = 'text-xs font-mono font-bold text-neonCyan uppercase tracking-widest mb-2';
   title.textContent = 'Your buzz words';
@@ -680,7 +695,7 @@ function bukBoardCsvButton(holder, runs, questions) {
   });
   const note = document.createElement('p');
   note.className = 'text-[11px] font-mono text-slate-500';
-  note.textContent = 'buzzboard.csv \u2014 upload it in Analytics \u2192 Buzzboard CSV for the full breakdown.';
+  note.textContent = 'Download it for a spreadsheet, or read it in Analytics \u2192 Buzzboard CSV by challenge code.';
   wrap.append(btn, note);
   holder.appendChild(wrap);
 }
@@ -708,33 +723,214 @@ async function bukSeedBoard(code) {
   }
 }
 
-async function bukJoinChallenge() {
+// ------------------------------------------------ the challenge screen's four stages
+//
+// Joining opens #/challenge/CODE, which shows the start button and nothing else; pressing
+// it is what begins the packet, and the packet is read in the play area alone. The router
+// owns which screen is visible, so this file only decides which stage that screen shows.
+
+// "none" arms nothing: it is what an exit leaves behind, so re-entering the URL decides
+// the stage again instead of reopening a panel nobody dismissed.
+function bukShowStage(stage) {
+  bukRun.stage = stage === 'none' ? null : stage;
+  const stages = {
+    join: 'challenge-stage-join', start: 'challenge-stage-start',
+    run: 'buk-run', done: 'challenge-stage-done',
+  };
+  Object.keys(stages).forEach((key) => {
+    const el = bukEl(stages[key]);
+    if (el) el.classList.toggle('hidden', key !== stage);
+  });
+  const codeEl = bukEl('buk-screen-code');
+  if (codeEl && bukRun.code) codeEl.textContent = bukRun.code.toUpperCase();
+}
+
+function bukScreenCode() {
+  const el = bukEl('buk-screen-code');
+  return el ? el.textContent.trim().toLowerCase() : '';
+}
+
+// An attempt this browser already claimed: re-entering the same URL must not restart it.
+function bukIsEntered(code) {
+  return Boolean(code) && bukRun.claimedCode === code && Boolean(bukRun.stage);
+}
+
+// Claim the single attempt, or resume the one already in progress.
+async function bukClaimAttempt(code, displayName) {
+  if (!code || !displayName) throw new Error('Enter a code and a display name.');
+  await bukEnsureIdentity();
+  const result = await bukApi(`/api/challenges/${encodeURIComponent(code)}/join`, {
+    method: 'POST', body: JSON.stringify({ displayName }),
+  });
+  bukRun.code = code;
+  bukRun.displayName = displayName;
+  bukRun.claimedCode = code;
+  bukRun.joinStatus = result.status;
+  bukRun.records = [];
+  bukRun.finished = false;
+  return result;
+}
+
+function bukJoinError(err, fallback) {
+  if (err.status === 409) return 'You have already used your attempt on this challenge.';
+  if (err.status === 404) return 'That challenge code does not exist.';
+  if (/anonymous|operation-not-allowed|sign/i.test(err.message || '')) {
+    return 'Anonymous sign-in failed \u2014 enable Anonymous sign-in in the Firebase console.';
+  }
+  return err.message || fallback;
+}
+
+// The board's join card: claim the attempt, then hand over to the challenge's own URL.
+async function bukJoinFromBoard() {
   const codeEl = bukEl('buk-member-code');
   const nameEl = bukEl('buk-member-name');
-  const code = (codeEl ? codeEl.value : '').trim();
+  const code = (codeEl ? codeEl.value : '').trim().toLowerCase();
   const displayName = (nameEl ? nameEl.value : '').trim();
   if (!code || !displayName) { bukStatus('buk-member-status', 'Enter a code and a display name.', '#ffaa00'); return; }
   try {
     bukStatus('buk-member-status', 'Joining\u2026');
-    await bukEnsureIdentity();
-    const result = await bukApi(`/api/challenges/${encodeURIComponent(code)}/join`, {
-      method: 'POST', body: JSON.stringify({ displayName }),
-    });
-    bukRun.code = code;
-    bukRun.records = [];
-    bukRun.finished = false;
-    bukStatus('buk-member-status', result.status === 'resumed' ? 'Resuming your attempt\u2026' : 'Attempt locked \u2014 good luck!', '#00ff66');
-    const runPanel = bukEl('buk-run'); if (runPanel) runPanel.classList.remove('hidden');
-    const next = await bukApi(`/api/challenges/${encodeURIComponent(code)}/next`);
-    if (next.done) { bukFinishRun(); return; }
+    const result = await bukClaimAttempt(code, displayName);
+    bukStatus('buk-member-status', result.status === 'resumed'
+      ? 'Attempt found \u2014 ready to resume.' : 'Attempt locked \u2014 good luck!', '#00ff66');
+    // The play screen is its own address, so the join carries the code into the URL. The
+    // router dispatches app:view, which puts up the start stage; without it, do it here.
+    if (typeof window.routerNavigate === 'function') window.routerNavigate(`#/challenge/${encodeURIComponent(code)}`);
+    else bukShowStartStage();
+  } catch (err) {
+    bukStatus('buk-member-status', bukJoinError(err, 'Could not join.'), '#ff4d4d');
+  }
+}
+
+// The challenge screen's own form: how a shared link is played.
+async function bukJoinFromScreen() {
+  const nameEl = bukEl('buk-join-name');
+  const displayName = (nameEl ? nameEl.value : '').trim();
+  const code = (bukRun.code || bukScreenCode() || '').toLowerCase();
+  bukStatus('buk-join-status', 'Joining\u2026');
+  try {
+    const result = await bukClaimAttempt(code, displayName);
+    bukStatus('buk-join-status', result.status === 'resumed' ? 'Resuming your attempt\u2026' : '', '#00ff66');
+    bukShowStartStage();
+  } catch (err) {
+    bukStatus('buk-join-status', bukJoinError(err, 'Could not join.'), '#ff4d4d');
+  }
+}
+
+// The start screen: which packet this is, how it is set up, and the button that begins it.
+async function bukShowStartStage() {
+  bukShowStage('start');
+  const btn = bukEl('buk-start-btn');
+  if (btn) btn.textContent = bukRun.joinStatus === 'resumed' ? 'Resume challenge' : 'Start challenge';
+  if (!bukRun.code) return;
+  try {
+    bukRenderChallengeStart(await bukApi(`/api/challenges/${encodeURIComponent(bukRun.code)}`));
+  } catch (err) {
+    bukStatus('buk-start-status', err.message || 'Could not read the challenge.', '#ff4d4d');
+  }
+}
+
+function bukRenderChallengeStart(meta) {
+  bukRun.meta = meta;
+  const set = (id, text) => { const el = bukEl(id); if (el) el.textContent = text; };
+  set('buk-start-title', meta.title || 'Challenge');
+  set('buk-start-code', String(meta.code || bukRun.code || '').toUpperCase());
+  set('buk-start-count', String(meta.questionCount || 0));
+  set('buk-start-bonuses', meta.readBonuses ? 'On (20s)' : 'Off');
+  set('buk-start-display', meta.displayMode === 'audio-only' ? 'Audio only' : 'Words + audio');
+  set('buk-screen-code', String(meta.code || bukRun.code || '').toUpperCase());
+  const holder = bukEl('buk-start-subjects');
+  if (!holder) return;
+  holder.replaceChildren();
+  const subjects = (meta.packetSummary || {}).subjects || {};
+  Object.keys(subjects).forEach((name) => {
+    const pill = document.createElement('span');
+    pill.className = 'px-2 py-0.5 rounded-full bg-panel border border-borderDark text-[10px] font-mono text-slate-300';
+    pill.textContent = `${name} ${subjects[name]}`;
+    holder.appendChild(pill);
+  });
+}
+
+// Start challenge: only here does the packet begin, and it begins in the play area alone.
+async function bukStartChallenge() {
+  if (!bukRun.code) return;
+  const btn = bukEl('buk-start-btn');
+  if (btn) btn.disabled = true;
+  bukStatus('buk-start-status', 'Starting\u2026');
+  try {
+    const next = await bukApi(`/api/challenges/${encodeURIComponent(bukRun.code)}/next`);
+    bukStatus('buk-start-status', '');
+    if (next.done) { bukRun.finished = true; bukShowStage('done'); bukRenderOwnSummary(); return; }
+    bukShowStage('run');
     bukStartQuestion(next);
   } catch (err) {
-    const msg = err.status === 409
-      ? 'You have already used your attempt on this challenge.'
-      : (/anonymous|operation-not-allowed|sign/i.test(err.message || '')
-        ? 'Anonymous sign-in failed \u2014 enable Anonymous sign-in in the Firebase console.'
-        : (err.message || 'Could not join.'));
-    bukStatus('buk-member-status', msg, '#ff4d4d');
+    bukStatus('buk-start-status', bukJoinError(err, 'Could not start the challenge.'), '#ff4d4d');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Off the play screen, nothing of the run may keep going: the read is stopped, the timers
+// are cleared and no stage stays armed. The attempt itself stays open on the server, so the
+// challenge link resumes it.
+function bukLeaveChallengeScreen() {
+  if (!bukRun.question && !bukRun.delivering) return;
+  bukStopDelivery();
+  if (bukRun.windowTimer) { clearTimeout(bukRun.windowTimer); bukRun.windowTimer = null; }
+  if (bukRun.lockoutTimer) { clearInterval(bukRun.lockoutTimer); bukRun.lockoutTimer = null; }
+  bukRun.question = null;
+  bukRun.answering = false;
+  bukRun.awaitingNext = false;
+  bukRun.pendingNext = null;
+  bukShowStage('none');
+}
+
+// Leaving mid-packet is a real choice, so it asks.
+function bukExitChallenge() {
+  const midRun = Boolean(bukRun.question) && !bukRun.finished;
+  if (midRun && !window.confirm('Leave the challenge? Your attempt stays open \u2014 the challenge link will resume it.')) return;
+  bukLeaveChallengeScreen();
+  bukShowStage('none');
+  if (typeof window.routerNavigate === 'function') window.routerNavigate('#/board');
+}
+
+// #/challenge/ab12 opens this screen. A claimed attempt goes straight to the start button;
+// a member who has not joined yet gets the join form with the code already filled in.
+async function bukEnterChallenge(code) {
+  const clean = String(code || '').trim().toLowerCase();
+  if (!clean) { bukShowStage('join'); return; }
+  bukRun.code = clean;
+  if (bukIsEntered(clean)) return;
+  // The board's join card already claimed this attempt: no second probe needed.
+  if (bukRun.claimedCode === clean) { bukShowStartStage(); return; }
+  const nameEl = bukEl('buk-join-name');
+  if (nameEl && !nameEl.value && bukRun.displayName) nameEl.value = bukRun.displayName;
+  bukShowStage('join');
+  bukStatus('buk-join-status', 'Checking your attempt\u2026');
+  try {
+    await bukEnsureIdentity();
+    // A claimed attempt answers /next; a member who has not joined is refused with 403.
+    const next = await bukApi(`/api/challenges/${encodeURIComponent(clean)}/next`);
+    bukRun.claimedCode = clean;
+    bukRun.joinStatus = 'resumed';
+    bukRun.records = [];
+    if (next && next.done) { bukRun.finished = true; bukShowStage('done'); bukRenderOwnSummary(); return; }
+    bukStatus('buk-join-status', '');
+    bukShowStartStage();
+  } catch (err) {
+    if (err.status === 404) { bukStatus('buk-join-status', 'That challenge code does not exist.', '#ff4d4d'); return; }
+    // 403 means "join this challenge before playing" \u2014 the honest answer is the join form.
+    if (err.status === 403) { bukStatus('buk-join-status', ''); return; }
+    bukStatus('buk-join-status', bukJoinError(err, 'Could not open the challenge.'), '#ff4d4d');
+  }
+}
+
+async function bukCopyChallengeLink(code) {
+  const link = `${window.location.origin}${window.location.pathname}#/challenge/${code}`;
+  try {
+    await navigator.clipboard.writeText(link);
+    if (typeof showToast === 'function') showToast('Challenge link copied');
+  } catch (err) {
+    if (typeof showToast === 'function') showToast(link);
   }
 }
 
@@ -742,7 +938,35 @@ function bukInit() {
   const createBtn = bukEl('buk-captain-create');
   if (createBtn) createBtn.addEventListener('click', bukCreateChallenge);
   const joinBtn = bukEl('buk-member-join');
-  if (joinBtn) joinBtn.addEventListener('click', bukJoinChallenge);
+  if (joinBtn) joinBtn.addEventListener('click', bukJoinFromBoard);
+  const joinSubmit = bukEl('buk-join-submit');
+  if (joinSubmit) joinSubmit.addEventListener('click', bukJoinFromScreen);
+  const startBtn = bukEl('buk-start-btn');
+  if (startBtn) startBtn.addEventListener('click', bukStartChallenge);
+  const exitBtn = bukEl('buk-exit');
+  if (exitBtn) exitBtn.addEventListener('click', () => { bukExitChallenge(); });
+  const linkBtn = bukEl('buk-captain-link');
+  if (linkBtn) linkBtn.addEventListener('click', () => {
+    const codeEl = bukEl('buk-captain-code');
+    const code = codeEl ? codeEl.textContent.trim() : '';
+    if (code) bukCopyChallengeLink(code);
+  });
+  const joinName = bukEl('buk-join-name');
+  if (joinName) {
+    joinName.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); bukJoinFromScreen(); }
+    });
+  }
+  // The router owns which screen is visible; this screen just has to fill itself in.
+  document.addEventListener('app:view', (event) => {
+    const detail = event.detail || {};
+    if (detail.name !== 'challenge') {
+      // Any other route — a link, or the back button — releases the play screen.
+      bukLeaveChallengeScreen();
+      return;
+    }
+    bukEnterChallenge(detail.params ? detail.params.code : '');
+  });
   const buzzBtn = bukEl('buk-buzz-btn');
   if (buzzBtn) buzzBtn.addEventListener('click', () => { bukBuzz(); });
   const submitBtn = bukEl('buk-answer-submit');
