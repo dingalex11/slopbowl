@@ -144,7 +144,6 @@ function bukSubjectFor(category) {
   const raw = String(category || '').trim();
   return BUK_SUBJECT_ALIASES[raw.toLowerCase()] || raw || 'General';
 }
-const BUK_MEMBER_COLORS = ['#00f3ff', '#ffaa00', '#00ff66', '#ff0055', '#b026ff', '#2dd4bf', '#f472b6', '#facc15'];
 
 // ============================================================
 // 3. API + IDENTITY
@@ -206,11 +205,15 @@ async function bukCreateChallenge() {
   const file = fileEl && fileEl.files ? fileEl.files[0] : null;
   if (!title.trim()) { bukStatus('buk-captain-status', 'Give the challenge a title.', '#ffaa00'); return; }
   if (!file) { bukStatus('buk-captain-status', 'Choose a .json packet first.', '#ffaa00'); return; }
+  const bonusesEl = bukEl('buk-captain-bonuses');
+  const displayEl = bukEl('buk-captain-display');
+  const readBonuses = bonusesEl ? Boolean(bonusesEl.checked) : true;
+  const displayMode = displayEl && displayEl.value === 'audio-only' ? 'audio-only' : 'hybrid';
   try {
     bukStatus('buk-captain-status', 'Uploading packet…');
     const bank = await bukParsePacketFile(file);
     const result = await bukApi('/api/challenges', {
-      method: 'POST', body: JSON.stringify({ title, bank }),
+      method: 'POST', body: JSON.stringify({ title, bank, readBonuses, displayMode }),
     });
     const codeEl = bukEl('buk-captain-code');
     if (codeEl) codeEl.textContent = result.code;
@@ -228,7 +231,7 @@ const bukRun = {
   code: null, meta: null, question: null, tracker: null,
   delivering: false, windowOpen: false, answered: false,
   readStart: 0, buzzAt: 0, firstKeystrokeAt: 0,
-  wordStreamDone: false, speechDone: false,
+  wordStreamDone: false, speechDone: false, displayMode: 'hybrid',
   streamTimer: null, windowTimer: null, lockoutTimer: null, speechPoll: null,
   utterance: null, words: [], shownWords: 0, wordSpans: [], revealIndex: -1,
   sawBoundary: false, fallbackTimer: null, fallbackInterval: null,
@@ -269,6 +272,8 @@ function bukStartQuestion(question) {
   bukRun.buzzAt = 0;
   bukRun.words = buzzTokenizeWords(question.text || '');
   bukRun.shownWords = 0;
+  // The captain chose this at creation; the server repeats it on every question payload.
+  bukRun.displayMode = question.displayMode === 'audio-only' ? 'audio-only' : 'hybrid';
   bukRun.tracker = createBuzzWordTracker(question.text || '', { wordsPerSecond: 2.6 });
 
   const progressLabel = bukEl('buk-run-progress');
@@ -291,6 +296,18 @@ function bukStartQuestion(question) {
 function bukPrepareReveal() {
   const textEl = bukEl('buk-question-text');
   if (textEl) textEl.replaceChildren();
+  if (bukRun.displayMode === 'audio-only') {
+    // Audio-only: the words are never shown. A status line and the progress bar are the
+    // only on-screen record of the read; the tracker still follows the audio for the buzz.
+    bukRun.wordSpans = [];
+    bukRun.revealIndex = -1;
+    const notice = document.createElement('p');
+    notice.className = 'text-sm font-mono font-black text-neonCyan uppercase tracking-widest';
+    notice.textContent = 'Reading question\u2026';
+    if (textEl) textEl.appendChild(notice);
+    if (!bukRun.words.length) bukRun.wordStreamDone = true;
+    return;
+  }
   // Pre-create every word as a hidden text node so the reveal only toggles visibility:
   // the layout stays put and untrusted packet text stays text (never markup).
   bukRun.wordSpans = bukRun.words.map((word) => {
@@ -309,13 +326,18 @@ function bukRevealUpTo(index) {
   const last = words.length - 1;
   const target = Math.max(-1, Math.min(index, last));
   if (target <= bukRun.revealIndex) return;
-  for (let i = bukRun.revealIndex + 1; i <= target; i += 1) {
-    if (bukRun.wordSpans[i]) bukRun.wordSpans[i].style.visibility = 'visible';
+  // Audio-only reveals no words: only the progress bar moves.
+  if (bukRun.displayMode !== 'audio-only') {
+    for (let i = bukRun.revealIndex + 1; i <= target; i += 1) {
+      if (bukRun.wordSpans[i]) bukRun.wordSpans[i].style.visibility = 'visible';
+    }
   }
   bukRun.revealIndex = target;
   bukRun.shownWords = target + 1;
   const counter = bukEl('buk-word-count');
-  if (counter) counter.textContent = `Word ${Math.max(1, target + 1)} of ${words.length}`;
+  if (counter) counter.textContent = bukRun.displayMode === 'audio-only'
+    ? ''
+    : `Word ${Math.max(1, target + 1)} of ${words.length}`;
   const bar = bukEl('buk-progress-bar');
   if (bar) bar.style.width = `${Math.min(100, Math.round(((target + 1) / Math.max(1, words.length)) * 100))}%`;
   if (target >= last) {
@@ -586,306 +608,82 @@ function bukRenderBoard(data) {
     holder.appendChild(empty);
     return;
   }
-  const colors = {};
-  runs.forEach((run, i) => { colors[run.uid] = BUK_MEMBER_COLORS[i % BUK_MEMBER_COLORS.length]; });
-
-  bukBoardLegend(holder, runs, colors);
-  bukBoardBuzzTable(holder, runs, questions, colors);
-  bukBoardBuzzLines(holder, runs, questions, colors);
-  bukBoardDepth(holder, runs, colors);
-  bukBoardSubjects(holder, runs);
-  bukBoardEarlyWrong(holder, runs, questions);
-  bukBoardBonus(holder, runs);
+  // The board is a data export, not a report. Every statistic it used to draw now lives
+  // in the Analytics station, which reads this CSV back in \u2014 so the only control here
+  // is the download itself.
   bukBoardCsvButton(holder, runs, questions);
 }
 
-function bukBoardLegend(holder, runs, colors) {
-  const wrap = document.createElement('div');
-  wrap.className = 'flex flex-wrap gap-3 mb-4';
-  for (const run of runs) {
-    const item = document.createElement('span');
-    item.className = 'flex items-center gap-1.5 text-[11px] font-mono font-bold';
-    const dot = document.createElement('span');
-    dot.style.width = '10px'; dot.style.height = '10px'; dot.style.borderRadius = '9999px';
-    dot.style.display = 'inline-block';
-    dot.style.background = colors[run.uid];
-    const name = document.createElement('span'); name.textContent = run.displayName || run.uid;
-    name.style.color = colors[run.uid];
-    item.append(dot, name);
-    wrap.appendChild(item);
-  }
-  holder.appendChild(wrap);
-}
-
-function bukBoardBuzzTable(holder, runs, questions, colors) {
-  const title = document.createElement('h3');
-  title.className = 'text-xs font-mono font-black text-slate-300 uppercase tracking-widest mb-2';
-  title.textContent = 'Buzz words per question';
-  holder.appendChild(title);
-  const scroll = document.createElement('div');
-  scroll.className = 'overflow-x-auto border border-borderDark rounded-xl';
-  const table = document.createElement('table');
-  table.className = 'w-full text-left text-xs font-mono';
-  const thead = document.createElement('thead');
-  const headRow = document.createElement('tr');
-  const qHead = document.createElement('th');
-  qHead.className = 'px-3 py-2 text-slate-500'; qHead.textContent = 'Q';
-  headRow.appendChild(qHead);
-  for (const run of runs) {
-    const th = document.createElement('th');
-    th.className = 'px-3 py-2'; th.style.color = colors[run.uid];
-    th.textContent = run.displayName || run.uid;
-    headRow.appendChild(th);
-  }
-  thead.appendChild(headRow); table.appendChild(thead);
-  const tbody = document.createElement('tbody');
-  questions.forEach((question, qIndex) => {
-    const tr = document.createElement('tr');
-    tr.className = 'border-t border-borderDark';
-    const qCell = document.createElement('td');
-    qCell.className = 'px-3 py-2 text-slate-500'; qCell.textContent = `Q${qIndex + 1}`;
-    tr.appendChild(qCell);
-    for (const run of runs) {
-      const td = document.createElement('td');
-      td.className = 'px-3 py-2';
-      const rec = (run.questions || []).find((r) => r.qIndex === qIndex && r.phase !== 'bonus');
-      const record = rec || (run.questions || []).find((r) => r.qIndex === qIndex);
-      if (record && record.buzzWord) {
-        const word = document.createElement('span');
-        word.textContent = record.buzzWord;
-        word.style.color = record.verdict === 'auto-correct' ? '#00ff66' : '#ff6b6b';
-        const idx = document.createElement('span');
-        idx.className = 'text-slate-500 text-[10px]';
-        idx.textContent = ` #${record.buzzWordIndex + 1}`;
-        td.append(word, idx);
-      } else {
-        const none = document.createElement('span');
-        none.className = 'text-slate-600'; none.textContent = '\u2014';
-        td.appendChild(none);
-      }
-      tr.appendChild(td);
-    }
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  scroll.appendChild(table);
-  holder.appendChild(scroll);
-}
-
-// The at-a-glance view: the question text once, each member's buzz word in their colour.
-function bukBoardBuzzLines(holder, runs, questions, colors) {
-  const title = document.createElement('h3');
-  title.className = 'text-xs font-mono font-black text-slate-300 uppercase tracking-widest mt-6 mb-2';
-  title.textContent = 'Buzz line view';
-  holder.appendChild(title);
-  questions.forEach((question, qIndex) => {
-    const words = buzzTokenizeWords(question.tossup_text || '');
-    const perWord = {};
-    for (const run of runs) {
-      const record = (run.questions || []).find((r) => r.qIndex === qIndex);
-      if (record && typeof record.buzzWordIndex === 'number' && record.buzzWordIndex >= 0) {
-        const list = perWord[record.buzzWordIndex] || (perWord[record.buzzWordIndex] = []);
-        list.push({ run, record });
-      }
-    }
-    const block = document.createElement('div');
-    block.className = 'mb-4 border border-borderDark rounded-xl p-3';
-    const label = document.createElement('p');
-    label.className = 'text-[10px] font-mono text-slate-500 mb-1';
-    label.textContent = `Q${qIndex + 1} \u2022 ${bukSubjectFor(question.category)} \u2022 answer: ${question.tossup_answer || ''}`;
-    block.appendChild(label);
-    const line = document.createElement('p');
-    line.className = 'text-sm font-sans leading-relaxed text-slate-300';
-    words.forEach((word, wordIndex) => {
-      const span = document.createElement('span');
-      span.textContent = `${word.word} `;
-      const hits = perWord[wordIndex];
-      if (hits && hits.length) {
-        span.style.color = colors[hits[0].run.uid];
-        span.style.fontWeight = '900';
-        span.style.borderBottom = `2px solid ${colors[hits[0].run.uid]}`;
-        span.title = hits.map((h) => `${h.run.displayName}: ${h.record.verdict}`).join(', ');
-      }
-      line.appendChild(span);
-    });
-    block.appendChild(line);
-    holder.appendChild(block);
-  });
-}
-
-function bukBoardDepth(holder, runs, colors) {
-  const title = document.createElement('h3');
-  title.className = 'text-xs font-mono font-black text-slate-300 uppercase tracking-widest mt-6 mb-2';
-  title.textContent = 'Buzz depth per member';
-  holder.appendChild(title);
-  const wrap = document.createElement('div');
-  wrap.className = 'grid grid-cols-2 md:grid-cols-4 gap-3';
-  for (const run of runs) {
-    const recs = (run.questions || []).filter((r) => typeof r.buzzWordIndex === 'number' && r.totalWords);
-    let medianShare = null;
-    if (recs.length) {
-      const shares = recs.map((r) => (r.buzzWordIndex + 1) / r.totalWords).sort((a, b) => a - b);
-      medianShare = shares[Math.floor(shares.length / 2)];
-    }
-    const early = recs.filter((r) => r.totalWords && (r.buzzWordIndex + 1) / r.totalWords <= 0.25).length;
-    const card = document.createElement('div');
-    card.className = 'bg-black border border-borderDark rounded-xl p-3';
-    const name = document.createElement('p');
-    name.className = 'text-xs font-mono font-bold mb-1';
-    name.style.color = colors[run.uid];
-    name.textContent = run.displayName || run.uid;
-    const depth = document.createElement('p');
-    depth.className = 'text-lg font-mono font-black text-slate-100';
-    depth.textContent = medianShare == null ? '\u2014' : `${Math.round(medianShare * 100)}% in`;
-    const sub = document.createElement('p');
-    sub.className = 'text-[10px] font-mono text-slate-500';
-    sub.textContent = `${early} buzz in first quarter of ${recs.length}`;
-    card.append(name, depth, sub);
-    wrap.appendChild(card);
-  }
-  holder.appendChild(wrap);
-}
-
-function bukBoardSubjects(holder, runs) {
-  const title = document.createElement('h3');
-  title.className = 'text-xs font-mono font-black text-slate-300 uppercase tracking-widest mt-6 mb-2';
-  title.textContent = 'Accuracy by subject';
-  holder.appendChild(title);
-  const subjects = new Set();
-  for (const run of runs) {
-    for (const r of run.questions || []) subjects.add(r.subject || bukSubjectFor(r.category));
-  }
-  const scroll = document.createElement('div');
-  scroll.className = 'overflow-x-auto border border-borderDark rounded-xl';
-  const table = document.createElement('table');
-  table.className = 'w-full text-left text-xs font-mono';
-  const thead = document.createElement('thead');
-  const hr = document.createElement('tr');
-  const sh = document.createElement('th'); sh.className = 'px-3 py-2 text-slate-500'; sh.textContent = 'Subject';
-  hr.appendChild(sh);
-  for (const run of runs) {
-    const th = document.createElement('th'); th.className = 'px-3 py-2 text-slate-400';
-    th.textContent = run.displayName || run.uid;
-    hr.appendChild(th);
-  }
-  thead.appendChild(hr); table.appendChild(thead);
-  const tbody = document.createElement('tbody');
-  for (const subject of [...subjects].sort()) {
-    const tr = document.createElement('tr'); tr.className = 'border-t border-borderDark';
-    const td0 = document.createElement('td'); td0.className = 'px-3 py-2 text-slate-300'; td0.textContent = subject;
-    tr.appendChild(td0);
-    for (const run of runs) {
-      const recs = (run.questions || []).filter((r) => (r.subject || bukSubjectFor(r.category)) === subject && r.verdict);
-      const correct = recs.filter((r) => r.verdict === 'auto-correct').length;
-      const td = document.createElement('td'); td.className = 'px-3 py-2';
-      td.textContent = recs.length ? `${correct}/${recs.length}` : '\u2014';
-      tr.appendChild(td);
-    }
-    tbody.appendChild(tr);
-  }
-  table.appendChild(tbody);
-  scroll.appendChild(table);
-  holder.appendChild(scroll);
-}
-
-// The coaching punchline: buzzed early and wrong.
-function bukBoardEarlyWrong(holder, runs, questions) {
-  const title = document.createElement('h3');
-  title.className = 'text-xs font-mono font-black text-slate-300 uppercase tracking-widest mt-6 mb-2';
-  title.textContent = 'Early and wrong';
-  holder.appendChild(title);
-  const list = document.createElement('div');
-  list.className = 'space-y-1';
-  let count = 0;
+// One flat row per toss-up attempt, carrying enough of the packet that the Analytics
+// buzzboard view can rebuild the highlighted question cards and the player matrix.
+function bukBoardCsvRows(runs, questions) {
+  const rows = [[
+    'Q_Num', 'Subject', 'Category', 'Type', 'QuestionText', 'Answer', 'Member',
+    'BuzzWord', 'BuzzWordIndex', 'BuzzDepthPct', 'WordsHeard', 'TotalWords',
+    'CaptureSource', 'ReactionSeconds', 'TypedAnswer', 'Verdict', 'BonusVerdict',
+  ]];
   for (const run of runs) {
     for (const r of run.questions || []) {
-      if (r.verdict !== 'auto-wrong' || typeof r.buzzWordIndex !== 'number' || !r.totalWords) continue;
-      const share = (r.buzzWordIndex + 1) / r.totalWords;
-      if (share > 0.35) continue;
-      count += 1;
-      const row = document.createElement('div');
-      row.className = 'flex items-center gap-2 text-xs font-mono text-slate-300 border border-borderDark rounded-lg px-3 py-2';
-      const who = document.createElement('span'); who.className = 'text-neonAmber font-bold'; who.textContent = run.displayName || run.uid;
-      const at = document.createElement('span'); at.className = 'text-slate-500'; at.textContent = `Q${r.qIndex + 1} buzzed on`;
-      const w = document.createElement('span'); w.className = 'text-neonCyan font-bold'; w.textContent = `"${r.buzzWord}"`;
-      const pos = document.createElement('span'); pos.className = 'text-slate-500'; pos.textContent = `word ${r.buzzWordIndex + 1}/${r.totalWords} \u2014 wrong`;
-      row.append(who, at, w, pos);
-      list.appendChild(row);
+      const question = questions[r.qIndex] || {};
+      const depth = (typeof r.buzzWordIndex === 'number' && r.totalWords)
+        ? Math.round(((r.buzzWordIndex + 1) / r.totalWords) * 100)
+        : '';
+      rows.push([
+        r.qIndex + 1,
+        r.subject || bukSubjectFor(r.category),
+        r.category || question.category || '',
+        r.type || question.type || '',
+        question.tossup_text || '',
+        question.tossup_answer || '',
+        run.displayName || run.uid,
+        r.buzzWord == null ? '' : r.buzzWord,
+        r.buzzWordIndex == null ? '' : r.buzzWordIndex + 1,
+        depth,
+        r.wordsHeard == null ? '' : r.wordsHeard,
+        r.totalWords == null ? '' : r.totalWords,
+        r.captureSource || '',
+        r.reactionSeconds == null ? '' : r.reactionSeconds,
+        r.typedAnswer || '',
+        r.verdict || '',
+        r.bonusVerdict || '',
+      ]);
     }
   }
-  if (!count) {
-    const none = document.createElement('p');
-    none.className = 'text-xs font-mono text-slate-500';
-    none.textContent = 'No early-and-wrong buzzes.';
-    list.appendChild(none);
-  }
-  holder.appendChild(list);
+  return rows;
 }
 
-function bukBoardBonus(holder, runs) {
-  const title = document.createElement('h3');
-  title.className = 'text-xs font-mono font-black text-slate-300 uppercase tracking-widest mt-6 mb-2';
-  title.textContent = 'Bonus axis';
-  holder.appendChild(title);
-  const wrap = document.createElement('div');
-  wrap.className = 'grid grid-cols-2 md:grid-cols-4 gap-3';
-  for (const run of runs) {
-    const bonuses = (run.questions || []).filter((r) => r.bonusVerdict);
-    const earned = bonuses.length;
-    const correct = bonuses.filter((r) => r.bonusVerdict === 'auto-correct').length;
-    const expired = bonuses.filter((r) => r.bonusExpired).length;
-    const card = document.createElement('div');
-    card.className = 'bg-black border border-borderDark rounded-xl p-3';
-    const name = document.createElement('p');
-    name.className = 'text-xs font-mono font-bold text-slate-300 mb-1';
-    name.textContent = run.displayName || run.uid;
-    const line = document.createElement('p');
-    line.className = 'text-sm font-mono text-slate-100';
-    line.textContent = `${correct}/${earned} bonus right`;
-    const sub = document.createElement('p');
-    sub.className = 'text-[10px] font-mono text-slate-500';
-    sub.textContent = `${expired} timed out at 20s`;
-    card.append(name, line, sub);
-    wrap.appendChild(card);
-  }
-  holder.appendChild(wrap);
+function bukBoardCsvText(runs, questions) {
+  const rows = bukBoardCsvRows(runs, questions);
+  return rows.map((row) => row.map((cell) => {
+    let value = String(cell);
+    // A leading =, +, - or @ makes a spreadsheet treat the cell as a formula.
+    if (/^[=+\-@\t\r]/.test(value)) value = `'${value}`;
+    return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  }).join(',')).join('\n');
 }
 
 function bukBoardCsvButton(holder, runs, questions) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mt-4 flex flex-wrap items-center gap-3';
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'mt-6 px-5 py-3 bg-black border border-neonCyan text-neonCyan text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition';
-  btn.textContent = 'Export CSV';
+  btn.className = 'px-5 py-3 bg-black border border-neonCyan text-neonCyan text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition';
+  btn.textContent = 'Download CSV';
   btn.addEventListener('click', () => {
-    const rows = [['Q_Num', 'Subject', 'Member', 'BuzzWord', 'BuzzWordIndex', 'WordsHeard', 'TotalWords', 'CaptureSource', 'ReactionSeconds', 'TypedAnswer', 'Verdict', 'BonusVerdict']];
-    for (const run of runs) {
-      for (const r of run.questions || []) {
-        rows.push([
-          r.qIndex + 1, r.subject || bukSubjectFor(r.category), run.displayName || run.uid,
-          r.buzzWord == null ? '' : r.buzzWord,
-          r.buzzWordIndex == null ? '' : r.buzzWordIndex + 1,
-          r.wordsHeard == null ? '' : r.wordsHeard,
-          r.totalWords == null ? '' : r.totalWords,
-          r.captureSource || '',
-          r.reactionSeconds == null ? '' : r.reactionSeconds,
-          r.typedAnswer || '', r.verdict || '', r.bonusVerdict || '',
-        ]);
-      }
-    }
-    const csv = rows.map((row) => row.map((cell) => {
-      const value = String(cell);
-      return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-    }).join(',')).join('\n');
+    const csv = bukBoardCsvText(runs, questions);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'buzzpoint-board.csv';
+    a.href = url; a.download = 'buzzboard.csv';
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   });
-  holder.appendChild(btn);
+  const note = document.createElement('p');
+  note.className = 'text-[11px] font-mono text-slate-500';
+  note.textContent = 'buzzboard.csv \u2014 upload it in Analytics \u2192 Buzzboard CSV for the full breakdown.';
+  wrap.append(btn, note);
+  holder.appendChild(wrap);
 }
-
 // ============================================================
 // 7. WIRING
 // ============================================================

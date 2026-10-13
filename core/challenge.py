@@ -21,8 +21,18 @@ from core.subjects import subject_for
 _ANSWER_FIELDS = {"tossup_answer", "bonus_answer"}
 
 
-def create_run_doc(code, uid, display_name, question_count, now_iso):
-    """The single run document a member claims. Creating it is what locks the attempt."""
+def create_run_doc(code, uid, display_name, question_count, now_iso, *,
+                   read_bonuses=True, display_mode="hybrid"):
+    """The single run document a member claims. Creating it is what locks the attempt.
+
+    The challenge's two pacing settings travel with the run so both the server's advance
+    and the member's delivery read them from one place:
+
+        readBonuses  when false, a correct toss-up advances to the next toss-up — no
+                     bonus is ever served, answered or scored
+        displayMode  "hybrid" shows the words as they are spoken; "audio-only" hides
+                     them and leaves the progress bar as the only progress signal
+    """
     return {
         "challengeCode": code,
         "uid": uid,
@@ -33,6 +43,8 @@ def create_run_doc(code, uid, display_name, question_count, now_iso):
         "cursor": 0,
         "phase": "tossup",
         "status": "in_progress",
+        "readBonuses": bool(read_bonuses),
+        "displayMode": "audio-only" if display_mode == "audio-only" else "hybrid",
         "questions": [],
     }
 
@@ -88,6 +100,9 @@ def next_question_payload(bank, run):
         "category": bank[cursor].get("category", ""),
         "subject": subject_for(bank[cursor].get("category")),
         "type": bank[cursor].get("type", ""),
+        # The member's delivery honours the settings the captain chose at creation.
+        "displayMode": run.get("displayMode", "hybrid"),
+        "readBonuses": bool(run.get("readBonuses", True)),
     })
     return payload
 
@@ -138,8 +153,12 @@ def _close_if_done(run, total, now_iso):
 
 
 def advance_after_tossup(run, correct, total, now_iso):
-    """A correct toss-up earns the bonus on the same question; otherwise move on."""
-    if correct:
+    """A correct toss-up earns the bonus on the same question; otherwise move on.
+
+    When the challenge has bonuses switched off, a correct toss-up moves on exactly like a
+    wrong one: the bonus phase is never entered, so no bonus is served or scored.
+    """
+    if correct and run.get("readBonuses", True):
         run["phase"] = "bonus"
     else:
         run["cursor"] = int(run.get("cursor", 0)) + 1

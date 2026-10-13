@@ -179,10 +179,96 @@ class BoardRenderingSafetyTests(unittest.TestCase):
         self.assertIn("textContent", BUZZPOINT_SOURCE)
         self.assertIn("createElement", BUZZPOINT_SOURCE)
 
-    def test_the_buzz_line_view_is_present(self):
-        self.assertIn("function bukBoardBuzzLines(", BUZZPOINT_SOURCE)
-        self.assertIn("function bukBoardBuzzTable(", BUZZPOINT_SOURCE)
-        self.assertIn("function bukBoardEarlyWrong(", BUZZPOINT_SOURCE)
+    def test_the_buzzboard_analytics_view_renders_imported_values_as_text(self):
+        # An uploaded board CSV is untrusted too: it is text, never markup.
+        source = (ROOT / "static/js/buzzboard_analytics.js").read_text(encoding="utf-8")
+        self.assertNotIn("innerHTML", source)
+        self.assertIn("textContent", source)
+        self.assertIn("createElement", source)
+
+    def test_the_buzz_line_view_moved_from_the_board_to_analytics(self):
+        """The board exports data; the analysis lives in the Analytics station.
+
+        The board used to draw buzz depth, subject accuracy and early-and-wrong charts in
+        place. It now only downloads its CSV, and the Analytics station reads that CSV back
+        into the question-buzzpoint view and the candidate matrix \u2014 so those views are
+        pinned in static/js/buzzboard_analytics.js instead.
+        """
+        self.assertIn("function bukBoardCsvRows(", BUZZPOINT_SOURCE)
+        self.assertNotIn("bukBoardBuzzTable(", BUZZPOINT_SOURCE)
+        self.assertNotIn("bukBoardEarlyWrong(", BUZZPOINT_SOURCE)
+        source = (ROOT / "static/js/buzzboard_analytics.js").read_text(encoding="utf-8")
+        self.assertIn("function bbxRenderQuestions(", source)
+        self.assertIn("function bbxRenderMatrix(", source)
+        self.assertIn("function bbxRenderHud(", source)
+        self.assertIn("function parseCSVRows(csvText)",
+                      (ROOT / "static/js/analytics.js").read_text(encoding="utf-8"))
+        self.assertIn("parseCSVRows(csvText)", source)
+
+
+class BoardExportTests(unittest.TestCase):
+    def test_the_export_carries_the_packet_so_analytics_can_rebuild_the_cards(self):
+        # One row per attempt, with the question text, its answer, the category and the
+        # word position \u2014 enough to redraw the highlighted question cards and the matrix.
+        for column in ("QuestionText", "Answer", "Category", "BuzzWordIndex", "BuzzDepthPct"):
+            self.assertIn(f"'{column}'", BUZZPOINT_SOURCE)
+
+    def test_the_download_refuses_to_export_spreadsheet_formulas(self):
+        self.assertIn("/^[=+\\-@\\t\\r]/", BUZZPOINT_SOURCE)
+
+
+class ChallengeSettingsTests(unittest.TestCase):
+    def test_a_correct_tossup_skips_the_bonus_when_bonuses_are_off(self):
+        run = challenge.create_run_doc("c", "u", "n", 2, "now", read_bonuses=False)
+        challenge.advance_after_tossup(run, True, 2, "now")
+        self.assertEqual(run["phase"], "tossup")
+        self.assertEqual(run["cursor"], 1)
+
+    def test_bonuses_still_follow_a_correct_tossup_when_they_are_on(self):
+        run = challenge.create_run_doc("c", "u", "n", 2, "now")
+        challenge.advance_after_tossup(run, True, 2, "now")
+        self.assertEqual(run["phase"], "bonus")
+
+    def test_the_display_mode_travels_with_every_served_question(self):
+        bank = [{"tossup_text": "q"}]
+        run = challenge.create_run_doc("c", "u", "n", 1, "now", display_mode="audio-only")
+        payload = challenge.next_question_payload(bank, run)
+        self.assertEqual(payload["displayMode"], "audio-only")
+        self.assertTrue(payload["readBonuses"])
+
+    def test_bonuses_off_travels_with_every_served_question(self):
+        bank = [{"tossup_text": "q"}]
+        run = challenge.create_run_doc("c", "u", "n", 1, "now", read_bonuses=False)
+        self.assertFalse(challenge.next_question_payload(bank, run)["readBonuses"])
+
+    def test_the_challenge_stores_the_settings_the_captain_chose(self):
+        self.assertIn('"readBonuses": read_bonuses', CHALLENGE_SERVICE_SOURCE)
+        self.assertIn('"displayMode": display_mode', CHALLENGE_SERVICE_SOURCE)
+        self.assertIn('read_bonuses=data.get("readBonuses", True)', UI_SERVICE_SOURCE)
+        self.assertIn('display_mode=data.get("displayMode", "hybrid")', UI_SERVICE_SOURCE)
+
+    def test_audio_only_hides_the_words_but_keeps_the_progress_bar(self):
+        self.assertIn("bukRun.displayMode === 'audio-only'", BUZZPOINT_SOURCE)
+        self.assertIn("Reading question", BUZZPOINT_SOURCE)
+
+    def test_the_captain_sets_both_settings_when_creating_the_challenge(self):
+        self.assertIn('id="buk-captain-bonuses"', INDEX_SOURCE)
+        self.assertIn('id="buk-captain-display"', INDEX_SOURCE)
+        self.assertIn("readBonuses, displayMode", BUZZPOINT_SOURCE)
+
+
+class BuzzboardAnalyticsShellTests(unittest.TestCase):
+    def test_the_analytics_station_offers_both_data_sources(self):
+        self.assertIn('id="analytics-tab-match"', INDEX_SOURCE)
+        self.assertIn('id="analytics-tab-buzzboard"', INDEX_SOURCE)
+        self.assertIn("<script src=\"/static/js/buzzboard_analytics.js\"></script>", INDEX_SOURCE)
+
+    def test_the_buzzboard_view_has_the_two_pages(self):
+        self.assertIn('id="bbx-page-questions"', INDEX_SOURCE)
+        self.assertIn('id="bbx-page-numbers"', INDEX_SOURCE)
+        self.assertIn('id="bbx-hud"', INDEX_SOURCE)
+        self.assertIn('id="bbx-questions-container"', INDEX_SOURCE)
+        self.assertIn('id="bbx-matrix"', INDEX_SOURCE)
 
 
 class AttemptLockTests(unittest.TestCase):

@@ -1,0 +1,1260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Science Bowl Tryouts — Minimalist Captain Matrix & Draft</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter, Newsreader, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            app: {
+              bg: '#FAF8F5',
+              card: '#FDFBF7',
+              border: '#E2DDD6',
+              borderLight: '#ECE7DF',
+              darkTooltip: '#333230',
+              team1: '#2563EB',      /* Blue (Team 1) */
+              team1Light: '#EFF6FF',
+              team1Border: '#93C5FD',
+              team2: '#DC2626',      /* Red (Team 2) */
+              team2Light: '#FEF2F2',
+              team2Border: '#FCA5A5',
+              team3: '#16A34A',      /* Green (Team 3) */
+              team3Light: '#F0FDF4',
+              team3Border: '#86EFAC'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+            serif: ['Newsreader', 'Georgia', 'serif']
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #FAF8F5;
+      color: #1C1917;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .stat-header {
+      border-bottom: 1.5px dotted #9CA3AF;
+      letter-spacing: 0.05em;
+      cursor: help;
+      text-transform: uppercase;
+      font-size: 10px;
+      font-weight: 500;
+      color: #78716C;
+      display: inline-block;
+      padding-bottom: 1px;
+    }
+
+    /* Buzzpoint Highlighting matching screenshot */
+    .buzz-neg {
+      background-color: #F8D7DA;
+      border-bottom: 2.5px solid #DC2626;
+      border-radius: 2px;
+      padding: 0 3px;
+      margin: 0 1px;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.12s ease;
+      display: inline-block;
+      color: #1C1917;
+    }
+    .buzz-neg:hover, .buzz-neg.is-active {
+      background-color: #F5B7B1;
+      outline: 2px solid #DC2626;
+      z-index: 20;
+    }
+
+    .buzz-correct {
+      background-color: #D1E7DD;
+      border-bottom: 2.5px solid #16A34A;
+      border-radius: 2px;
+      padding: 0 3px;
+      margin: 0 1px;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.12s ease;
+      display: inline-block;
+      color: #1C1917;
+    }
+    .buzz-correct:hover, .buzz-correct.is-active {
+      background-color: #BBF7D0;
+      outline: 2px solid #16A34A;
+      z-index: 20;
+    }
+
+    .buzz-dimmed {
+      opacity: 0.25 !important;
+      border-bottom-style: dotted !important;
+      filter: grayscale(0.7);
+    }
+
+    /* Dark Tooltip Popover matching screenshot */
+    #buzz-tooltip {
+      position: absolute;
+      z-index: 1000;
+      background: #333230;
+      color: #FFFFFF;
+      border-radius: 4px;
+      box-shadow: 0 8px 24px -2px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      transition: opacity 0.12s ease;
+      width: 250px;
+    }
+    #buzz-tooltip::before {
+      content: '';
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border-width: 5px;
+      border-style: solid;
+      border-color: transparent transparent #333230 transparent;
+    }
+    #buzz-tooltip.arrow-bottom::before {
+      bottom: auto;
+      top: 100%;
+      border-color: #333230 transparent transparent transparent;
+    }
+
+    /* AoE2 Team Cycle Badges */
+    .aoe-badge {
+      transition: transform 0.08s ease, background-color 0.12s ease;
+      user-select: none;
+    }
+    .aoe-badge:active {
+      transform: scale(0.92);
+    }
+
+    /* Progress bar transitions */
+    .progress-bar-fill {
+      transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    ::-webkit-scrollbar {
+      height: 5px;
+      width: 5px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #D8D2C7;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased text-[#1C1917]">
+
+  <!-- FLOATING BUZZ TOOLTIP (Exact screenshot fidelity) -->
+  <div id="buzz-tooltip" class="hidden opacity-0 p-3 text-xs font-sans">
+    <div class="flex items-center space-x-1.5 mb-1">
+      <span class="inline-block w-2.5 h-2.5 rotate-45 border" id="tt-icon"></span>
+      <span class="font-bold text-white tracking-wide" id="tt-player">simon</span>
+      <span class="px-1.5 py-0.2 rounded text-[10px] font-semibold tracking-wider uppercase ml-1" id="tt-tag">Neg</span>
+    </div>
+    <div class="text-[#A8A29E] text-[10.5px] mb-2 font-mono" id="tt-sub">SMH 2026 · 2026-10-04</div>
+    <div class="border-t border-[#4E4A4A] pt-2 space-y-1 text-[11px]">
+      <div class="flex justify-between">
+        <span class="text-[#9CA3AF]">Given Answer:</span>
+        <span class="text-white font-mono font-medium truncate max-w-[130px]" id="tt-given">neural crest</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-[#9CA3AF]">Buzz Position:</span>
+        <span class="text-amber-300 font-mono" id="tt-depth">42% (Word 14)</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-[#9CA3AF]">Point Impact:</span>
+        <span class="font-bold" id="tt-points">-5 pts</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- STICKY TOP DOCK: TEAMS HUD & EXPANDED PERCENT COVERAGE BARS -->
+  <header class="sticky top-0 z-40 bg-[#FAF8F5]/98 border-b border-[#E2DDD6] backdrop-blur-xs px-4 py-2.5">
+    <div class="max-w-7xl mx-auto space-y-2">
+      
+      <!-- Top Row: Title, Tab Switcher & Global Actions -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div class="flex items-center space-x-3">
+          <span class="font-bold text-xs tracking-tight uppercase text-stone-900 font-mono bg-stone-200/90 px-2 py-0.5 rounded">Scibowl Draft</span>
+          <span class="text-stone-300 text-xs">/</span>
+          
+          <div class="inline-flex p-0.5 bg-[#EBE5DB] rounded text-xs font-medium">
+            <button id="tab-btn-matrix" onclick="switchMainTab('matrix')" class="px-2.5 py-1 rounded bg-white text-stone-950 font-semibold shadow-2xs transition">
+              Candidate Matrix (28)
+            </button>
+            <button id="tab-btn-questions" onclick="switchMainTab('questions')" class="px-2.5 py-1 rounded text-stone-600 hover:text-stone-900 transition">
+              Question Buzzpoints
+            </button>
+          </div>
+
+          <span class="text-[11px] text-stone-400 hidden xl:inline font-mono">
+            [Click badge: T1 → T2 → T3 → Clear]
+          </span>
+        </div>
+
+        <div class="flex items-center space-x-2 text-xs">
+          <button onclick="toggleCoverageDetails()" id="coverage-toggle-btn" class="text-stone-600 hover:text-stone-900 font-mono text-[11px] px-2 py-1 rounded border border-[#E2DDD6] bg-white transition flex items-center space-x-1">
+            <span id="coverage-toggle-text">Coverage Meters</span>
+            <span id="coverage-toggle-icon">▾</span>
+          </button>
+          <button onclick="clearAllTeams()" class="text-stone-400 hover:text-stone-700 text-[11px] px-1.5 py-1 rounded transition" title="Clear all team assignments">
+            Reset All
+          </button>
+          <button onclick="exportRosters()" class="bg-stone-900 hover:bg-stone-800 text-white font-medium text-[11px] px-2.5 py-1 rounded transition">
+            Export Rosters
+          </button>
+        </div>
+      </div>
+
+      <!-- Bottom Row: 3 Team Cards with Animated Percent Coverage Bars -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+        
+        <!-- TEAM 1 (BLUE) -->
+        <div id="hud-card-t1" class="border border-blue-200 bg-blue-50/50 rounded-md p-2 transition-all">
+          <div class="flex items-center justify-between mb-1.5">
+            <div class="flex items-center space-x-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+              <span class="font-bold text-xs text-blue-950 font-mono tracking-tight">TEAM 1 (BLUE)</span>
+              <span id="t1-count-badge" class="text-[11px] font-mono font-semibold text-blue-700">(0/4)</span>
+            </div>
+            <div class="flex items-center space-x-1">
+              <span id="t1-pct-label" class="font-mono text-xs font-bold text-blue-900">0%</span>
+              <span class="text-[10px] text-blue-600/80 font-mono uppercase">cov</span>
+            </div>
+          </div>
+
+          <!-- Overall Coverage Bar -->
+          <div class="w-full bg-blue-200/60 rounded-full h-1.5 overflow-hidden">
+            <div id="t1-overall-bar" class="progress-bar-fill h-full bg-blue-600 rounded-full" style="width: 0%;"></div>
+          </div>
+
+          <!-- Per-Subject Mini Coverage Meters (Collapsible or compact view) -->
+          <div id="t1-sub-meters" class="grid grid-cols-5 gap-1 pt-2">
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">BIO</span>
+              <div class="w-full bg-blue-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t1-sub-bio" class="progress-bar-fill h-full bg-blue-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t1-sub-bio-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">CHM</span>
+              <div class="w-full bg-blue-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t1-sub-chem" class="progress-bar-fill h-full bg-blue-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t1-sub-chem-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">PHY</span>
+              <div class="w-full bg-blue-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t1-sub-phys" class="progress-bar-fill h-full bg-blue-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t1-sub-phys-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">MTH</span>
+              <div class="w-full bg-blue-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t1-sub-math" class="progress-bar-fill h-full bg-blue-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t1-sub-math-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">ESS</span>
+              <div class="w-full bg-blue-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t1-sub-ess" class="progress-bar-fill h-full bg-blue-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t1-sub-ess-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+          </div>
+
+          <!-- Status badge / missing alert -->
+          <div class="mt-1.5 flex items-center justify-between text-[10px] font-mono pt-1 border-t border-blue-200/60">
+            <span id="t1-roster-names" class="text-blue-900/80 truncate max-w-[190px]">None assigned</span>
+            <span id="t1-alert-badge" class="px-1 py-0.2 rounded text-[9.5px] font-medium bg-blue-100 text-blue-800">4 open</span>
+          </div>
+        </div>
+
+        <!-- TEAM 2 (RED) -->
+        <div id="hud-card-t2" class="border border-red-200 bg-red-50/50 rounded-md p-2 transition-all">
+          <div class="flex items-center justify-between mb-1.5">
+            <div class="flex items-center space-x-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-red-600"></span>
+              <span class="font-bold text-xs text-red-950 font-mono tracking-tight">TEAM 2 (RED)</span>
+              <span id="t2-count-badge" class="text-[11px] font-mono font-semibold text-red-700">(0/4)</span>
+            </div>
+            <div class="flex items-center space-x-1">
+              <span id="t2-pct-label" class="font-mono text-xs font-bold text-red-900">0%</span>
+              <span class="text-[10px] text-red-600/80 font-mono uppercase">cov</span>
+            </div>
+          </div>
+
+          <!-- Overall Coverage Bar -->
+          <div class="w-full bg-red-200/60 rounded-full h-1.5 overflow-hidden">
+            <div id="t2-overall-bar" class="progress-bar-fill h-full bg-red-600 rounded-full" style="width: 0%;"></div>
+          </div>
+
+          <!-- Per-Subject Mini Coverage Meters -->
+          <div id="t2-sub-meters" class="grid grid-cols-5 gap-1 pt-2">
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">BIO</span>
+              <div class="w-full bg-red-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t2-sub-bio" class="progress-bar-fill h-full bg-red-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t2-sub-bio-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">CHM</span>
+              <div class="w-full bg-red-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t2-sub-chem" class="progress-bar-fill h-full bg-red-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t2-sub-chem-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">PHY</span>
+              <div class="w-full bg-red-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t2-sub-phys" class="progress-bar-fill h-full bg-red-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t2-sub-phys-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">MTH</span>
+              <div class="w-full bg-red-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t2-sub-math" class="progress-bar-fill h-full bg-red-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t2-sub-math-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">ESS</span>
+              <div class="w-full bg-red-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t2-sub-ess" class="progress-bar-fill h-full bg-red-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t2-sub-ess-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+          </div>
+
+          <!-- Status badge / missing alert -->
+          <div class="mt-1.5 flex items-center justify-between text-[10px] font-mono pt-1 border-t border-red-200/60">
+            <span id="t2-roster-names" class="text-red-900/80 truncate max-w-[190px]">None assigned</span>
+            <span id="t2-alert-badge" class="px-1 py-0.2 rounded text-[9.5px] font-medium bg-red-100 text-red-800">4 open</span>
+          </div>
+        </div>
+
+        <!-- TEAM 3 (GREEN) -->
+        <div id="hud-card-t3" class="border border-green-200 bg-green-50/50 rounded-md p-2 transition-all">
+          <div class="flex items-center justify-between mb-1.5">
+            <div class="flex items-center space-x-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-green-600"></span>
+              <span class="font-bold text-xs text-green-950 font-mono tracking-tight">TEAM 3 (GREEN)</span>
+              <span id="t3-count-badge" class="text-[11px] font-mono font-semibold text-green-700">(0/4)</span>
+            </div>
+            <div class="flex items-center space-x-1">
+              <span id="t3-pct-label" class="font-mono text-xs font-bold text-green-900">0%</span>
+              <span class="text-[10px] text-green-600/80 font-mono uppercase">cov</span>
+            </div>
+          </div>
+
+          <!-- Overall Coverage Bar -->
+          <div class="w-full bg-green-200/60 rounded-full h-1.5 overflow-hidden">
+            <div id="t3-overall-bar" class="progress-bar-fill h-full bg-green-600 rounded-full" style="width: 0%;"></div>
+          </div>
+
+          <!-- Per-Subject Mini Coverage Meters -->
+          <div id="t3-sub-meters" class="grid grid-cols-5 gap-1 pt-2">
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">BIO</span>
+              <div class="w-full bg-green-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t3-sub-bio" class="progress-bar-fill h-full bg-green-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t3-sub-bio-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">CHM</span>
+              <div class="w-full bg-green-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t3-sub-chem" class="progress-bar-fill h-full bg-green-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t3-sub-chem-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">PHY</span>
+              <div class="w-full bg-green-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t3-sub-phys" class="progress-bar-fill h-full bg-green-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t3-sub-phys-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">MTH</span>
+              <div class="w-full bg-green-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t3-sub-math" class="progress-bar-fill h-full bg-green-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t3-sub-math-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-[9px] font-mono text-stone-500 uppercase">ESS</span>
+              <div class="w-full bg-green-200/50 h-1 rounded-full overflow-hidden mt-0.5">
+                <div id="t3-sub-ess" class="progress-bar-fill h-full bg-green-600 rounded-full" style="width: 0%;"></div>
+              </div>
+              <span id="t3-sub-ess-txt" class="text-[8.5px] font-mono text-stone-400 mt-0.5">0%</span>
+            </div>
+          </div>
+
+          <!-- Status badge / missing alert -->
+          <div class="mt-1.5 flex items-center justify-between text-[10px] font-mono pt-1 border-t border-green-200/60">
+            <span id="t3-roster-names" class="text-green-900/80 truncate max-w-[190px]">None assigned</span>
+            <span id="t3-alert-badge" class="px-1 py-0.2 rounded text-[9.5px] font-medium bg-green-100 text-green-800">4 open</span>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </header>
+
+  <!-- MAIN VIEWPORT -->
+  <main class="max-w-7xl mx-auto px-4 py-3 flex-1 w-full space-y-4">
+
+    <!-- TAB 1: MINIMALIST CANDIDATE MATRIX (28 SPECIALISTS) -->
+    <div id="panel-matrix" class="space-y-2.5">
+      
+      <!-- Filter and search ribbon -->
+      <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+        
+        <!-- Subject tabs (Specialist sorting) -->
+        <div class="inline-flex rounded border border-[#E2DDD6] bg-white p-0.5 text-stone-600 text-xs">
+          <button onclick="setSubjectFilter('ALL')" class="sub-filter-btn px-2.5 py-1 rounded bg-stone-900 text-white font-semibold" data-sub="ALL">All Subjects</button>
+          <button onclick="setSubjectFilter('Bio')" class="sub-filter-btn px-2.5 py-1 rounded hover:text-stone-900" data-sub="Bio">Biology</button>
+          <button onclick="setSubjectFilter('Chem')" class="sub-filter-btn px-2.5 py-1 rounded hover:text-stone-900" data-sub="Chem">Chemistry</button>
+          <button onclick="setSubjectFilter('Phys')" class="sub-filter-btn px-2.5 py-1 rounded hover:text-stone-900" data-sub="Phys">Physics</button>
+          <button onclick="setSubjectFilter('Math')" class="sub-filter-btn px-2.5 py-1 rounded hover:text-stone-900" data-sub="Math">Math</button>
+          <button onclick="setSubjectFilter('ESS')" class="sub-filter-btn px-2.5 py-1 rounded hover:text-stone-900" data-sub="ESS">Earth & Space</button>
+        </div>
+
+        <!-- Search input + counter -->
+        <div class="flex items-center space-x-2">
+          <input 
+            type="text" 
+            id="player-search-input" 
+            oninput="handleSearch(this.value)" 
+            placeholder="Filter candidates..." 
+            class="px-2.5 py-1 rounded border border-[#E2DDD6] bg-white text-xs text-stone-800 placeholder-stone-400 focus:outline-none focus:border-stone-800 w-44"
+          >
+          <span class="text-stone-400 font-mono text-[11px]" id="candidate-count-indicator">28 candidates</span>
+        </div>
+
+      </div>
+
+      <!-- High Density Spreadsheet Table -->
+      <div class="bg-white border border-[#E2DDD6] rounded-lg overflow-x-auto shadow-2xs">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-[#E2DDD6] bg-[#FAF8F5] text-stone-500 font-mono text-[10.5px] uppercase select-none">
+              <th class="py-2 px-3 w-16 text-center stat-header" title="Age of Empires 2 style assignment: Click to cycle Unassigned -> T1 -> T2 -> T3">Team</th>
+              <th class="py-2 px-3 cursor-pointer hover:text-stone-900" onclick="sortBy('name')">Candidate</th>
+              <th class="py-2 px-2 text-center cursor-pointer hover:text-stone-900" onclick="sortBy('bio')">Bio PPTH</th>
+              <th class="py-2 px-2 text-center cursor-pointer hover:text-stone-900" onclick="sortBy('chem')">Chem PPTH</th>
+              <th class="py-2 px-2 text-center cursor-pointer hover:text-stone-900" onclick="sortBy('phys')">Phys PPTH</th>
+              <th class="py-2 px-2 text-center cursor-pointer hover:text-stone-900" onclick="sortBy('math')">Math PPTH</th>
+              <th class="py-2 px-2 text-center cursor-pointer hover:text-stone-900" onclick="sortBy('ess')">ESS PPTH</th>
+              <th class="py-2 px-2 text-center stat-header cursor-pointer hover:text-stone-900" onclick="sortBy('acc')" title="Accuracy strictly within tested rooms">Acc %</th>
+              <th class="py-2 px-2 text-center stat-header cursor-pointer hover:text-stone-900" onclick="sortBy('celerity')" title="Average buzz speed depth">Speed</th>
+              <th class="py-2 px-2 text-center stat-header cursor-pointer hover:text-stone-900" onclick="sortBy('negs')" title="Total incorrect early interrupts">Negs</th>
+              <th class="py-2 px-3 text-right">Primary Specialty</th>
+            </tr>
+          </thead>
+          <tbody id="matrix-tbody" class="divide-y divide-[#ECE7DF] font-sans">
+            <!-- Rendered by JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Quick Legend Footer -->
+      <div class="flex flex-wrap items-center justify-between text-[11px] text-stone-400 font-mono pt-0.5">
+        <span>Click [—] badge to cycle T1 (Blue) → T2 (Red) → T3 (Green) → Clear. Shift-click to clear.</span>
+        <span>Untested subjects show "—" without penalty.</span>
+      </div>
+
+    </div>
+
+    <!-- TAB 2: QUESTION INSPECTION (Exact user screenshot fidelity) -->
+    <div id="panel-questions" class="hidden space-y-4">
+      
+      <!-- Player Focus bar -->
+      <div class="bg-white border border-[#E2DDD6] rounded-lg p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div class="flex items-center space-x-2">
+          <span class="text-stone-500 font-mono text-[11px] uppercase">Isolate Buzzer:</span>
+          <div id="question-participant-pills" class="flex flex-wrap items-center gap-1">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+        <div class="flex items-center space-x-3 text-stone-600">
+          <button onclick="toggleBuzzVisibility()" class="hover:text-stone-900 font-medium" id="toggle-buzz-label">
+            Hide Buzzpoints
+          </button>
+          <span class="text-stone-300">·</span>
+          <button onclick="toggleAnswerVisibility()" class="hover:text-stone-900 font-medium" id="toggle-ans-label">
+            Show Answers
+          </button>
+        </div>
+      </div>
+
+      <!-- Question Cards matching user screenshot -->
+      <div id="questions-container" class="space-y-4">
+        <!-- Rendered by JS -->
+      </div>
+
+    </div>
+
+  </main>
+
+  <script>
+    /* 28 Realistically generated Science Bowl candidates (1-3 subjects tested each) */
+    const rawCandidates = [
+      { id: 'simon', name: 'simon', realName: 'Simon Vance', team: 1, anchor: 'Biology', bio: 8.5, chem: null, phys: null, math: null, ess: 6.2, buzzes: 22, correct: 17, negs: 5, celerity: 84 },
+      { id: 'priya', name: 'priya_k', realName: 'Priya Kapoor', team: 2, anchor: 'Physics', bio: null, chem: null, phys: 9.4, math: 8.8, ess: null, buzzes: 28, correct: 26, negs: 2, celerity: 92 },
+      { id: 'kevin', name: 'kevin_z', realName: 'Kevin Zhang', team: 3, anchor: 'Chemistry', bio: null, chem: 9.1, phys: null, math: null, ess: null, buzzes: 16, correct: 14, negs: 2, celerity: 91 },
+      { id: 'chloe', name: 'chloe_t', realName: 'Chloe Tran', team: 1, anchor: 'Earth & Space', bio: 4.8, chem: 4.2, phys: null, math: null, ess: 8.9, buzzes: 26, correct: 22, negs: 4, celerity: 82 },
+      { id: 'alex', name: 'alex_m', realName: 'Alex Moreno', team: 2, anchor: 'Chemistry', bio: null, chem: 7.2, phys: 5.5, math: null, ess: null, buzzes: 19, correct: 15, negs: 4, celerity: 80 },
+      { id: 'elena', name: 'elena_v', realName: 'Elena Vasquez', team: 3, anchor: 'Math', bio: null, chem: null, phys: null, math: 8.2, ess: 5.8, buzzes: 15, correct: 11, negs: 4, celerity: 76 },
+      { id: 'david', name: 'david_w', realName: 'David Wu', team: 0, anchor: 'Physics', bio: 2.1, chem: null, phys: 6.4, math: null, ess: null, buzzes: 12, correct: 7, negs: 5, celerity: 71 },
+      { id: 'marcus', name: 'marcus_l', realName: 'Marcus Lin', team: 0, anchor: 'Earth & Space', bio: null, chem: null, phys: null, math: null, ess: 7.8, buzzes: 14, correct: 11, negs: 3, celerity: 79 },
+      { id: 'ananya', name: 'ananya_r', realName: 'Ananya Rao', team: 0, anchor: 'Biology', bio: 7.9, chem: 5.8, phys: null, math: null, ess: null, buzzes: 18, correct: 14, negs: 4, celerity: 83 },
+      { id: 'leo', name: 'leo_c', realName: 'Leo Chen', team: 0, anchor: 'Physics', bio: null, chem: null, phys: 8.1, math: 6.9, ess: null, buzzes: 21, correct: 17, negs: 4, celerity: 85 },
+      { id: 'hannah', name: 'hannah_s', realName: 'Hannah Smith', team: 0, anchor: 'Chemistry', bio: null, chem: 8.4, phys: null, math: null, ess: null, buzzes: 15, correct: 13, negs: 2, celerity: 87 },
+      { id: 'arjun', name: 'arjun_m', realName: 'Arjun Mehta', team: 0, anchor: 'Math', bio: null, chem: null, phys: 7.0, math: 8.6, ess: null, buzzes: 17, correct: 15, negs: 2, celerity: 86 },
+      { id: 'sarah', name: 'sarah_j', realName: 'Sarah Jenkins', team: 0, anchor: 'Earth & Space', bio: 5.2, chem: null, phys: null, math: null, ess: 8.1, buzzes: 16, correct: 13, negs: 3, celerity: 81 },
+      { id: 'samir', name: 'samir_p', realName: 'Samir Patel', team: 0, anchor: 'Biology', bio: 8.1, chem: null, phys: null, math: null, ess: null, buzzes: 13, correct: 11, negs: 2, celerity: 88 },
+      { id: 'jordan', name: 'jordan_k', realName: 'Jordan Kim', team: 0, anchor: 'Physics', bio: null, chem: 6.0, phys: 7.5, math: null, ess: null, buzzes: 18, correct: 14, negs: 4, celerity: 79 },
+      { id: 'lucas', name: 'lucas_b', realName: 'Lucas Brown', team: 0, anchor: 'Math', bio: null, chem: null, phys: null, math: 7.9, ess: null, buzzes: 11, correct: 9, negs: 2, celerity: 84 },
+      { id: 'rachel', name: 'rachel_z', realName: 'Rachel Zhao', team: 0, anchor: 'Chemistry', bio: 5.0, chem: 7.8, phys: null, math: null, ess: null, buzzes: 16, correct: 13, negs: 3, celerity: 80 },
+      { id: 'ethan', name: 'ethan_g', realName: 'Ethan Garcia', team: 0, anchor: 'Earth & Space', bio: null, chem: null, phys: null, math: null, ess: 7.2, buzzes: 12, correct: 9, negs: 3, celerity: 75 },
+      { id: 'maya', name: 'maya_t', realName: 'Maya Tanaka', team: 0, anchor: 'Biology', bio: 7.3, chem: null, phys: null, math: null, ess: 5.1, buzzes: 15, correct: 11, negs: 4, celerity: 77 },
+      { id: 'owen', name: 'owen_f', realName: 'Owen Fischer', team: 0, anchor: 'Physics', bio: null, chem: null, phys: 7.9, math: 7.1, ess: null, buzzes: 20, correct: 16, negs: 4, celerity: 83 },
+      { id: 'grace', name: 'grace_l', realName: 'Grace Liu', team: 0, anchor: 'Chemistry', bio: null, chem: 8.0, phys: null, math: null, ess: null, buzzes: 14, correct: 12, negs: 2, celerity: 86 },
+      { id: 'noah', name: 'noah_h', realName: 'Noah Harris', team: 0, anchor: 'Math', bio: null, chem: null, phys: null, math: 8.5, ess: null, buzzes: 13, correct: 11, negs: 2, celerity: 89 },
+      { id: 'zoe', name: 'zoe_m', realName: 'Zoe Miller', team: 0, anchor: 'Biology', bio: 6.8, chem: 4.9, phys: null, math: null, ess: null, buzzes: 15, correct: 10, negs: 5, celerity: 74 },
+      { id: 'kyle', name: 'kyle_c', realName: 'Kyle Cho', team: 0, anchor: 'Physics', bio: null, chem: null, phys: 6.9, math: 6.2, ess: null, buzzes: 16, correct: 11, negs: 5, celerity: 78 },
+      { id: 'olivia', name: 'olivia_d', realName: 'Olivia Davis', team: 0, anchor: 'Earth & Space', bio: null, chem: null, phys: null, math: null, ess: 6.9, buzzes: 10, correct: 7, negs: 3, celerity: 73 },
+      { id: 'ryan', name: 'ryan_n', realName: 'Ryan Nelson', team: 0, anchor: 'Chemistry', bio: null, chem: 6.7, phys: 4.8, math: null, ess: null, buzzes: 14, correct: 9, negs: 5, celerity: 72 },
+      { id: 'sophia', name: 'sophia_w', realName: 'Sophia Wang', team: 0, anchor: 'Biology', bio: 7.6, chem: null, phys: null, math: null, ess: null, buzzes: 11, correct: 9, negs: 2, celerity: 85 },
+      { id: 'ben', name: 'ben_k', realName: 'Ben Kaplan', team: 0, anchor: 'Math', bio: null, chem: null, phys: null, math: 7.4, ess: 4.5, buzzes: 14, correct: 10, negs: 4, celerity: 77 }
+    ];
+
+    // Compute accuracy %
+    rawCandidates.forEach(c => {
+      c.acc = c.buzzes > 0 ? Math.round((c.correct / c.buzzes) * 100) : 0;
+    });
+
+    // Sample question data reflecting user's exact screenshot
+    const sampleQuestions = [
+      {
+        id: 101,
+        category: 'Biology',
+        categoryClass: 'bg-[#DCFCE7] text-[#166534]',
+        type: 'Tossup',
+        format: 'SA',
+        round: 'SMH 2026 Round 6',
+        participants: ['simon', 'chloe', 'david', 'ananya', 'maya'],
+        stats: {
+          plays: 8, buzzes: 13, correct: 6, interrupts: 6, conversion: '75%', accuracy: '46%', power: 'N/A', neg: '50%', avgBuzz: '@76%', celerity: '@84%'
+        },
+        tokens: [
+          { text: "What", buzz: null },
+          { text: "vertebrate", buzz: null },
+          { text: "structure,", buzz: null },
+          { text: "found", buzz: null },
+          { text: "adjacent", buzz: null },
+          { text: "to", buzz: null },
+          { text: "the", buzz: null },
+          { text: "neural", buzz: null },
+          { text: "tube", buzz: { player: 'david', type: 'neg', result: 'Neg', pts: -5, answer: 'notochord', depth: '40%' } },
+          { text: "of", buzz: null },
+          { text: "an", buzz: { player: 'chloe', type: 'correct', result: 'Correct', pts: 10, answer: 'neural crest cells', depth: '47%' } },
+          { text: "embryo", buzz: null },
+          { text: "eventually", buzz: { player: 'simon', type: 'neg', result: 'Neg', pts: -5, answer: 'somites', depth: '56%' } },
+          { text: "disperses", buzz: null },
+          { text: "to", buzz: null },
+          { text: "facilitate", buzz: { player: 'simon', type: 'correct', result: 'Correct', pts: 10, answer: 'neural crest', depth: '69%' } },
+          { text: "the", buzz: { player: 'david', type: 'neg', result: 'Neg', pts: -5, answer: 'mesenchyme', depth: '73%' } },
+          { text: "formation", buzz: null },
+          { text: "of", buzz: null },
+          { text: "teeth,", buzz: null },
+          { text: "cartilage,", buzz: null },
+          { text: "and", buzz: null },
+          { text: "sensory", buzz: null },
+          { text: "capsules?", buzz: null }
+        ],
+        endCount: 7,
+        answer: "NEURAL CREST (ACCEPT: NEURAL CREST CELLS)"
+      },
+      {
+        id: 102,
+        category: 'Chemistry',
+        categoryClass: 'bg-[#E0F2FE] text-[#075985]',
+        type: 'Tossup',
+        format: 'SA',
+        round: 'SMH 2026 Round 6',
+        participants: ['kevin', 'alex', 'hannah', 'rachel'],
+        stats: {
+          plays: 8, buzzes: 11, correct: 8, interrupts: 4, conversion: '100%', accuracy: '73%', power: 'N/A', neg: '27%', avgBuzz: '@58%', celerity: '@88%'
+        },
+        tokens: [
+          { text: "Which", buzz: null },
+          { text: "fundamental", buzz: null },
+          { text: "law", buzz: null },
+          { text: "states", buzz: null },
+          { text: "that", buzz: { player: 'kevin', type: 'correct', result: 'Correct', pts: 10, answer: 'Hess\'s Law', depth: '35%' } },
+          { text: "the", buzz: null },
+          { text: "total", buzz: null },
+          { text: "enthalpy", buzz: { player: 'alex', type: 'correct', result: 'Correct', pts: 10, answer: 'Hess\'s Law', depth: '52%' } },
+          { text: "change", buzz: null },
+          { text: "is", buzz: null },
+          { text: "independent", buzz: { player: 'rachel', type: 'neg', result: 'Neg', pts: -5, answer: 'Gibbs energy', depth: '72%' } },
+          { text: "of", buzz: null },
+          { text: "the", buzz: null },
+          { text: "reaction", buzz: null },
+          { text: "pathway?", buzz: null }
+        ],
+        endCount: 3,
+        answer: "HESS'S LAW (ACCEPT: LAW OF CONSTANT HEAT SUMMATION)"
+      }
+    ];
+
+    // Global UI state
+    const state = {
+      activeTab: 'matrix',
+      subjectFilter: 'ALL',
+      searchQuery: '',
+      sortKey: 'bio',
+      sortAsc: false,
+      selectedPlayerId: 'ALL',
+      showBuzzpoints: true,
+      showAnswers: false,
+      showCoverageDetails: true
+    };
+  </script>
+
+  <script>
+    /* AoE2 Team Cycling Logic: 0 (Unassigned) -> 1 (T1 Blue) -> 2 (T2 Red) -> 3 (T3 Green) -> 0 */
+    function cycleTeam(playerId, reverse = false) {
+      const cand = rawCandidates.find(c => c.id === playerId);
+      if (!cand) return;
+
+      if (reverse) {
+        cand.team = 0; // Quick reset on right-click or shift-click
+      } else {
+        cand.team = (cand.team + 1) % 4;
+      }
+
+      renderMatrixTable();
+      updateCoverageBars();
+    }
+
+    function clearAllTeams() {
+      rawCandidates.forEach(c => c.team = 0);
+      renderMatrixTable();
+      updateCoverageBars();
+    }
+
+    function toggleCoverageDetails() {
+      state.showCoverageDetails = !state.showCoverageDetails;
+      const meters = ['t1-sub-meters', 't2-sub-meters', 't3-sub-meters'];
+      meters.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('hidden', !state.showCoverageDetails);
+      });
+      document.getElementById('coverage-toggle-icon').innerText = state.showCoverageDetails ? '▾' : '▸';
+    }
+
+    /* Computes and animates the coverage percentage bars for each team */
+    function updateCoverageBars() {
+      const teams = [
+        { id: 1, prefix: 't1', name: 'Team 1', color: 'blue' },
+        { id: 2, prefix: 't2', name: 'Team 2', color: 'red' },
+        { id: 3, prefix: 't3', name: 'Team 3', color: 'green' }
+      ];
+
+      const subjects = [
+        { key: 'bio', name: 'BIO' },
+        { key: 'chem', name: 'CHM' },
+        { key: 'phys', name: 'PHY' },
+        { key: 'math', name: 'MTH' },
+        { key: 'ess', name: 'ESS' }
+      ];
+
+      teams.forEach(t => {
+        const members = rawCandidates.filter(c => c.team === t.id);
+        const count = members.length;
+
+        // Update count badge
+        const countEl = document.getElementById(`${t.prefix}-count-badge`);
+        countEl.innerText = `(${count}/4)`;
+        if (count === 4) {
+          countEl.className = `text-[11px] font-mono font-bold text-${t.color}-700`;
+        } else {
+          countEl.className = `text-[11px] font-mono font-semibold text-${t.color}-600`;
+        }
+
+        // Roster names list
+        const namesEl = document.getElementById(`${t.prefix}-roster-names`);
+        if (count === 0) {
+          namesEl.innerText = 'None assigned';
+        } else {
+          namesEl.innerText = members.map(m => m.realName.split(' ')[0]).join(', ');
+        }
+
+        // Calculate individual subject strength and presence
+        let coveredSubjectCount = 0;
+        let missingSubjects = [];
+
+        subjects.forEach(sub => {
+          // Find max PPTH for this subject among team members
+          let maxScore = 0;
+          members.forEach(m => {
+            const val = m[sub.key];
+            if (val !== null && val > maxScore) {
+              maxScore = val;
+            }
+          });
+
+          // PPTH scaled to 10.0 = 100%
+          const pct = Math.min(100, Math.round((maxScore / 9.5) * 100));
+
+          if (maxScore > 0) {
+            coveredSubjectCount++;
+          } else {
+            missingSubjects.push(sub.name);
+          }
+
+          // Update mini meter
+          const barEl = document.getElementById(`${t.prefix}-sub-${sub.key}`);
+          const txtEl = document.getElementById(`${t.prefix}-sub-${sub.key}-txt`);
+          if (barEl) barEl.style.width = `${pct}%`;
+          if (txtEl) {
+            txtEl.innerText = `${pct}%`;
+            txtEl.className = pct > 0 
+              ? `text-[8.5px] font-mono text-stone-700 font-semibold` 
+              : `text-[8.5px] font-mono text-stone-300`;
+          }
+        });
+
+        // Overall coverage % (each of 5 subjects contributes 20%)
+        const overallCoveragePct = Math.round((coveredSubjectCount / 5) * 100);
+
+        // Update main progress bar
+        const overallBarEl = document.getElementById(`${t.prefix}-overall-bar`);
+        const overallPctLabel = document.getElementById(`${t.prefix}-pct-label`);
+        if (overallBarEl) overallBarEl.style.width = `${overallCoveragePct}%`;
+        if (overallPctLabel) overallPctLabel.innerText = `${overallCoveragePct}%`;
+
+        // Missing alert pill
+        const alertEl = document.getElementById(`${t.prefix}-alert-badge`);
+        if (count === 0) {
+          alertEl.innerText = '4 slots open';
+          alertEl.className = `px-1 py-0.2 rounded text-[9.5px] font-medium bg-${t.color}-100 text-${t.color}-800`;
+        } else if (overallCoveragePct === 100) {
+          alertEl.innerText = 'Full 5/5 coverage';
+          alertEl.className = 'px-1 py-0.2 rounded text-[9.5px] font-bold bg-emerald-100 text-emerald-800';
+        } else if (count >= 4) {
+          alertEl.innerText = `Missing: ${missingSubjects.join(', ')}`;
+          alertEl.className = 'px-1 py-0.2 rounded text-[9.5px] font-bold bg-amber-100 text-amber-900 border border-amber-300';
+        } else {
+          alertEl.innerText = `${4 - count} slots left`;
+          alertEl.className = `px-1 py-0.2 rounded text-[9.5px] font-medium bg-stone-100 text-stone-600`;
+        }
+      });
+    }
+
+    function exportRosters() {
+      const t1 = rawCandidates.filter(c => c.team === 1).map(c => `${c.realName} (${c.anchor})`).join(', ') || 'None';
+      const t2 = rawCandidates.filter(c => c.team === 2).map(c => `${c.realName} (${c.anchor})`).join(', ') || 'None';
+      const t3 = rawCandidates.filter(c => c.team === 3).map(c => `${c.realName} (${c.anchor})`).join(', ') || 'None';
+
+      const text = `Science Bowl Tryout Lineups:\n• Team 1 (Blue): ${t1}\n• Team 2 (Red): ${t2}\n• Team 3 (Green): ${t3}`;
+      
+      const el = document.createElement('textarea');
+      el.value = text;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+
+      const btn = event.target;
+      const prev = btn.innerText;
+      btn.innerText = 'Copied!';
+      setTimeout(() => btn.innerText = prev, 1500);
+    }
+  </script>
+
+  <script>
+    function setSubjectFilter(sub) {
+      state.subjectFilter = sub;
+      document.querySelectorAll('.sub-filter-btn').forEach(btn => {
+        if (btn.getAttribute('data-sub') === sub) {
+          btn.className = 'sub-filter-btn px-2.5 py-1 rounded bg-stone-900 text-white font-semibold';
+        } else {
+          btn.className = 'sub-filter-btn px-2.5 py-1 rounded hover:text-stone-900';
+        }
+      });
+      renderMatrixTable();
+    }
+
+    function handleSearch(val) {
+      state.searchQuery = val.toLowerCase().trim();
+      renderMatrixTable();
+    }
+
+    function sortBy(key) {
+      if (state.sortKey === key) {
+        state.sortAsc = !state.sortAsc;
+      } else {
+        state.sortKey = key;
+        state.sortAsc = false;
+      }
+      renderMatrixTable();
+    }
+
+    function renderMatrixTable() {
+      const tbody = document.getElementById('matrix-tbody');
+      tbody.innerHTML = '';
+
+      let list = [...rawCandidates];
+
+      // Filter by subject
+      if (state.subjectFilter !== 'ALL') {
+        const key = state.subjectFilter.toLowerCase();
+        list = list.filter(c => c[key] !== null);
+      }
+
+      // Filter by search
+      if (state.searchQuery) {
+        list = list.filter(c => 
+          c.name.toLowerCase().includes(state.searchQuery) ||
+          c.realName.toLowerCase().includes(state.searchQuery) ||
+          c.anchor.toLowerCase().includes(state.searchQuery)
+        );
+      }
+
+      // Sort
+      list.sort((a, b) => {
+        let valA = a[state.sortKey];
+        let valB = b[state.sortKey];
+
+        // Place nulls at bottom
+        if (valA === null) valA = -999;
+        if (valB === null) valB = -999;
+
+        if (typeof valA === 'string') {
+          return state.sortAsc ? valA.localeCompare(valB) : valB.localeCompare(a[state.sortKey]);
+        }
+        return state.sortAsc ? (valA - valB) : (valB - valA);
+      });
+
+      document.getElementById('candidate-count-indicator').innerText = `${list.length} candidate${list.length === 1 ? '' : 's'}`;
+
+      list.forEach(cand => {
+        const tr = document.createElement('tr');
+        
+        let rowBg = 'hover:bg-stone-50/70';
+        if (cand.team === 1) rowBg = 'bg-blue-50/40 hover:bg-blue-50/70';
+        if (cand.team === 2) rowBg = 'bg-red-50/40 hover:bg-red-50/70';
+        if (cand.team === 3) rowBg = 'bg-green-50/40 hover:bg-green-50/70';
+
+        tr.className = `transition-colors ${rowBg}`;
+
+        // AoE2 team badge config
+        let teamBadgeClass = 'border border-dashed border-stone-300 text-stone-400 bg-white hover:border-stone-500 hover:text-stone-700';
+        let teamLabel = '—';
+        if (cand.team === 1) {
+          teamBadgeClass = 'bg-blue-600 text-white font-bold border border-blue-700 shadow-2xs';
+          teamLabel = 'T1';
+        } else if (cand.team === 2) {
+          teamBadgeClass = 'bg-red-600 text-white font-bold border border-red-700 shadow-2xs';
+          teamLabel = 'T2';
+        } else if (cand.team === 3) {
+          teamBadgeClass = 'bg-green-600 text-white font-bold border border-green-700 shadow-2xs';
+          teamLabel = 'T3';
+        }
+
+        // PPTH column renderer
+        const renderPPTH = (val) => {
+          if (val === null) {
+            return `<span class="text-stone-300 font-mono select-none">—</span>`;
+          }
+          const isHigh = val >= 8.0;
+          return `<span class="font-mono ${isHigh ? 'font-bold text-stone-900' : 'text-stone-700'}">${val.toFixed(1)}</span>`;
+        };
+
+        tr.innerHTML = `
+          <!-- AOE2 Multi-Click Badge -->
+          <td class="py-1.5 px-3 text-center">
+            <button 
+              type="button" 
+              onclick="cycleTeam('${cand.id}', event.shiftKey)" 
+              oncontextmenu="event.preventDefault(); cycleTeam('${cand.id}', true);"
+              class="aoe-badge w-7 h-5 rounded text-[10.5px] font-mono flex items-center justify-center cursor-pointer ${teamBadgeClass}"
+              title="Click to cycle T1 -> T2 -> T3. Shift-click or Right-click to unassign."
+            >
+              ${teamLabel}
+            </button>
+          </td>
+
+          <!-- Candidate Name -->
+          <td class="py-1.5 px-3">
+            <div class="flex items-center space-x-1.5">
+              <span class="font-semibold text-stone-900">${cand.realName}</span>
+              <span class="text-stone-400 font-mono text-[10.5px]">@${cand.name}</span>
+            </div>
+          </td>
+
+          <!-- Subject PPTH Columns -->
+          <td class="py-1.5 px-2 text-center">${renderPPTH(cand.bio)}</td>
+          <td class="py-1.5 px-2 text-center">${renderPPTH(cand.chem)}</td>
+          <td class="py-1.5 px-2 text-center">${renderPPTH(cand.phys)}</td>
+          <td class="py-1.5 px-2 text-center">${renderPPTH(cand.math)}</td>
+          <td class="py-1.5 px-2 text-center">${renderPPTH(cand.ess)}</td>
+
+          <!-- Accuracy % -->
+          <td class="py-1.5 px-2 text-center font-mono ${cand.acc >= 80 ? 'text-emerald-700 font-bold' : 'text-stone-800'}">
+            ${cand.acc}%
+          </td>
+
+          <!-- Speed -->
+          <td class="py-1.5 px-2 text-center font-mono text-stone-600">
+            @${cand.celerity}%
+          </td>
+
+          <!-- Negs -->
+          <td class="py-1.5 px-2 text-center font-mono ${cand.negs >= 4 ? 'text-rose-600 font-bold' : 'text-stone-600'}">
+            ${cand.negs}
+          </td>
+
+          <!-- Primary Anchor -->
+          <td class="py-1.5 px-3 text-right">
+            <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-stone-100 text-stone-700 border border-stone-200">
+              ${cand.anchor}
+            </span>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+    }
+  </script>
+
+  <script>
+    function renderQuestionParticipants() {
+      const container = document.getElementById('question-participant-pills');
+      container.innerHTML = '';
+
+      const allActive = state.selectedPlayerId === 'ALL';
+      const allBtn = document.createElement('button');
+      allBtn.onclick = () => filterByQuestionPlayer('ALL');
+      allBtn.className = `px-2 py-0.5 rounded text-[11px] font-medium transition ${
+        allActive ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+      }`;
+      allBtn.innerText = 'All Buzzers';
+      container.appendChild(allBtn);
+
+      const pids = ['simon', 'chloe', 'david', 'kevin', 'alex'];
+      pids.forEach(pid => {
+        const cand = rawCandidates.find(c => c.id === pid);
+        if (!cand) return;
+
+        const isActive = state.selectedPlayerId === pid;
+        const btn = document.createElement('button');
+        btn.onclick = () => filterByQuestionPlayer(pid);
+        btn.className = `px-2 py-0.5 rounded text-[11px] font-medium transition ${
+          isActive ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+        }`;
+        btn.innerText = cand.realName.split(' ')[0];
+        container.appendChild(btn);
+      });
+    }
+
+    function filterByQuestionPlayer(pid) {
+      state.selectedPlayerId = pid;
+      renderQuestionParticipants();
+      renderQuestions();
+    }
+
+    function toggleBuzzVisibility() {
+      state.showBuzzpoints = !state.showBuzzpoints;
+      document.getElementById('toggle-buzz-label').innerText = state.showBuzzpoints ? 'Hide Buzzpoints' : 'Show Buzzpoints';
+      renderQuestions();
+    }
+
+    function toggleAnswerVisibility() {
+      state.showAnswers = !state.showAnswers;
+      document.getElementById('toggle-ans-label').innerText = state.showAnswers ? 'Hide Answers' : 'Show Answers';
+      renderQuestions();
+    }
+
+    function renderQuestions() {
+      const container = document.getElementById('questions-container');
+      container.innerHTML = '';
+
+      sampleQuestions.forEach(q => {
+        let tokensHtml = '';
+
+        q.tokens.forEach(tok => {
+          if (!tok.buzz || !state.showBuzzpoints) {
+            tokensHtml += `<span>${tok.text} </span>`;
+          } else {
+            const isMatch = (state.selectedPlayerId === 'ALL' || tok.buzz.player === state.selectedPlayerId);
+            const isDimmed = !isMatch;
+
+            let badgeClass = tok.buzz.type === 'neg' ? 'buzz-neg' : 'buzz-correct';
+            if (isDimmed) badgeClass += ' buzz-dimmed';
+
+            tokensHtml += `
+              <span class="${badgeClass}"
+                    data-player="${tok.buzz.player}"
+                    data-result="${tok.buzz.result}"
+                    data-type="${tok.buzz.type}"
+                    data-points="${tok.buzz.pts}"
+                    data-answer="${tok.buzz.answer.replace(/"/g, '&quot;')}"
+                    data-depth="${tok.buzz.depth}"
+                    onmouseenter="showBuzzTooltip(event, this)"
+                    onmouseleave="hideBuzzTooltip()"
+                    onclick="filterByQuestionPlayer('${tok.buzz.player}')">
+                ${tok.text}
+              </span> 
+            `;
+          }
+        });
+
+        const card = document.createElement('article');
+        card.className = "bg-white border border-[#E2DDD6] rounded-lg overflow-hidden shadow-2xs";
+        card.innerHTML = `
+          <!-- Header Bar (Exact match to screenshot) -->
+          <div class="px-4 py-2.5 flex items-center justify-between border-b border-[#E2DDD6] bg-[#FAF8F5]">
+            <div class="flex items-center space-x-2">
+              <span class="px-2.5 py-0.5 rounded text-xs font-semibold ${q.categoryClass}">
+                ${q.category}
+              </span>
+              <span class="px-2.5 py-0.5 rounded text-xs font-medium bg-[#EEF2FF] text-[#3730A3]">
+                ${q.type}
+              </span>
+              <span class="px-2 py-0.5 rounded text-xs font-mono font-medium border border-stone-300 text-stone-600 bg-white">
+                ${q.format}
+              </span>
+              <span class="text-xs text-stone-500 font-medium ml-1">
+                ${q.round}
+              </span>
+            </div>
+
+            <div class="flex items-center space-x-1 font-mono text-[11px] text-stone-500">
+              <span class="bg-stone-200/80 px-2 py-0.5 rounded font-semibold text-stone-900">All</span>
+              <span class="px-1.5 py-0.5 rounded hover:text-stone-900 cursor-pointer">Tournament</span>
+            </div>
+          </div>
+
+          <div class="p-4 space-y-3">
+            <!-- Stats Ribbon (Dotted underlines matching user screenshot) -->
+            <div class="border border-[#E2DDD6] rounded bg-[#FAF8F5] px-3 py-2">
+              <div class="grid grid-cols-5 sm:grid-cols-10 gap-2 text-center font-mono">
+                <div class="flex flex-col items-center">
+                  <span class="stat-header">PLAYS</span>
+                  <span class="text-xs font-bold text-stone-900 mt-1">${q.stats.plays}</span>
+                </div>
+                <div class="flex flex-col items-center">
+                  <span class="stat-header">BUZZES</span>
+                  <span class="text-xs font-bold text-stone-900 mt-1">${q.stats.buzzes}</span>
+                </div>
+                <div class="flex flex-col items-center">
+                  <span class="stat-header">CORRECT</span>
+                  <span class="text-xs font-bold text-stone-900 mt-1">${q.stats.correct}</span>
+                </div>
+                <div class="flex flex-col items-center">
+                  <span class="stat-header">INTERRUPTS</span>
+                  <span class="text-xs font-bold text-stone-900 mt-1">${q.stats.interrupts}</span>
+                </div>
+                <div class="flex flex-col items-center">
+                  <span class="stat-header">CONVERSION</span>
+                  <span class="text-xs font-bold text-stone-900 mt-1">${q.stats.conversion}</span>
+                </div>
+                <div class="flex flex-col items-center">
+                  <span class="stat-header">ACCURACY</span>
+                  <span class="text-xs font-bold text-stone-900 mt-1">${q.stats.accuracy}</span>
+                </div>
+                <div class="flex flex-col items-center">
+                  <span class="stat-header">POWER</span>
+                  <span class="text-xs font-bold text-stone-900 mt-1">${q.stats.power}</span>
+                </div>
+                <div class="flex flex-col items-center">
+                  <span class="stat-header">NEG</span>
+                  <span class="text-xs font-bold text-stone-900 mt-1">${q.stats.neg}</span>
+                </div>
+                <div class="flex flex-col items-center">
+                  <span class="stat-header">AVG BUZZ</span>
+                  <span class="text-xs font-bold text-stone-900 mt-1">${q.stats.avgBuzz}</span>
+                </div>
+                <div class="flex flex-col items-center">
+                  <span class="stat-header">CELERITY</span>
+                  <span class="text-xs font-bold text-stone-900 mt-1">${q.stats.celerity}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Question Prose (Word-for-word screenshot layout) -->
+            <div class="text-[15px] leading-relaxed text-stone-800 font-serif pt-1 select-text">
+              ${tokensHtml}
+            </div>
+
+            <!-- Bottom metadata row matching user screenshot -->
+            <div class="pt-2 flex flex-wrap items-center justify-between gap-2 text-xs border-t border-[#ECE7DF]">
+              <div class="flex items-center space-x-3">
+                <span class="px-2 py-0.5 rounded text-[11px] font-mono font-medium border border-rose-200 bg-rose-50 text-rose-800">
+                  END · ${q.endCount}
+                </span>
+
+                <button onclick="toggleSingleAnswer(${q.id})" class="inline-flex items-center space-x-1 text-stone-600 hover:text-stone-900 font-medium">
+                  <span>Show Answer</span>
+                </button>
+
+                <button onclick="toggleBuzzVisibility()" class="inline-flex items-center space-x-1 text-stone-600 hover:text-stone-900 font-medium">
+                  <span>${state.showBuzzpoints ? 'Hide Buzzpoints' : 'Show Buzzpoints'}</span>
+                </button>
+              </div>
+
+              <div class="text-stone-400 font-mono text-[11px]">
+                Target: ${q.answer}
+              </div>
+            </div>
+
+            <!-- Single Answer Reveal Box -->
+            <div id="ans-box-${q.id}" class="${state.showAnswers ? 'block' : 'hidden'} bg-[#FAF8F5] border border-[#E2DDD6] rounded p-2.5 text-xs font-mono text-stone-800">
+              <span class="font-bold text-emerald-800">Answer:</span> ${q.answer}
+            </div>
+
+          </div>
+        </article>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function toggleSingleAnswer(id) {
+      const box = document.getElementById(`ans-box-${id}`);
+      if (box) box.classList.toggle('hidden');
+    }
+
+    /* Dark Popover Tooltip Logic */
+    const tt = document.getElementById('buzz-tooltip');
+    let ttTimeout;
+
+    function showBuzzTooltip(e, el) {
+      clearTimeout(ttTimeout);
+
+      const player = el.getAttribute('data-player');
+      const result = el.getAttribute('data-result');
+      const type = el.getAttribute('data-type');
+      const points = el.getAttribute('data-points');
+      const answer = el.getAttribute('data-answer');
+      const depth = el.getAttribute('data-depth');
+
+      document.getElementById('tt-player').innerText = player;
+      document.getElementById('tt-given').innerText = `"${answer}"`;
+      document.getElementById('tt-depth').innerText = depth;
+      document.getElementById('tt-points').innerText = `${points > 0 ? '+' : ''}${points} pts`;
+
+      const tag = document.getElementById('tt-tag');
+      const icon = document.getElementById('tt-icon');
+      tag.innerText = result;
+
+      if (type === 'neg') {
+        tag.className = 'px-1.5 py-0.2 rounded text-[10px] font-semibold tracking-wider uppercase ml-1 bg-red-950 text-red-300 border border-red-700';
+        icon.className = 'inline-block w-2.5 h-2.5 rotate-45 border border-red-400 bg-red-500/30';
+      } else {
+        tag.className = 'px-1.5 py-0.2 rounded text-[10px] font-semibold tracking-wider uppercase ml-1 bg-emerald-950 text-emerald-300 border border-emerald-700';
+        icon.className = 'inline-block w-2.5 h-2.5 rotate-45 border border-emerald-400 bg-emerald-500';
+      }
+
+      const rect = el.getBoundingClientRect();
+      const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+
+      tt.classList.remove('hidden');
+
+      const ttHeight = tt.offsetHeight || 120;
+      const ttWidth = tt.offsetWidth || 250;
+
+      let top = rect.bottom + scrollY + 7;
+      let left = rect.left + scrollX + (rect.width / 2) - (ttWidth / 2);
+
+      if (top + ttHeight > window.innerHeight + scrollY) {
+        top = rect.top + scrollY - ttHeight - 7;
+        tt.classList.add('arrow-bottom');
+      } else {
+        tt.classList.remove('arrow-bottom');
+      }
+
+      tt.style.top = `${top}px`;
+      tt.style.left = `${Math.max(10, left)}px`;
+
+      requestAnimationFrame(() => {
+        tt.classList.remove('opacity-0');
+        tt.classList.add('opacity-100');
+      });
+    }
+
+    function hideBuzzTooltip() {
+      ttTimeout = setTimeout(() => {
+        tt.classList.add('opacity-0');
+        setTimeout(() => tt.classList.add('hidden'), 120);
+      }, 50);
+    }
+
+    function switchMainTab(tabId) {
+      state.activeTab = tabId;
+
+      const pMatrix = document.getElementById('panel-matrix');
+      const pQuestions = document.getElementById('panel-questions');
+      const btnMatrix = document.getElementById('tab-btn-matrix');
+      const btnQuestions = document.getElementById('tab-btn-questions');
+
+      if (tabId === 'matrix') {
+        pMatrix.classList.remove('hidden');
+        pQuestions.classList.add('hidden');
+        btnMatrix.className = 'px-2.5 py-1 rounded bg-white text-stone-950 font-semibold shadow-2xs transition';
+        btnQuestions.className = 'px-2.5 py-1 rounded text-stone-600 hover:text-stone-900 transition';
+        renderMatrixTable();
+      } else {
+        pQuestions.classList.remove('hidden');
+        pMatrix.classList.add('hidden');
+        btnQuestions.className = 'px-2.5 py-1 rounded bg-white text-stone-950 font-semibold shadow-2xs transition';
+        btnMatrix.className = 'px-2.5 py-1 rounded text-stone-600 hover:text-stone-900 transition';
+        renderQuestionParticipants();
+        renderQuestions();
+      }
+    }
+
+    // Startup initialization
+    window.addEventListener('DOMContentLoaded', () => {
+      renderMatrixTable();
+      updateCoverageBars();
+      renderQuestionParticipants();
+      renderQuestions();
+    });
+  </script>
+
+</body>
+</html>

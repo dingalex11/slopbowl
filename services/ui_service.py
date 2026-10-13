@@ -472,7 +472,8 @@ async def create_challenge_endpoint(request: Request):
         if not isinstance(data, dict):
             raise ValueError("Invalid challenge setup")
         return await asyncio.to_thread(
-            challenge_service.create_challenge, user.uid, data.get("title"), data.get("bank")
+            challenge_service.create_challenge, user.uid, data.get("title"), data.get("bank"),
+            read_bonuses=data.get("readBonuses", True), display_mode=data.get("displayMode", "hybrid"),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

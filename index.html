@@ -1288,6 +1288,19 @@
             <label class="block text-[10px] font-mono text-slate-500 uppercase mb-1">Packet (.json)</label>
             <button type="button" onclick="document.getElementById('buk-captain-packet').click(); playSound('click');" class="px-3 py-1.5 bg-black border border-borderDark text-slate-300 hover:text-white text-[10px] font-mono font-bold rounded-lg active:scale-95">Add packet</button>
             <input type="file" id="buk-captain-packet" accept=".json,.txt" class="hidden">
+
+            <label class="mt-4 flex items-center gap-2 cursor-pointer select-none">
+              <input id="buk-captain-bonuses" type="checkbox" checked class="w-4 h-4 accent-cyan-400">
+              <span class="text-[11px] font-mono font-bold text-slate-300 uppercase">Read bonuses</span>
+            </label>
+            <p class="mt-1 text-[10px] font-mono text-slate-500">Off: a correct toss-up goes straight to the next question.</p>
+
+            <label class="block text-[10px] font-mono text-slate-500 uppercase mb-1 mt-4">Question display</label>
+            <select id="buk-captain-display" class="w-full bg-panel border border-borderDark rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-neonCyan">
+              <option value="hybrid">Hybrid &mdash; words and audio</option>
+              <option value="audio-only">Audio only &mdash; progress bar</option>
+            </select>
+
             <button type="button" id="buk-captain-create" class="mt-3 w-full py-3 bg-neonCyan text-black text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Create challenge</button>
             <p class="mt-2 text-[11px] font-mono text-slate-400">Code: <span id="buk-captain-code" class="text-neonAmber font-black"></span></p>
             <p id="buk-captain-status" class="mt-1 text-[11px] font-mono text-slate-500"></p>
@@ -1418,7 +1431,7 @@
 
   <!-- MATCH ANALYTICS (real: backed by analytics.js CSV engine) -->
   <div id="analyticsModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
-    <div class="bg-panel border border-neonAmber rounded-3xl max-w-3xl w-full p-6 shadow-neon-amber max-h-[90vh] overflow-y-auto custom-scrollbar">
+    <div class="bg-panel border border-neonAmber rounded-3xl max-w-5xl w-full p-6 shadow-neon-amber max-h-[90vh] overflow-y-auto custom-scrollbar">
       <div class="flex items-center justify-between border-b border-borderDark pb-4 mb-4">
         <div class="flex items-center space-x-2">
           <span class="text-xl">&#128202;</span>
@@ -1427,6 +1440,12 @@
         <button onclick="closeModal('analyticsModal'); playSound('click');" class="text-slate-400 hover:text-white p-1 text-xl">&times;</button>
       </div>
 
+      <div class="flex flex-wrap items-center gap-2 mb-4">
+        <button type="button" id="analytics-tab-match" onclick="showAnalyticsView('match')" class="px-3 py-1.5 rounded-lg text-[11px] font-mono font-black uppercase border transition bg-neonAmber text-black border-neonAmber">Slopbowl Match CSV</button>
+        <button type="button" id="analytics-tab-buzzboard" onclick="showAnalyticsView('buzzboard')" class="px-3 py-1.5 rounded-lg text-[11px] font-mono font-black uppercase border transition bg-black text-slate-300 border-borderDark hover:text-white">Buzzboard CSV</button>
+      </div>
+
+      <div id="analytics-panel-match">
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
         <span id="csv-status-text" class="text-xs text-slate-400 font-mono uppercase">SYSTEM READY // WAITING FOR MATCH CSV</span>
         <div class="flex items-center gap-2">
@@ -1481,6 +1500,64 @@
           </tbody>
         </table>
       </div>
+      </div>
+
+      <!-- ============ BUZZBOARD CSV — two pages: question buzzpoints + numerical data ============ -->
+      <div id="analytics-panel-buzzboard" class="hidden">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <span id="bbx-status-text" class="text-xs text-slate-400 font-mono uppercase">SYSTEM READY // WAITING FOR BUZZBOARD CSV</span>
+          <div class="flex items-center gap-2">
+            <span id="bbx-count-badge" class="hidden bg-black text-slate-300 border border-borderDark px-2 py-1 rounded text-xs font-mono font-bold">0 ROWS LOADED</span>
+            <button type="button" onclick="resetBuzzboardAnalytics()" class="bg-black border border-borderDark text-slate-300 px-3 py-1.5 rounded-xl text-xs uppercase font-bold transition hover:border-neonPink hover:text-neonPink">Clear Data</button>
+          </div>
+        </div>
+
+        <div id="bbx-drop-zone" onclick="document.getElementById('bbx-file-input').click()" class="border-2 border-dashed border-borderDark rounded-xl flex flex-col items-center justify-center p-6 text-center cursor-pointer hover:border-neonAmber hover:bg-panelHover transition-all relative overflow-hidden min-h-[140px]">
+          <b class="text-slate-200 font-mono text-xs uppercase">Drop Buzzboard CSVs</b>
+          <span class="text-[10px] text-slate-500 mt-2 font-mono">Download one from the Buzzpoint Board, then drop it here</span>
+        </div>
+        <input type="file" id="bbx-file-input" accept=".csv" multiple class="hidden">
+
+        <div class="flex flex-wrap items-center gap-2 mt-4">
+          <button type="button" id="bbx-page-questions" onclick="bbxShowPage('questions')" class="px-3 py-1.5 rounded-lg text-[11px] font-mono font-black uppercase border transition bg-neonCyan text-black border-neonCyan">Question Buzzpoints</button>
+          <button type="button" id="bbx-page-numbers" onclick="bbxShowPage('numbers')" class="px-3 py-1.5 rounded-lg text-[11px] font-mono font-black uppercase border transition bg-black text-slate-300 border-borderDark hover:text-white">Numerical Data</button>
+        </div>
+
+        <!-- PAGE 1: question cards with word-level buzz highlighting -->
+        <div id="bbx-panel-questions" class="mt-4 space-y-3">
+          <div class="bg-black border border-borderDark rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-slate-500 font-mono text-[11px] uppercase">Isolate buzzer:</span>
+              <div id="bbx-participant-pills" class="flex flex-wrap items-center gap-1"></div>
+            </div>
+            <div class="flex items-center gap-3 text-slate-400 text-[11px] font-mono">
+              <button type="button" id="bbx-toggle-buzz" onclick="bbxToggleBuzzpoints()" class="hover:text-white">Hide Buzzpoints</button>
+              <span class="text-slate-600">&middot;</span>
+              <button type="button" id="bbx-toggle-ans" onclick="bbxToggleAnswers()" class="hover:text-white">Show Answers</button>
+            </div>
+          </div>
+          <div id="bbx-questions-container" class="space-y-3"></div>
+        </div>
+
+        <!-- PAGE 2: candidate matrix, coverage meters and the draft -->
+        <div id="bbx-panel-numbers" class="mt-4 hidden space-y-3">
+          <div id="bbx-hud" class="grid grid-cols-1 md:grid-cols-3 gap-2.5"></div>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div id="bbx-subject-filters" class="inline-flex flex-wrap gap-1"></div>
+            <div class="flex items-center gap-2">
+              <input id="bbx-search" type="text" oninput="bbxSetSearch(this.value)" placeholder="Filter candidates..." class="px-2.5 py-1 rounded border border-borderDark bg-black text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-neonCyan w-40">
+              <span id="bbx-count-indicator" class="text-slate-500 font-mono text-[11px]">0 candidates</span>
+              <button type="button" onclick="bbxResetTeams()" class="text-slate-500 hover:text-white text-[11px] font-mono px-1.5 py-1">Reset All</button>
+              <button type="button" onclick="bbxExportRosters(this)" class="bg-neonCyan hover:bg-cyan-300 text-black text-[11px] font-mono font-black uppercase px-2.5 py-1 rounded transition">Export Rosters</button>
+            </div>
+          </div>
+          <div class="bg-black border border-borderDark rounded-xl overflow-x-auto">
+            <table id="bbx-matrix" class="w-full text-left text-xs font-mono whitespace-nowrap"></table>
+          </div>
+        </div>
+      </div>
+
+      <div id="bbx-tooltip" class="hidden fixed z-[60] w-[250px] bg-black/95 border border-borderDark rounded-lg p-3 text-xs shadow-2xl pointer-events-none"></div>
 
       <div class="flex items-center justify-end mt-4">
         <button onclick="closeModal('analyticsModal'); playSound('click');" class="px-4 py-2 bg-black border border-borderDark text-xs font-mono text-slate-400 hover:text-white rounded-xl">
@@ -1508,6 +1585,7 @@
   <script src="/static/js/camera.js"></script>
   <script src="/static/js/pdf_parser.js"></script>
   <script src="/static/js/analytics.js"></script>
+  <script src="/static/js/buzzboard_analytics.js"></script>
   <script src="/static/js/solo.js"></script>
   <script src="/static/js/buzzpoint.js"></script>
   <script>

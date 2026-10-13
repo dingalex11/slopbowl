@@ -74,6 +74,28 @@ def _validate_display_name(name):
     return name.strip()
 
 
+DISPLAY_MODES = ("hybrid", "audio-only")
+
+
+def _validate_settings(read_bonuses, display_mode):
+    """Validate the two settings a captain picks when creating a challenge.
+
+    ``read_bonuses`` off means no bonus is served or scored: a correct toss-up advances
+    straight to the next toss-up. ``display_mode`` is how the member sees the read \u2014
+    "hybrid" reveals the words as they are spoken, "audio-only" leaves only the progress
+    bar (and a status line) while the question is read aloud.
+    """
+    if read_bonuses is None:
+        read_bonuses = True
+    if not isinstance(read_bonuses, bool):
+        raise ValueError("readBonuses must be true or false")
+    if display_mode is None:
+        display_mode = "hybrid"
+    if not isinstance(display_mode, str) or display_mode not in DISPLAY_MODES:
+        raise ValueError("displayMode must be 'hybrid' or 'audio-only'")
+    return read_bonuses, display_mode
+
+
 def _packet_summary(bank):
     counts = {}
     for question in bank:
@@ -84,12 +106,13 @@ def _packet_summary(bank):
 
 # --------------------------------------------------------------------------- create
 
-def create_challenge(owner_uid, title, bank):
+def create_challenge(owner_uid, title, bank, *, read_bonuses=True, display_mode="hybrid"):
     """Store a packet server-only and open a challenge under a fresh code."""
     if not isinstance(owner_uid, str) or not owner_uid:
         raise ValueError("Challenge owner must be a signed-in user")
     title = _validate_title(title)
     bank = validate_question_bank(bank)
+    read_bonuses, display_mode = _validate_settings(read_bonuses, display_mode)
 
     client = _client()
     last_error = None
@@ -103,6 +126,8 @@ def create_challenge(owner_uid, title, bank):
                 "createdAt": time.time(),
                 "questionCount": len(bank),
                 "packetSummary": _packet_summary(bank),
+                "readBonuses": read_bonuses,
+                "displayMode": display_mode,
                 "rulesSnapshot": RULES_SNAPSHOT,
             })
         except Exception as exc:  # noqa: BLE001 - collision vs service failure
@@ -112,7 +137,10 @@ def create_challenge(owner_uid, title, bank):
             raise RuntimeError("Challenge service is unavailable") from exc
         # The bank holds the answers, so it lives where clients cannot read it.
         client.collection(BANKS).document(code).set({"bank": bank, "createdAt": time.time()})
-        return {"code": code, "title": title, "questionCount": len(bank)}
+        return {
+            "code": code, "title": title, "questionCount": len(bank),
+            "readBonuses": read_bonuses, "displayMode": display_mode,
+        }
     raise RuntimeError("Could not allocate a free challenge code — try again") from last_error
 
 
@@ -131,6 +159,8 @@ def get_challenge_meta(code):
         "ownerUid": data.get("ownerUid", ""),
         "questionCount": data.get("questionCount", 0),
         "packetSummary": data.get("packetSummary", {}),
+        "readBonuses": bool(data.get("readBonuses", True)),
+        "displayMode": data.get("displayMode", "hybrid"),
         "rulesSnapshot": data.get("rulesSnapshot", RULES_SNAPSHOT),
     }
 
@@ -170,14 +200,17 @@ def join_challenge(code, uid, display_name):
     the server-side lock the board depends on.
     """
     display_name = _validate_display_name(display_name)
-    get_challenge_meta(code)  # 404-ish if the code is unknown
+    meta = get_challenge_meta(code)  # 404-ish if the code is unknown
     existing = _get_run(code, uid)
     action, run = join_outcome(existing)
     if action == "refuse":
         raise PermissionError("You have already used your attempt on this challenge")
     if action == "resume":
         return {"status": "resumed", "run": run}
-    run = create_run_doc(code, uid, display_name, get_challenge_meta(code)["questionCount"], _now_iso())
+    run = create_run_doc(
+        code, uid, display_name, meta["questionCount"], _now_iso(),
+        read_bonuses=meta["readBonuses"], display_mode=meta["displayMode"],
+    )
     try:
         _run_ref(code, uid).create(run)
     except Exception as exc:  # noqa: BLE001 - lost a race; treat as already claimed
