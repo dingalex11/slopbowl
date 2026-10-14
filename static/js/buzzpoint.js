@@ -239,6 +239,9 @@ const bukRun = {
   utterance: null, words: [], shownWords: 0, wordSpans: [], revealIndex: -1,
   sawBoundary: false, fallbackTimer: null, fallbackInterval: null,
   answering: false, awaitingNext: false,
+  // The last word the read was allowed to show. A buzz sets it, so the rest of the question
+  // cannot appear while the member is answering it.
+  frozenAt: null,
   records: [], finished: false,
   // The challenge screen: which stage is showing, and which attempt this browser claimed.
   stage: null, claimedCode: null, joinStatus: null, displayName: '',
@@ -250,6 +253,11 @@ const BUK_BONUS_WINDOW_S = 20.0;
 // Realistic spoken pace (chars/sec at rate 1) for the reveal fallback when the engine gives
 // no word boundaries. Matches the app's measured pace (SOLO_SPOKEN_CHARS_PER_SECOND).
 const BUK_SPOKEN_CHARS_PER_SECOND = 12;
+
+// A question this device cannot read aloud is not a question the member can buzz on: the buzz
+// is supposed to log the word they HEARD. So the read is refused rather than faked out of the
+// revealed text, and the attempt is left exactly where it is.
+const BUK_READ_ALOUD_ERROR = 'This device cannot read the question aloud \u2014 open this challenge on a device with speech voices.';
 
 function bukStopSpeech() {
   if (window.speechSynthesis) window.speechSynthesis.cancel();
@@ -277,6 +285,7 @@ function bukStartQuestion(question) {
   bukRun.buzzAt = 0;
   bukRun.words = buzzTokenizeWords(question.text || '');
   bukRun.shownWords = 0;
+  bukRun.frozenAt = null;
   // The captain chose this at creation; the server repeats it on every question payload.
   bukRun.displayMode = question.displayMode === 'audio-only' ? 'audio-only' : 'hybrid';
   bukRun.tracker = createBuzzWordTracker(question.text || '', { wordsPerSecond: 2.6 });
@@ -329,7 +338,11 @@ function bukPrepareReveal() {
 function bukRevealUpTo(index) {
   const words = bukRun.words;
   const last = words.length - 1;
-  const target = Math.max(-1, Math.min(index, last));
+  // A buzzed read stops where it was: whatever asks for more words afterwards — the read
+  // settling, or the paced fallback — the rest of the question stays off the screen until the
+  // answer is submitted.
+  const ceiling = bukRun.frozenAt === null ? last : Math.min(last, bukRun.frozenAt);
+  const target = Math.max(-1, Math.min(index, ceiling));
   if (target <= bukRun.revealIndex) return;
   // Audio-only reveals no words: only the progress bar moves.
   if (bukRun.displayMode !== 'audio-only') {
@@ -367,17 +380,43 @@ function bukStartFallbackReveal() {
         return;
       }
       const elapsedSeconds = (performance.now() - bukRun.readStart) / 1000;
-      bukRevealUpTo(bukWordIndexAt(bukRun.words, elapsedSeconds * charsPerSecond));
+      bukRevealUpTo(buzzWordIndexAt(bukRun.words, elapsedSeconds * charsPerSecond));
       if (bukRun.tracker) bukRun.tracker.noteCounted(bukRun.revealIndex);
     }, 120);
   }, 120);
 }
 
+// A device with no speech engine at all cannot play this mode. Voices that have not loaded yet
+// are NOT grounds to refuse: Chrome and iOS report an empty list until speech is first used, so
+// the read itself is the real test (see the poll in bukSpeak and bukReadUnavailable).
+function bukCanReadAloud() {
+  return Boolean(window.speechSynthesis) && typeof window.SpeechSynthesisUtterance === 'function';
+}
+
+// The read could not be spoken. Nothing is revealed, no buzz window opens and no answer is
+// recorded \u2014 the run stays on this question, so the member can resume it on a device that
+// speaks. Measured before this existed: the client declared the read complete 1.5s in, put the
+// whole question on screen and then recorded a timeout against a question nobody had heard.
+function bukReadUnavailable() {
+  bukStopDelivery();
+  if (bukRun.windowTimer) { clearTimeout(bukRun.windowTimer); bukRun.windowTimer = null; }
+  if (bukRun.lockoutTimer) { clearInterval(bukRun.lockoutTimer); bukRun.lockoutTimer = null; }
+  bukRun.windowOpen = false;
+  bukRun.answering = false;
+  bukRun.awaitingNext = false;
+  const buzzBtn = bukEl('buk-buzz-btn');
+  if (buzzBtn) buzzBtn.disabled = true;
+  const panel = bukEl('buk-answer-panel');
+  if (panel) panel.classList.add('hidden');
+  const feedback = bukEl('buk-feedback');
+  if (feedback) { feedback.textContent = BUK_READ_ALOUD_ERROR; feedback.style.color = '#ff4d4d'; }
+  bukStatus('buk-run-status', 'Read refused \u2014 nothing was recorded. Your attempt is untouched: open this challenge again on a device with speech voices.', '#ff4d4d');
+  return true;
+}
+
 function bukSpeak(text) {
   if (!window.speechSynthesis) {
-    bukRun.speechDone = true;
-    bukStartFallbackReveal();
-    bukFinishDelivery();
+    bukReadUnavailable();
     return;
   }
   bukStopSpeech();
@@ -418,12 +457,24 @@ function bukSpeak(text) {
     if (bukRun.tracker) bukRun.tracker.noteNaturalEnd();
     settle();
   };
-  utterance.onerror = () => settle();
+  // A buzz cancels the read, and Chromium reports a cancelled utterance as an error
+  // ('interrupted') rather than an end — so settling here would reveal the whole question the
+  // instant a member buzzed. The cancelled read is refused on both channels.
+  utterance.onerror = () => {
+    if (bukRun.tracker && bukRun.tracker.isCancelled()) return;
+    // An error before a single word came out is this device failing to speak, not a read that
+    // finished, so it is refused instead of settled.
+    if (!spoke) { bukReadUnavailable(); return; }
+    settle();
+  };
   const begin = performance.now();
   bukRun.speechPoll = setInterval(() => {
     if (settled) { clearInterval(bukRun.speechPoll); bukRun.speechPoll = null; return; }
     if (window.speechSynthesis.speaking || window.speechSynthesis.pending) { spoke = true; return; }
-    if (spoke || performance.now() - begin > 1500) settle();
+    // It spoke and stopped: the read is over even when no 'end' event arrives.
+    if (spoke) { settle(); return; }
+    // It never spoke at all: the engine accepted the utterance and nothing came of it.
+    if (performance.now() - begin > 1500) bukReadUnavailable();
   }, 200);
   window.speechSynthesis.speak(utterance);
 }
@@ -455,6 +506,8 @@ function bukBuzz() {
   // THE rule: snapshot the word BEFORE cancelling the read.
   const snapshot = bukRun.tracker ? bukRun.tracker.snapshot() : null;
   if (bukRun.tracker) bukRun.tracker.markCancelled();
+  // Freeze before the read is stopped: the words on screen now are the ones the member heard.
+  bukRun.frozenAt = bukRun.revealIndex;
   bukStopDelivery();
   if (bukRun.windowTimer) { clearTimeout(bukRun.windowTimer); bukRun.windowTimer = null; }
   bukRun.windowOpen = false;
@@ -470,6 +523,14 @@ function bukBuzz() {
   bukStatus('buk-run-status', `Locked out at ${reactionSeconds.toFixed(2)}s on "${snapshot ? snapshot.word : ''}" \u2014 answer now`, '#ffaa00');
   bukOpenAnswerPanel(BUK_ANSWER_WINDOW_S, 'tossup');
   return true;
+}
+
+// The answer is in, so the rest of the question is no longer a secret: a buzzed read reveals
+// what it had not reached yet, exactly as a completed read shows its text.
+function bukRevealFullQuestion() {
+  if (bukRun.frozenAt === null) return;
+  bukRun.frozenAt = null;
+  bukRevealUpTo((bukRun.words || []).length - 1);
 }
 
 function bukOpenAnswerPanel(seconds, phase) {
@@ -535,6 +596,7 @@ async function bukSubmitToServer(typedAnswer, buzz, expired, outcome) {
       feedback.style.color = result.correct ? '#00ff66' : '#ff6b6b';
     }
     const panel = bukEl('buk-answer-panel'); if (panel) panel.classList.add('hidden');
+    bukRevealFullQuestion();
     bukAdvance(result.next);
   } catch (err) {
     bukStatus('buk-run-status', err.message || 'Could not record that answer.', '#ff4d4d');
@@ -855,6 +917,13 @@ async function bukStartChallenge() {
   if (!bukRun.code) return;
   const btn = bukEl('buk-start-btn');
   if (btn) btn.disabled = true;
+  // Definitively unable to speak: refuse before the packet begins, so nothing is served and the
+  // member's attempt is untouched.
+  if (!bukCanReadAloud()) {
+    bukStatus('buk-start-status', BUK_READ_ALOUD_ERROR, '#ff4d4d');
+    if (btn) btn.disabled = false;
+    return;
+  }
   bukStatus('buk-start-status', 'Starting\u2026');
   try {
     const next = await bukApi(`/api/challenges/${encodeURIComponent(bukRun.code)}/next`);

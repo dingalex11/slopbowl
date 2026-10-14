@@ -28,6 +28,13 @@ UI_SERVICE_SOURCE = (ROOT / "services/ui_service.py").read_text(encoding="utf-8"
 CHALLENGE_SERVICE_SOURCE = (ROOT / "services/challenge_service.py").read_text(encoding="utf-8")
 
 
+def function_source(source, name):
+    """The text of one top-level function, from its definition to its closing brace."""
+    start = source.index(f"function {name}(")
+    end = source.index("\n}\n", start) + 3
+    return source[start:end]
+
+
 class WordOffsetTests(unittest.TestCase):
     def test_tokenize_keeps_char_offsets(self):
         tokens = words.tokenize_words("The nucleus holds DNA.")
@@ -172,6 +179,109 @@ class BuzzWordTrackerContractTests(unittest.TestCase):
     def test_the_tracker_is_reusable_beyond_the_board(self):
         self.assertIn("window.BuzzWordTracker = createBuzzWordTracker;", BUZZPOINT_SOURCE)
         self.assertIn("window.buzzTokenizeWords = buzzTokenizeWords;", BUZZPOINT_SOURCE)
+
+
+class BuzzedReadFreezeTests(unittest.TestCase):
+    """A buzz stops the read: the rest of the question stays off the screen while you answer.
+
+    The browser reports a *cancelled* utterance through 'error', not 'end'. Settling on that
+    error revealed the whole question the instant a member buzzed — measured in the browser:
+    four of eight words on screen at the buzz, all eight a beat later. The freeze is enforced
+    inside the reveal itself, so no later settle and no paced fallback can push words past the
+    word the read had reached.
+    """
+
+    def test_a_cancelled_read_never_settles(self):
+        """Both channels a browser uses to report a cancelled read must refuse it."""
+        onend = BUZZPOINT_SOURCE[BUZZPOINT_SOURCE.index("utterance.onend")
+                                 :BUZZPOINT_SOURCE.index("utterance.onerror")]
+        onerror = BUZZPOINT_SOURCE[BUZZPOINT_SOURCE.index("utterance.onerror")
+                                   :BUZZPOINT_SOURCE.index("const begin = performance.now();")]
+        for name, body in (("onend", onend), ("onerror", onerror)):
+            self.assertIn("if (bukRun.tracker && bukRun.tracker.isCancelled()) return;", body,
+                          f"{name} must refuse a cancelled read")
+        # Chromium's own wording for it, so the reason travels with the fix.
+        self.assertIn("'interrupted'", BUZZPOINT_SOURCE)
+
+    def test_the_read_is_frozen_before_it_is_stopped(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukBuzz")
+        self.assertIn("bukRun.frozenAt = bukRun.revealIndex;", body)
+        # Freezing after the cancel would leave a race the browser could win.
+        self.assertLess(body.index("bukRun.frozenAt = bukRun.revealIndex;"),
+                        body.index("bukStopDelivery();"))
+
+    def test_the_freeze_is_enforced_in_the_shared_reveal(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukRevealUpTo")
+        self.assertIn("const ceiling = bukRun.frozenAt === null ? last : Math.min(last, bukRun.frozenAt);", body)
+        self.assertIn("Math.min(index, ceiling)", body)
+
+    def test_the_rest_of_the_question_appears_once_the_answer_is_in(self):
+        self.assertIn("function bukRevealFullQuestion()", BUZZPOINT_SOURCE)
+        body = function_source(BUZZPOINT_SOURCE, "bukSubmitToServer")
+        self.assertIn("bukRevealFullQuestion();", body)
+
+    def test_each_question_starts_unfrozen(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukStartQuestion")
+        self.assertIn("bukRun.frozenAt = null;", body)
+
+    def test_the_paced_fallback_reveals_through_the_word_index_the_file_defines(self):
+        """The fallback called a function that does not exist, so on an engine that fires no
+        word boundaries the reveal threw every 120 ms and no word ever appeared."""
+        self.assertIn("function buzzWordIndexAt(words, charIndex)", BUZZPOINT_SOURCE)
+        self.assertNotIn("bukWordIndexAt(", BUZZPOINT_SOURCE)
+        body = function_source(BUZZPOINT_SOURCE, "bukStartFallbackReveal")
+        self.assertIn("bukRevealUpTo(buzzWordIndexAt(bukRun.words, elapsedSeconds * charsPerSecond));", body)
+        # The paced reveal is also a buzz-point source, so the tracker must be told the word.
+        self.assertIn("bukRun.tracker.noteCounted(bukRun.revealIndex);", body)
+
+
+class ReadAloudUnavailableTests(unittest.TestCase):
+    """A device that cannot read the question aloud must refuse the read, not fake it.
+
+    Measured in the browser with a speech engine that accepts the utterance and never speaks
+    it (no voices installed, autoplay blocked, or no TTS backend): the client declared the read
+    complete 1.5s in \u2014 the whole question on screen, the buzz window open, and then a timeout
+    recorded against a question nobody had heard. A buzz is supposed to log the word the member
+    heard, so an unspoken question is refused and the attempt is left where it is.
+    """
+
+    def test_a_silent_engine_refuses_the_read_instead_of_settling_it(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukSpeak")
+        # No engine at all, and an engine that never starts, both refuse.
+        self.assertIn("if (!window.speechSynthesis) {\n    bukReadUnavailable();\n    return;\n  }", body)
+        self.assertIn("if (performance.now() - begin > 1500) bukReadUnavailable();", body)
+        # The old bail declared the read finished, which is what dumped the question.
+        self.assertNotIn("if (spoke || performance.now() - begin > 1500) settle();", body)
+        # A read that spoke and stopped is still recovered, so an end event is not required.
+        self.assertIn("if (spoke) { settle(); return; }", body)
+
+    def test_an_error_before_any_audio_is_a_refusal_not_a_finished_read(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukSpeak")
+        self.assertIn("if (!spoke) { bukReadUnavailable(); return; }", body)
+
+    def test_a_refused_read_reveals_nothing_and_records_nothing(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukReadUnavailable")
+        self.assertIn("bukRun.windowOpen = false;", body)
+        self.assertIn("buzzBtn.disabled = true;", body)
+        self.assertIn("panel.classList.add('hidden');", body)
+        # No answer is submitted, so the attempt stays unspent for a device that speaks.
+        self.assertNotIn("bukSubmitToServer", body)
+        self.assertIn("BUK_READ_ALOUD_ERROR", body)
+        self.assertIn("bukStopDelivery();", body)
+
+    def test_the_start_button_refuses_before_the_packet_begins(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukStartChallenge")
+        self.assertIn("if (!bukCanReadAloud()) {", body)
+        # Refusal has to come before the first question is fetched.
+        self.assertLess(body.index("if (!bukCanReadAloud()) {"), body.index("await bukApi("))
+        self.assertIn("BUK_READ_ALOUD_ERROR", body)
+
+    def test_an_empty_voice_list_is_not_grounds_to_refuse(self):
+        """Chrome and iOS report no voices until speech is first used, so the read is the test."""
+        body = function_source(BUZZPOINT_SOURCE, "bukCanReadAloud")
+        self.assertIn("Boolean(window.speechSynthesis)", body)
+        self.assertIn("typeof window.SpeechSynthesisUtterance === 'function'", body)
+        self.assertNotIn("getVoices", body)
 
 
 class BoardRenderingSafetyTests(unittest.TestCase):
