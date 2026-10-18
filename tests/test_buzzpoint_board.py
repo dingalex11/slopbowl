@@ -9,6 +9,7 @@ The non-negotiable primitive under test: track every word the TTS reads, and whe
 fires, log the word being spoken at that instant as the buzz-point.
 """
 
+import json
 import unittest
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from services import ui_service
 
 ROOT = Path(__file__).resolve().parents[1]
 BUZZPOINT_SOURCE = (ROOT / "static/js/buzzpoint.js").read_text(encoding="utf-8")
+SOLO_SOURCE = (ROOT / "static/js/solo.js").read_text(encoding="utf-8")
 ANALYTICS_SOURCE = (ROOT / "static/js/buzzboard_analytics.js").read_text(encoding="utf-8")
 ROUTER_SOURCE = (ROOT / "static/js/router.js").read_text(encoding="utf-8")
 INDEX_SOURCE = (ROOT / "index.html").read_text(encoding="utf-8")
@@ -66,8 +68,25 @@ class GradingTests(unittest.TestCase):
         self.assertTrue(grading.judge_keyword("NUCLEUS", "nucleus"))
         self.assertTrue(grading.judge_keyword("MITOCHONDRIA", "the mitochondria"))
 
-    def test_single_word_answer_accepts_a_five_character_opening(self):
+    def test_a_long_answer_tolerates_a_bounded_typo(self):
+        # Bounded on purpose: a slip in a long word is forgiven, but the allowance is far
+        # too small to reach a different word of the same length.
         self.assertTrue(grading.judge_keyword("mitochondria", "mitocondria"))
+        self.assertTrue(grading.judge_keyword("NUCLEUS", "nucles"))
+        self.assertFalse(grading.judge_keyword("mitochondria", "chloroplast"))
+        self.assertFalse(grading.judge_keyword("NUCLEUS", "nucleolus"))
+
+    def test_a_short_answer_must_be_spelled_out(self):
+        # A short answer has too few characters for a typo to stay unambiguous, so the
+        # previous five-character-opening rule is gone: "tids" is not TIDES.
+        self.assertTrue(grading.judge_keyword("TIDES", "tide"))
+        self.assertFalse(grading.judge_keyword("TIDES", "tids"))
+        self.assertFalse(grading.judge_keyword("IRON", "environment"))
+
+    def test_a_regular_plural_is_the_same_answer(self):
+        self.assertTrue(grading.judge_keyword("NUCLEUS", "nuclei"))
+        self.assertTrue(grading.judge_keyword("PLASTID", "plastids"))
+        self.assertTrue(grading.judge_keyword("RADII", "radius"))
 
     def test_multi_word_answer_needs_every_significant_word(self):
         self.assertTrue(grading.judge_keyword("double helix", "it is a double helix"))
@@ -77,17 +96,159 @@ class GradingTests(unittest.TestCase):
         self.assertFalse(grading.judge_keyword("nucleus", ""))
         self.assertFalse(grading.grade_tossup({"tossup_answer": "nucleus"}, ""))
 
-    def test_multiple_choice_accepts_the_letter_or_the_phrase(self):
-        question = {"type": "MC", "tossup_answer": "W) STATIONARY"}
-        self.assertTrue(grading.grade_tossup(question, "W"))
-        self.assertTrue(grading.grade_tossup(question, "stationary"))
-        self.assertTrue(grading.grade_tossup(question, "W) STATIONARY"))
-        self.assertFalse(grading.grade_tossup(question, "X"))
-
     def test_bonus_grading_uses_the_bonus_answer(self):
         question = {"bonus_answer": "HEMOGLOBIN"}
         self.assertTrue(grading.grade_bonus(question, "hemoglobin"))
         self.assertFalse(grading.grade_bonus(question, "nucleus"))
+
+
+class AcceptAlternativeTests(unittest.TestCase):
+    """Packet alternatives: ``6,000 (ACCEPT: 6 x 10^3)`` lists two correct answers.
+
+    The parenthetical is part of the packet line, not part of the answer, so it must be
+    parsed out rather than folded into the text being matched. Measured before this existed:
+    the real packet line below scored BOTH of its own answers as wrong.
+    """
+
+    def test_a_parenthetical_alternative_is_a_correct_answer(self):
+        line = "6,000 (ACCEPT: 6 \u00d7 103 )"
+        self.assertTrue(grading.judge_keyword(line, "6,000"))
+        self.assertTrue(grading.judge_keyword(line, "6000"))
+        self.assertTrue(grading.judge_keyword(line, "6 x 10^3"))
+        self.assertTrue(grading.judge_keyword(line, "6 times 10 cubed"))
+        self.assertFalse(grading.judge_keyword(line, "6.2 kilograms"))
+        self.assertFalse(grading.judge_keyword(line, "200"))
+
+    def test_a_whole_line_written_as_an_alternative_is_accepted(self):
+        self.assertTrue(grading.judge_keyword("ACCEPT: 90 NORTH", "90 north"))
+
+    def test_several_alternatives_in_one_group(self):
+        self.assertTrue(grading.judge_keyword("RADIUS (ACCEPT: RADII, RADIUS)", "radii"))
+        self.assertTrue(grading.judge_keyword("RADIUS (ACCEPT: RADII, RADIUS)", "radius"))
+
+    def test_a_comma_inside_a_number_is_not_an_alternative_separator(self):
+        self.assertTrue(grading.judge_keyword("THICKNESS (ACCEPT: 1,000)", "1000"))
+
+    def test_a_semicolon_line_lists_equally_correct_answers(self):
+        self.assertTrue(grading.judge_keyword("MACH; KNOTS", "knots"))
+        self.assertTrue(grading.judge_keyword("MACH; KNOTS", "mach"))
+        self.assertTrue(grading.judge_keyword("HECTARE; ACRE", "acre"))
+
+    def test_an_annotation_is_not_part_of_the_answer(self):
+        self.assertTrue(grading.judge_keyword("HEAT AND PRESSURE (in any order)", "pressure and heat"))
+        line = "13 (Solution: 5 2 + 12 2 = c 2 ; c = 13)"
+        self.assertTrue(grading.judge_keyword(line, "13"))
+        self.assertFalse(grading.judge_keyword(line, "c"))
+
+    def test_every_answer_line_in_the_shipped_packet_grades_itself_correct(self):
+        # A packet's own answer must always be accepted for its own question.
+        bank = json.loads((ROOT / "questions/m_round01_bank.json").read_text(encoding="utf-8"))
+        for index, question in enumerate(bank):
+            with self.subTest(question=index + 1, field="tossup_answer"):
+                self.assertTrue(grading.grade_tossup(question, question["tossup_answer"]))
+            with self.subTest(question=index + 1, field="bonus_answer"):
+                self.assertTrue(grading.grade_bonus(question, question["bonus_answer"]))
+
+
+class NumericGradingTests(unittest.TestCase):
+    """A numeric answer is decided by value, never by the digits appearing in the reply."""
+
+    def test_the_same_number_written_differently_is_correct(self):
+        self.assertTrue(grading.judge_keyword("6000", "6,000"))
+        self.assertTrue(grading.judge_keyword("540,000", "540000"))
+        self.assertTrue(grading.judge_keyword("6000", "6 x 10^3"))
+        self.assertTrue(grading.judge_keyword("30", "thirty"))
+
+    def test_a_unit_may_be_stated_or_left_out(self):
+        # NSB's appendix: units do not need to be stated, and if stated must be correct.
+        self.assertTrue(grading.judge_keyword("6000", "6000 grams"))
+        self.assertTrue(grading.judge_keyword("6000", "6 x 10^3 grams"))
+        self.assertTrue(grading.judge_keyword("90", "90 degrees"))
+
+    def test_a_different_number_is_never_correct(self):
+        self.assertFalse(grading.judge_keyword("30", "300"))
+        self.assertFalse(grading.judge_keyword("32", "3.2"))
+        self.assertFalse(grading.judge_keyword("540,000", "5400"))
+
+    def test_a_number_inside_a_longer_expression_is_not_the_answer(self):
+        # Containment must not decide a numeric answer: 6 is not "6 x 10^3".
+        self.assertFalse(grading.judge_keyword("6", "6 x 10^3"))
+        self.assertFalse(grading.judge_keyword("13", "5 2 + 12 2"))
+
+    def test_a_qualifier_that_means_something_is_never_dropped(self):
+        # "90 south" must not satisfy a packet answer of 90 NORTH.
+        line = "90 (ACCEPT: 90\u00ba NORTH)"
+        self.assertTrue(grading.judge_keyword(line, "90 degrees north"))
+        self.assertFalse(grading.judge_keyword(line, "90 south"))
+
+
+class MultipleChoiceRuleTests(unittest.TestCase):
+    """NSB Rule 3-3 (letter or verbal answer) and Rule 3-6 (both, if both are given)."""
+
+    QUESTION = {"type": "MC", "tossup_answer": "Y) SEVEN-TENTHS"}
+
+    def test_the_letter_or_the_choice_text_is_correct(self):
+        self.assertTrue(grading.grade_tossup(self.QUESTION, "Y"))
+        self.assertTrue(grading.grade_tossup(self.QUESTION, "y"))
+        self.assertTrue(grading.grade_tossup(self.QUESTION, "seven-tenths"))
+
+    def test_case_and_punctuation_slide_but_the_wording_must_be_exact(self):
+        self.assertTrue(grading.grade_tossup(self.QUESTION, "Seven Tenths!"))
+        self.assertFalse(grading.grade_tossup(self.QUESTION, "seven tenth"))
+        self.assertFalse(grading.grade_tossup(self.QUESTION, "tenths"))
+
+    def test_when_both_are_given_both_must_be_correct(self):
+        self.assertTrue(grading.grade_tossup(self.QUESTION, "Y) seven tenths"))
+        self.assertFalse(grading.grade_tossup(self.QUESTION, "Y) ten"))
+        self.assertFalse(grading.grade_tossup(self.QUESTION, "X) seven tenths"))
+
+    def test_only_the_official_w_x_y_z_labels_are_letters(self):
+        self.assertFalse(grading.grade_tossup(self.QUESTION, "X"))
+        self.assertFalse(grading.grade_tossup(self.QUESTION, "A"))
+        self.assertFalse(grading.grade_tossup(self.QUESTION, "B"))
+
+    def test_a_choice_written_as_a_digit_takes_its_spelled_form(self):
+        question = {"type": "MC", "tossup_answer": "W) 0"}
+        self.assertTrue(grading.grade_tossup(question, "W"))
+        self.assertTrue(grading.grade_tossup(question, "0"))
+        self.assertTrue(grading.grade_tossup(question, "zero"))
+        self.assertFalse(grading.grade_tossup(question, "X"))
+
+    def test_a_short_answer_beginning_with_a_choice_letter_is_not_a_letter_answer(self):
+        # "X-RAY" is the answer, not option X, so it is graded as text.
+        self.assertTrue(grading.grade_tossup({"tossup_answer": "X-RAY"}, "xray"))
+        self.assertFalse(grading.grade_tossup({"tossup_answer": "X-RAY"}, "W"))
+
+
+class SoloJudgeMirrorTests(unittest.TestCase):
+    """``core/grading.py`` is the reference; ``soloJudgeAnswer`` must not drift from it.
+
+    There is no JS runtime in the suite, so the mirror is pinned by asserting on its source
+    the way the other frontend tests do. The behaviour of both sides was verified against
+    the same case table (46 cases) before this was written.
+    """
+
+    def test_the_solo_judge_keeps_the_same_rule_functions(self):
+        for name in (
+            "soloCandidateAnswers", "soloJudgeKeyword", "soloJudgeMultipleChoice",
+            "soloNumericReplyMatches", "soloReplyNumber", "soloMatchesCandidate",
+            "soloTypoAllowance", "soloPhrasesEqual",
+        ):
+            with self.subTest(function=name):
+                self.assertIn(f"function {name}(", SOLO_SOURCE)
+
+    def test_the_solo_judge_reads_the_same_packet_markers(self):
+        # The ACCEPT group, the annotation parenthetical, the W/X/Y/Z choice line, and the
+        # bounded typo bands must all be present on both sides.
+        self.assertIn("accept", SOLO_SOURCE.lower())
+        self.assertIn("SOLO_MC_LINE", SOLO_SOURCE)
+        self.assertIn("SOLO_UNIT_WORDS", SOLO_SOURCE)
+        for band in ("if (word.length < 6) return 0;", "if (word.length < 9) return 1;"):
+            with self.subTest(band=band):
+                self.assertIn(band, SOLO_SOURCE)
+
+    def test_the_solo_judge_is_wired_into_the_drill(self):
+        self.assertIn("soloJudgeAnswer(entry.question, response)", SOLO_SOURCE)
 
 
 class ChallengeStateMachineTests(unittest.TestCase):
@@ -561,6 +722,73 @@ class LiveBoardTests(unittest.TestCase):
 
     def test_a_board_with_no_runs_is_followed_until_the_first_one_lands(self):
         self.assertIn("it will fill in as members play", ANALYTICS_SOURCE)
+
+
+class MultipleChoiceReadTests(unittest.TestCase):
+    """A multiple-choice stem is unreadable without its choices.
+
+    A packet serves a choice question as a stem plus an ``options`` list, and the reader spoke
+    the stem alone — so a multiple-choice toss-up stopped at "which of the following" and the
+    choices were neither read nor shown. Measured on a real sample packet: every choice
+    question reached the member with its choices missing.
+
+    The fix composes ONE read — stem then every choice — so the spoken text, the word clock
+    that logs the buzz-point word, and the word-by-word reveal all cover the same words.
+    """
+
+    def test_the_read_is_the_stem_followed_by_every_choice(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukReadParts")
+        self.assertIn("question.options", body)
+        self.assertIn("parts.push", body)
+        # One string, so the utterance and the reveal cannot disagree about the words.
+        self.assertIn("join(' ')", body)
+
+    def test_the_read_is_composed_once_and_used_by_both_channels(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukStartQuestion")
+        self.assertIn("const read = bukReadParts(question);", body)
+        self.assertIn("bukSpeak(read.text)", body)
+        self.assertIn("createBuzzWordTracker(read.text", body)
+        self.assertIn("buzzTokenizeWords(read.text)", body)
+        # The stem alone must never be spoken again.
+        self.assertNotIn("bukSpeak(question.text", body)
+        self.assertNotIn("createBuzzWordTracker(question.text", body)
+
+    def test_each_choice_is_drawn_on_its_own_line(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukPrepareReveal")
+        self.assertIn("buk-question-options", body)
+        # A choice line exists before the read reaches it, but stays invisible.
+        self.assertIn("line.style.display = 'none'", body)
+        self.assertIn("optionsEl.classList.remove('hidden')", body)
+
+    def test_a_choice_appears_only_when_the_read_reaches_it(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukRevealUpTo")
+        self.assertIn("bukRun.wordHosts[i]", body)
+        self.assertIn("host.style.display = ''", body)
+
+    def test_the_run_screen_has_a_place_for_the_choices(self):
+        self.assertIn('id="buk-question-options"', INDEX_SOURCE)
+
+    def test_the_choices_are_served_with_the_question_for_both_phases(self):
+        bank = [{
+            "tossup_text": "Which of the following is a gas: ",
+            "tossup_options": ["W) oxygen", "X) hydrogen"],
+            "bonus_text": "Which of these is a metal: ",
+            "bonus_options": ["W) iron", "X) neon"],
+        }]
+        run = challenge.create_run_doc("c", "u", "n", 1, "now")
+        tossup = challenge.next_question_payload(bank, run)
+        self.assertEqual(tossup["options"], ["W) oxygen", "X) hydrogen"])
+        run["phase"] = "bonus"
+        bonus = challenge.next_question_payload(bank, run)
+        self.assertEqual(bonus["options"], ["W) iron", "X) neon"])
+        # The answer key still never travels with them.
+        self.assertNotIn("tossup_answer", tossup)
+        self.assertNotIn("bonus_answer", bonus)
+
+    def test_a_short_answer_question_is_read_exactly_as_before(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukReadParts")
+        # No choices means one part: the stem, unchanged.
+        self.assertIn("filter(Boolean)", body)
 
 
 if __name__ == "__main__":

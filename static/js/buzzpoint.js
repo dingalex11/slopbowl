@@ -236,7 +236,8 @@ const bukRun = {
   readStart: 0, buzzAt: 0, firstKeystrokeAt: 0,
   wordStreamDone: false, speechDone: false, displayMode: 'hybrid',
   streamTimer: null, windowTimer: null, lockoutTimer: null, speechPoll: null,
-  utterance: null, words: [], shownWords: 0, wordSpans: [], revealIndex: -1,
+  utterance: null, words: [], shownWords: 0, wordSpans: [], wordHosts: [], revealIndex: -1,
+  readText: '', readParts: [],
   sawBoundary: false, fallbackTimer: null, fallbackInterval: null,
   answering: false, awaitingNext: false,
   // The last word the read was allowed to show. A buzz sets it, so the rest of the question
@@ -272,6 +273,34 @@ function bukStopDelivery() {
   bukStopSpeech();
 }
 
+// A multiple-choice question is unreadable without its choices: the stem ends in a colon and
+// the choices ARE the rest of the question. They arrive as their own field, so the read is
+// the stem followed by every choice — one utterance, one word list, one buzz clock — rather
+// than a stem that stops at "which of the following" and is never finished.
+function bukReadParts(question) {
+  const stem = String((question && question.text) || '');
+  const options = (Array.isArray(question && question.options) ? question.options : [])
+    .map((option) => String(option == null ? '' : option).trim())
+    .filter(Boolean);
+  const parts = [{ kind: 'stem', text: stem, start: 0 }];
+  let cursor = stem.length + 1;
+  options.forEach((option) => {
+    parts.push({ kind: 'option', text: option, start: cursor });
+    cursor += option.length + 1;
+  });
+  return { parts, text: parts.map((part) => part.text).join(' ') };
+}
+
+// Which part of the read a word at this character offset belongs to. Used to put each choice
+// on its own line without splitting the single word list the tracker counts.
+function bukPartIndexFor(parts, charIndex) {
+  let found = 0;
+  for (let i = 0; i < parts.length; i += 1) {
+    if (parts[i].start <= charIndex) found = i;
+  }
+  return found;
+}
+
 // Stream the words on a timer (the deterministic counted source) and speak aloud in
 // parallel. A read is over only when BOTH channels are.
 function bukStartQuestion(question) {
@@ -283,12 +312,16 @@ function bukStartQuestion(question) {
   bukRun.speechDone = false;
   bukRun.firstKeystrokeAt = 0;
   bukRun.buzzAt = 0;
-  bukRun.words = buzzTokenizeWords(question.text || '');
+  // The choices are part of the question being read, not a caption under it.
+  const read = bukReadParts(question);
+  bukRun.readText = read.text;
+  bukRun.readParts = read.parts;
+  bukRun.words = buzzTokenizeWords(read.text);
   bukRun.shownWords = 0;
   bukRun.frozenAt = null;
   // The captain chose this at creation; the server repeats it on every question payload.
   bukRun.displayMode = question.displayMode === 'audio-only' ? 'audio-only' : 'hybrid';
-  bukRun.tracker = createBuzzWordTracker(question.text || '', { wordsPerSecond: 2.6 });
+  bukRun.tracker = createBuzzWordTracker(read.text, { wordsPerSecond: 2.6 });
 
   const progressLabel = bukEl('buk-run-progress');
   if (progressLabel) {
@@ -304,16 +337,22 @@ function bukStartQuestion(question) {
   bukRun.readStart = performance.now();
   bukRun.tracker.noteStart();
   bukPrepareReveal();
-  bukSpeak(question.text || '');
+  bukSpeak(read.text);
 }
 
 function bukPrepareReveal() {
   const textEl = bukEl('buk-question-text');
+  const optionsEl = bukEl('buk-question-options');
   if (textEl) textEl.replaceChildren();
+  if (optionsEl) {
+    optionsEl.replaceChildren();
+    optionsEl.classList.add('hidden');
+  }
+  bukRun.wordSpans = [];
+  bukRun.wordHosts = [];
   if (bukRun.displayMode === 'audio-only') {
     // Audio-only: the words are never shown. A status line and the progress bar are the
     // only on-screen record of the read; the tracker still follows the audio for the buzz.
-    bukRun.wordSpans = [];
     bukRun.revealIndex = -1;
     const notice = document.createElement('p');
     notice.className = 'text-sm font-mono font-black text-neonCyan uppercase tracking-widest';
@@ -324,12 +363,28 @@ function bukPrepareReveal() {
   }
   // Pre-create every word as a hidden text node so the reveal only toggles visibility:
   // the layout stays put and untrusted packet text stays text (never markup).
-  bukRun.wordSpans = bukRun.words.map((word) => {
+  // Each choice gets its own line, hidden until the read reaches it: a choice that has not
+  // been spoken yet must not appear.
+  const parts = bukRun.readParts && bukRun.readParts.length
+    ? bukRun.readParts
+    : [{ kind: 'stem', text: bukRun.readText || '', start: 0 }];
+  const hosts = parts.map((part, index) => {
+    if (index === 0) return textEl;
+    const line = document.createElement('div');
+    line.className = 'mt-1';
+    line.style.display = 'none';
+    if (optionsEl) optionsEl.appendChild(line);
+    return line;
+  });
+  if (optionsEl && parts.length > 1) optionsEl.classList.remove('hidden');
+  bukRun.words.forEach((word) => {
+    const host = hosts[bukPartIndexFor(parts, word.start)] || textEl;
     const span = document.createElement('span');
     span.textContent = `${word.word} `;
     span.style.visibility = 'hidden';
-    if (textEl) textEl.appendChild(span);
-    return span;
+    if (host) host.appendChild(span);
+    bukRun.wordSpans.push(span);
+    bukRun.wordHosts.push(host || null);
   });
   bukRun.revealIndex = -1;
   if (!bukRun.words.length) bukRun.wordStreamDone = true;
@@ -348,6 +403,8 @@ function bukRevealUpTo(index) {
   if (bukRun.displayMode !== 'audio-only') {
     for (let i = bukRun.revealIndex + 1; i <= target; i += 1) {
       if (bukRun.wordSpans[i]) bukRun.wordSpans[i].style.visibility = 'visible';
+      const host = bukRun.wordHosts[i];
+      if (host && host.style.display === 'none') host.style.display = '';
     }
   }
   bukRun.revealIndex = target;
