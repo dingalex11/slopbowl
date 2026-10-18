@@ -110,6 +110,23 @@ function createBuzzWordTracker(text, options) {
     };
   }
 
+  // A buzz in the five seconds AFTER the read is not a buzz on any word: the member heard the
+  // whole question, so there is no word to point at. Reported as an 'end' capture with no word
+  // attached \u2014 recording the last word would put the buzz back inside the question and count
+  // it as an interrupt on the board.
+  function snapshotAtEnd() {
+    return {
+      word: null,
+      wordIndex: null,
+      charIndex: null,
+      wordsHeard: totalWords,
+      totalWords,
+      captureSource: 'end',
+      lastConfirmedWord: totalWords ? words[totalWords - 1].word : null,
+      confidence: 'after the last word',
+    };
+  }
+
   // Flag BEFORE speechSynthesis.cancel(): cancel fires terminal events, and a cancel must
   // never be mistaken for the read finishing (or a word completing).
   function markCancelled() { cancelRequested = true; }
@@ -122,7 +139,7 @@ function createBuzzWordTracker(text, options) {
 
   return {
     words, totalWords, noteStart, noteBoundary, noteCounted,
-    snapshot, markCancelled, isCancelled, noteNaturalEnd,
+    snapshot, snapshotAtEnd, markCancelled, isCancelled, noteNaturalEnd,
   };
 }
 
@@ -235,7 +252,7 @@ const bukRun = {
   delivering: false, windowOpen: false, answered: false,
   readStart: 0, buzzAt: 0, firstKeystrokeAt: 0,
   wordStreamDone: false, speechDone: false, displayMode: 'hybrid',
-  streamTimer: null, lockoutTimer: null, speechPoll: null,
+  streamTimer: null, lockoutTimer: null, windowTimer: null, windowDeadline: 0, speechPoll: null,
   utterance: null, words: [], shownWords: 0, wordSpans: [], revealIndex: -1,
   readText: '',
   sawBoundary: false, fallbackTimer: null, fallbackInterval: null,
@@ -250,6 +267,10 @@ const bukRun = {
 
 const BUK_ANSWER_WINDOW_S = 5.0;
 const BUK_BONUS_WINDOW_S = 20.0;
+// The toss-up read ends with a five-second buzzpoint, not with the last word: the member has
+// heard the whole question and may still buzz. Five seconds after the final word the toss-up
+// is over and is recorded as expired.
+const BUK_TOSSUP_WINDOW_S = 5.0;
 // Realistic spoken pace (chars/sec at rate 1) for the reveal fallback when the engine gives
 // no word boundaries. Matches the app's measured pace (SOLO_SPOKEN_CHARS_PER_SECOND).
 const BUK_SPOKEN_CHARS_PER_SECOND = 12;
@@ -276,8 +297,35 @@ function bukOpenBuzzpoint() {
 
 function bukEndBuzzpoint() {
   bukRun.windowOpen = false;
+  bukRun.windowDeadline = 0;
+  if (bukRun.windowTimer) { clearInterval(bukRun.windowTimer); bukRun.windowTimer = null; }
   const buzzBtn = bukEl('buk-buzz-btn');
   if (buzzBtn) buzzBtn.disabled = true;
+  // The countdown belongs to the window, so it leaves with it.
+  const timerEl = bukEl('buk-buzz-timer');
+  if (timerEl) timerEl.textContent = '';
+}
+
+// After the read, the buzzpoint is still open for BUK_TOSSUP_WINDOW_S. The countdown is drawn
+// on screen (and in the status line) so the window is visible rather than inferred from a
+// button that stays enabled for a few more seconds. At zero the toss-up is over: the buzzpoint
+// closes and the question is recorded as expired.
+function bukStartBuzzDeadline() {
+  bukOpenBuzzpoint();
+  const timerEl = bukEl('buk-buzz-timer');
+  const deadline = performance.now() + BUK_TOSSUP_WINDOW_S * 1000;
+  bukRun.windowDeadline = deadline;
+  const tick = () => {
+    const remaining = Math.max(0, (deadline - performance.now()) / 1000);
+    if (timerEl) timerEl.textContent = `${remaining.toFixed(1)}s left to buzz`;
+    bukStatus('buk-run-status', `Read complete \u2014 ${remaining.toFixed(1)}s to buzz.`, '#ffaa00');
+    if (remaining <= 0) {
+      bukEndBuzzpoint();
+      bukSubmitToServer('', null, true, 'expired'); // no buzz in the window: wrong, no answer
+    }
+  };
+  bukRun.windowTimer = setInterval(tick, 100);
+  tick();
 }
 
 // A fresh question starts with no buzz on record: the previous question's word must not sit
@@ -543,16 +591,14 @@ function bukFinishDelivery() {
   if (bukRun.answered || !bukRun.delivering) return;
   if (!bukRun.wordStreamDone || !bukRun.speechDone) return;
   bukRun.delivering = false;
-  // The read is the question: when it ends, the buzzpoint ends with it. An unbuzzed tossup is
-  // over, so it is recorded as expired instead of leaving a buzz window open on a question
-  // the member has already heard in full.
-  bukEndBuzzpoint();
   if (bukRun.question && bukRun.question.phase === 'bonus') {
-    bukStatus('buk-run-status', `Read complete \u2014 ${BUK_BONUS_WINDOW_S}s to type your bonus answer.`, '#00f3ff');
+    // A bonus is not buzzable, so its read hands straight over to the 20-second answer window.
+    bukEndBuzzpoint();
+    bukStatus('buk-run-status', `Read complete \u2014 ${BUK_BONUS_WINDOW_S.toFixed(0)}s to type your bonus answer.`, '#00f3ff');
     bukOpenAnswerPanel(BUK_BONUS_WINDOW_S, 'bonus');
   } else {
-    bukStatus('buk-run-status', 'Read complete \u2014 no buzz, question over.', '#ffaa00');
-    bukSubmitToServer('', null, true, 'expired');  // no buzz: wrong, no answer
+    // A toss-up is still buzzable for five seconds after the last word.
+    bukStartBuzzDeadline();
   }
 }
 
@@ -561,9 +607,15 @@ function bukBuzz() {
   if (!bukRun.windowOpen && !bukRun.delivering) return false;
   if (bukRun.question.phase === 'bonus') return false;
 
+  // A buzz in the post-read window was heard against the whole question, so it is captured
+  // at the END: no word, capture source 'end'. Buzzing before the read ends still snapshots
+  // the word the member was on.
+  const atEnd = !bukRun.delivering && bukRun.wordStreamDone && bukRun.speechDone;
   // THE rule: snapshot the word BEFORE cancelling the read.
-  const snapshot = bukRun.tracker ? bukRun.tracker.snapshot() : null;
-  if (bukRun.tracker) bukRun.tracker.markCancelled();
+  const snapshot = bukRun.tracker
+    ? (atEnd ? bukRun.tracker.snapshotAtEnd() : bukRun.tracker.snapshot())
+    : null;
+  if (bukRun.tracker && !atEnd) bukRun.tracker.markCancelled();
   // Freeze before the read is stopped: the words on screen now are the ones the member heard.
   bukRun.frozenAt = bukRun.revealIndex;
   bukStopDelivery();
@@ -573,10 +625,16 @@ function bukBuzz() {
 
   bukRun.pendingBuzz = { ...snapshot, reactionSeconds: Number(reactionSeconds.toFixed(3)) };
   const wordEl = bukEl('buk-buzz-word');
-  if (wordEl) wordEl.textContent = snapshot && snapshot.word ? snapshot.word : '(no word)';
+  if (wordEl) {
+    wordEl.textContent = snapshot && snapshot.captureSource === 'end'
+      ? '[end]'
+      : (snapshot && snapshot.word ? snapshot.word : '(no word)');
+  }
   const srcEl = bukEl('buk-buzz-source');
   if (srcEl) srcEl.textContent = snapshot ? `${snapshot.captureSource} \u2022 ${snapshot.wordsHeard}/${snapshot.totalWords} words` : '';
-  bukStatus('buk-run-status', `Locked out at ${reactionSeconds.toFixed(2)}s on "${snapshot ? snapshot.word : ''}" \u2014 answer now`, '#ffaa00');
+  bukStatus('buk-run-status', atEnd
+    ? `Buzzed at the end of the question \u2014 answer now`
+    : `Locked out at ${reactionSeconds.toFixed(2)}s on "${snapshot ? snapshot.word : ''}" \u2014 answer now`, '#ffaa00');
   bukOpenAnswerPanel(BUK_ANSWER_WINDOW_S, 'tossup');
   return true;
 }
@@ -596,7 +654,12 @@ function bukOpenAnswerPanel(seconds, phase) {
   if (input) { input.value = ''; input.focus(); }
   bukRun.answerPhase = phase;
   bukRun.answering = true;
+  const title = bukEl('buk-answer-title');
+  if (title) title.textContent = phase === 'bonus' ? `Bonus answer \u2014 ${seconds.toFixed(0)}s` : `Type your answer \u2014 ${seconds.toFixed(0)}s`;
   const label = bukEl('buk-answer-timer');
+  // Show the full window at once: the label used to say 5.0s until the first tick, so a bonus
+  // opened looking like a toss-up answer window.
+  if (label) label.textContent = `${seconds.toFixed(1)}s`;
   const deadline = performance.now() + seconds * 1000;
   bukRun.lockoutTimer = setInterval(() => {
     const remaining = Math.max(0, (deadline - performance.now()) / 1000);
@@ -719,7 +782,11 @@ function bukRenderOwnSummary() {
     const row = document.createElement('div');
     row.className = 'flex items-center gap-2 text-xs font-mono text-slate-300 border-b border-borderDark py-1';
     const q = document.createElement('span'); q.className = 'text-slate-500'; q.textContent = `Q${rec.qIndex + 1}`;
-    const w = document.createElement('span'); w.className = 'text-neonCyan'; w.textContent = rec.buzz && rec.buzz.word ? rec.buzz.word : '\u2014';
+    const w = document.createElement('span'); w.className = 'text-neonCyan';
+    // A buzz after the read is marked at the end, not on the question's last word.
+    w.textContent = rec.buzz && rec.buzz.captureSource === 'end'
+      ? '[end]'
+      : (rec.buzz && rec.buzz.word ? rec.buzz.word : '\u2014');
     const s = document.createElement('span'); s.className = 'text-slate-500'; s.textContent = rec.buzz ? rec.buzz.captureSource : '';
     const v = document.createElement('span'); v.textContent = rec.verdict || '';
     v.style.color = rec.correct ? '#00ff66' : '#ff6b6b';
@@ -777,7 +844,9 @@ function bukBoardCsvRows(runs, questions) {
         questionText,
         question.tossup_answer || '',
         run.displayName || run.uid,
-        r.buzzWord == null ? '' : r.buzzWord,
+        // An end-of-question buzz has no word: it is marked [end] with no index, so the
+        // captain's export cannot read it as a buzz on the final word.
+        r.captureSource === 'end' ? '[end]' : (r.buzzWord == null ? '' : r.buzzWord),
         r.buzzWordIndex == null ? '' : r.buzzWordIndex + 1,
         depth,
         r.wordsHeard == null ? '' : r.wordsHeard,
@@ -1128,7 +1197,10 @@ function bukInit() {
   // Keyboard controls (see the run legend): Space buzzes, Enter submits, N goes next.
   document.addEventListener('keydown', (event) => {
     const active = document.activeElement;
-    const typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+    // A hidden answer input keeps focus after its panel closes; it cannot receive typing, so
+    // it must not swallow the Space that buzzes on the next question either.
+    const typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')
+      && active.offsetParent !== null;
     if (event.code === 'Space') {
       // Streaming / active clue -> buzz (the Buzz button does the same).
       if (!typing && bukRun.question && !bukRun.answered && (bukRun.windowOpen || bukRun.delivering)) {

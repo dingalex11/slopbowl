@@ -538,7 +538,10 @@ function bbxBuildModels() {
     question.attempts += 1;
     if (row.verdict === 'correct') question.correct += 1;
     if (row.verdict === 'wrong') question.wrong += 1;
-    if (row.buzzIndex === null) {
+    // An 'end' buzz has no word index but is still a buzz: the member heard the whole
+    // question and buzzed in the five seconds after it. Only a run with no buzz at all
+    // counts as a no-buzz on the END line.
+    if (row.buzzIndex === null && row.captureSource !== 'end') {
       question.noBuzz += 1;
     } else {
       question.buzzes.push(row);
@@ -575,7 +578,7 @@ function bbxBuildModels() {
     const bucket = player.subjects[subjectKey];
     bucket.attempts += 1;
     if (row.verdict === 'correct') { player.correct += 1; bucket.correct += 1; }
-    if (row.buzzIndex !== null) {
+    if (row.buzzIndex !== null || row.captureSource === 'end') {
       player.buzzes += 1;
       if (row.depth !== null) { player.depthSum += row.depth; player.depthCount += 1; }
       if (row.verdict === 'wrong') { player.negs += 1; bucket.negs += 1; }
@@ -800,7 +803,9 @@ function bbxQuestionCard(question) {
       span.style.padding = '0 3px';
       span.style.cursor = 'pointer';
       if (!matches) span.style.opacity = '0.25';
-      span.title = showHits.map((hit) => `${hit.member}: ${hit.verdict === 'correct' ? 'Correct' : 'Neg'} \u2014 "${hit.typedAnswer || '\u2014'}"`).join('\n');
+      // The names and verdicts live in the styled tooltip; a native title would open a second,
+      // unpainted tooltip on top of it with the same list.
+      span.setAttribute('aria-label', showHits.map((hit) => `${hit.member}: ${hit.verdict === 'correct' ? 'Correct' : 'Neg'}`).join(', '));
       span.addEventListener('mouseenter', () => bbxShowTooltip(span, showHits, correct));
       span.addEventListener('mouseleave', bbxHideTooltip);
       span.addEventListener('click', () => {
@@ -813,10 +818,25 @@ function bbxQuestionCard(question) {
     bbxAppend(prose, 'span', 'text-slate-500', 'This export carried no question text \u2014 re-download the board CSV to include it.');
   }
 
-  // Footer: how the question ended, and the answer on request.
+  // Footer: who buzzed at the END, how many never buzzed, and the answer on request.
   const foot = bbxAppend(body, 'div', 'pt-2 flex flex-wrap items-center justify-between gap-2 text-xs border-t border-borderDark');
-  const footLeft = bbxAppend(foot, 'div', 'flex items-center gap-3');
-  bbxAppend(footLeft, 'span', 'px-2 py-0.5 rounded text-[11px] font-mono font-medium border border-neonPink/50 bg-panel text-neonPink', `END \u00b7 ${question.noBuzz}`);
+  const footLeft = bbxAppend(foot, 'div', 'flex flex-wrap items-center gap-2');
+  // An end buzz has no word to hover, so the END badge carries the whole list in its tooltip
+  // rather than repeating every member inline.
+  const endBuzzes = question.buzzes.filter((buzz) => buzz.captureSource === 'end');
+  const endBadge = bbxAppend(footLeft, 'span', 'px-2 py-0.5 rounded text-[11px] font-mono font-medium border border-neonPink/50 bg-panel text-neonPink', `END \u00b7 ${endBuzzes.length}`);
+  if (endBuzzes.length) {
+    endBadge.className += ' cursor-help';
+    endBadge.setAttribute('aria-label', `${endBuzzes.length} end buzz${endBuzzes.length === 1 ? '' : 'es'}`);
+    endBadge.addEventListener('mouseenter', () => {
+      bbxShowTooltip(endBadge, endBuzzes, endBuzzes.some((hit) => hit.verdict === 'correct'));
+    });
+    endBadge.addEventListener('mouseleave', bbxHideTooltip);
+  }
+  // A run that ended without any buzz is not an end buzz: it keeps its own count.
+  if (question.noBuzz) {
+    bbxAppend(footLeft, 'span', 'px-2 py-0.5 rounded text-[11px] font-mono text-slate-500 border border-borderDark bg-panel', `NO BUZZ \u00b7 ${question.noBuzz}`);
+  }
   const answerBtn = document.createElement('button');
   answerBtn.type = 'button';
   answerBtn.className = 'inline-flex items-center text-slate-400 hover:text-white font-medium';
@@ -862,36 +882,34 @@ function bbxShowTooltip(anchor, hits, correct) {
   const tip = bbxEl('bbx-tooltip');
   if (!tip) return;
   tip.replaceChildren();
-  const primary = hits[0];
-  const head = bbxAppend(tip, 'div', 'flex items-center gap-1.5 mb-1');
-  const dot = bbxAppend(head, 'span', 'inline-block w-2.5 h-2.5 rotate-45 border');
-  dot.style.borderColor = correct ? '#00ff66' : '#ff0055';
-  dot.style.background = correct ? 'rgba(0,255,102,0.3)' : 'rgba(255,0,85,0.3)';
-  bbxAppend(head, 'span', 'font-bold text-white tracking-wide', primary.member);
-  bbxAppend(head, 'span', 'px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ml-1 border',
-    correct ? 'Correct' : 'Neg')
-    .style.cssText = `color:${correct ? '#00ff66' : '#ff0055'};border-color:${correct ? '#00ff66' : '#ff0055'}`;
-  const table = bbxAppend(tip, 'div', 'border-t border-borderDark pt-2 space-y-1 text-[11px]');
+  tip.style.borderColor = correct ? '#00ff66' : '#ff0055';
+  // Just the member and whether they were right. The word already shows the buzz position,
+  // the verdict already implies the answer, and the points follow from the verdict.
   hits.forEach((hit, index) => {
-    if (index > 0) bbxAppend(table, 'div', 'border-t border-borderDark my-1');
-    const row = (label, value) => {
-      const line = bbxAppend(table, 'div', 'flex justify-between gap-3');
-      bbxAppend(line, 'span', 'text-slate-500', label);
-      bbxAppend(line, 'span', 'text-slate-100 font-mono', value);
-    };
-    row('Given Answer:', hit.typedAnswer ? `"${hit.typedAnswer}"` : '\u2014');
-    row('Buzz Position:', `${hit.depth === null ? '\u2014' : `${Math.round(hit.depth)}%`} (Word ${hit.buzzIndex})`);
-    row('Point Impact:', `${hit.verdict === 'correct' ? '+' : ''}${hit.verdict === 'correct' ? BBX_CORRECT_POINTS : BBX_NEG_POINTS} pts`);
+    if (index > 0) bbxAppend(tip, 'div', 'border-t border-white/20 my-1.5');
+    const hitCorrect = hit.verdict === 'correct';
+    const row = bbxAppend(tip, 'div', 'flex items-center gap-1.5');
+    const dot = bbxAppend(row, 'span', 'inline-block w-2.5 h-2.5 rotate-45 border');
+    dot.style.borderColor = hitCorrect ? '#00ff66' : '#ff0055';
+    dot.style.background = hitCorrect ? 'rgba(0,255,102,0.3)' : 'rgba(255,0,85,0.3)';
+    bbxAppend(row, 'span', 'font-bold text-white tracking-wide', hit.member);
+    // A wrong answer after the question was read in full is just incorrect; a neg is an
+    // interrupt, which by definition happens before the read finishes.
+    const verdictText = hitCorrect ? 'Correct' : (hit.captureSource === 'end' ? 'Incorrect' : 'Neg');
+    const verdict = bbxAppend(row, 'span', 'text-[10px] font-black uppercase tracking-wider', verdictText);
+    verdict.style.color = hitCorrect ? '#00ff66' : '#ff0055';
   });
   tip.classList.remove('hidden');
   const rect = anchor.getBoundingClientRect();
-  const width = tip.offsetWidth || 250;
+  const width = tip.offsetWidth || 300;
   const height = tip.offsetHeight || 120;
   let left = rect.left + (rect.width / 2) - (width / 2);
   let top = rect.bottom + 7;
   if (top + height > window.innerHeight) top = rect.top - height - 7;
   tip.style.left = `${Math.max(10, Math.min(left, window.innerWidth - width - 10))}px`;
-  tip.style.top = `${Math.max(10, top)}px`;
+  // A list of several buzzers is a tall panel; keep it on screen when it has to flip above
+  // an anchor near the bottom.
+  tip.style.top = `${Math.max(10, Math.min(top, window.innerHeight - height - 10))}px`;
 }
 
 function bbxHideTooltip() {

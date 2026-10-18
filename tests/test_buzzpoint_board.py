@@ -397,12 +397,17 @@ class BuzzedReadFreezeTests(unittest.TestCase):
 
 
 class BuzzpointLifetimeTests(unittest.TestCase):
-    """The buzzpoint lives for exactly one question, and only while it is being read.
+    """The buzzpoint lives for one question: its read, then its five seconds.
 
-    Measured before this: the button was enabled when the read *finished* (a five-second
-    post-read window) and disabled forever after the first buzz \u2014 so from the second
-    question on, the one control meant for buzzing could not be clicked mid-read at all, while
-    an already-answered question could still be buzzed.
+    Measured before this: the button was enabled when the read *finished* and disabled forever
+    after the first buzz \u2014 so from the second question on, the one control meant for buzzing
+    could not be clicked mid-read at all, while an already-answered question could still be
+    buzzed. It now follows the question's whole lifetime, and the post-read window has a
+    visible countdown instead of being inferred from a button that stays enabled.
+
+    A buzz in that window was heard against the whole question, so it is captured as an 'end'
+    buzz with no word and no word index: the board must never mark the final word as if the
+    member had buzzed before hearing it.
     """
 
     def test_the_buzz_button_opens_with_the_read(self):
@@ -412,15 +417,56 @@ class BuzzpointLifetimeTests(unittest.TestCase):
         self.assertIn("buzzBtn.disabled = false;", opener)
         self.assertIn("bukRun.windowOpen = true;", opener)
 
-    def test_the_buzzpoint_ends_when_the_question_is_over(self):
+    def test_the_read_ends_in_a_five_second_buzz_window(self):
+        self.assertIn("const BUK_TOSSUP_WINDOW_S = 5.0;", BUZZPOINT_SOURCE)
         finish = function_source(BUZZPOINT_SOURCE, "bukFinishDelivery")
-        self.assertIn("bukEndBuzzpoint();", finish)
-        # An unbuzzed tossup is over at the end of the read, not five seconds later: no burst
-        # of buzzing on a question the member has already heard in full.
-        self.assertIn("bukSubmitToServer('', null, true, 'expired');", finish)
-        self.assertLess(finish.index("bukEndBuzzpoint();"),
-                        finish.index("bukSubmitToServer('', null, true, 'expired');"))
-        self.assertNotIn("BUK_TOSSUP_WINDOW_S", BUZZPOINT_SOURCE)
+        self.assertIn("bukStartBuzzDeadline();", finish)
+        # The read does not score the toss-up: the window's expiry does.
+        self.assertNotIn("bukSubmitToServer('', null, true, 'expired');", finish)
+        window = function_source(BUZZPOINT_SOURCE, "bukStartBuzzDeadline")
+        self.assertIn("const deadline = performance.now() + BUK_TOSSUP_WINDOW_S * 1000;", window)
+        self.assertIn("bukEndBuzzpoint();", window)
+        self.assertIn("bukSubmitToServer('', null, true, 'expired');", window)
+        # The countdown is drawn, so the open window is visible rather than assumed.
+        self.assertIn("buk-buzz-timer", window)
+        self.assertIn("bukRun.windowTimer = setInterval(tick, 100);", window)
+
+    def test_a_finished_read_is_still_buzzable_until_the_window_closes(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukBuzz")
+        # The window opens the button without a read running behind it.
+        self.assertIn("if (!bukRun.windowOpen && !bukRun.delivering) return false;", body)
+        self.assertIn("const atEnd = !bukRun.delivering && bukRun.wordStreamDone && bukRun.speechDone;", body)
+        self.assertIn("snapshotAtEnd()", body)
+        # A hidden answer input keeps focus after its panel closes; Space must still buzz.
+        self.assertIn("&& active.offsetParent !== null;", BUZZPOINT_SOURCE)
+        self.assertIn("if (!typing && bukRun.question && !bukRun.answered && (bukRun.windowOpen || bukRun.delivering))", BUZZPOINT_SOURCE)
+
+    def test_an_end_buzz_is_marked_at_the_end_not_on_the_last_word(self):
+        end = BUZZPOINT_SOURCE[BUZZPOINT_SOURCE.index("function snapshotAtEnd()")
+                               :BUZZPOINT_SOURCE.index("// Flag BEFORE speechSynthesis.cancel()")]
+        self.assertIn("word: null,", end)
+        self.assertIn("wordIndex: null,", end)
+        self.assertIn("charIndex: null,", end)
+        self.assertIn("captureSource: 'end',", end)
+        self.assertIn("wordsHeard: totalWords,", end)
+        # The member sees [end] where a word would sit, and the export says the same.
+        body = function_source(BUZZPOINT_SOURCE, "bukBuzz")
+        self.assertIn("? '[end]'", body)
+        self.assertIn("rec.buzz.captureSource === 'end'", BUZZPOINT_SOURCE)
+        self.assertIn("r.captureSource === 'end' ? '[end]'", BUZZPOINT_SOURCE)
+
+    def test_the_bonus_read_opens_the_twenty_second_answer_window(self):
+        self.assertIn("const BUK_BONUS_WINDOW_S = 20.0;", BUZZPOINT_SOURCE)
+        finish = function_source(BUZZPOINT_SOURCE, "bukFinishDelivery")
+        self.assertIn("bukOpenAnswerPanel(BUK_BONUS_WINDOW_S, 'bonus');", finish)
+        panel = function_source(BUZZPOINT_SOURCE, "bukOpenAnswerPanel")
+        self.assertIn("const deadline = performance.now() + seconds * 1000;", panel)
+        # The window's full length shows at once instead of the panel's 5.0s placeholder.
+        self.assertIn("label.textContent = `${seconds.toFixed(1)}s`;", panel)
+        self.assertIn("bukSubmitToServer(input ? input.value : '', bukRun.pendingBuzz, true, 'expired');", panel)
+        # Both windows have somewhere on the run screen to be seen.
+        self.assertIn('id="buk-buzz-timer"', INDEX_SOURCE)
+        self.assertIn('id="buk-answer-title"', INDEX_SOURCE)
 
     def test_an_answered_question_cannot_be_buzzed_again(self):
         submit = function_source(BUZZPOINT_SOURCE, "bukSubmitToServer")
@@ -437,6 +483,10 @@ class BuzzpointLifetimeTests(unittest.TestCase):
         self.assertIn("bukRun.pendingBuzz = null;", reset)
         self.assertIn("wordEl.textContent = '';", reset)
         self.assertIn("srcEl.textContent = '';", reset)
+        # The previous question's countdown must not keep ticking into this one.
+        closer = function_source(BUZZPOINT_SOURCE, "bukEndBuzzpoint")
+        self.assertIn("clearInterval(bukRun.windowTimer)", closer)
+        self.assertIn("timerEl.textContent = '';", closer)
 
     def test_the_buzz_is_refused_outside_a_read(self):
         body = function_source(BUZZPOINT_SOURCE, "bukBuzz")
@@ -444,6 +494,67 @@ class BuzzpointLifetimeTests(unittest.TestCase):
         self.assertIn("if (!bukRun.windowOpen && !bukRun.delivering) return false;", body)
         # A bonus never takes a buzz.
         self.assertIn("if (bukRun.question.phase === 'bonus') return false;", body)
+
+
+class EndBuzzBoardTests(unittest.TestCase):
+    """An end buzz is a buzz with no word, so the board must not read it as a no-buzz."""
+
+    def test_an_end_buzz_counts_as_a_buzz_and_not_as_a_no_buzz(self):
+        self.assertIn("if (row.buzzIndex === null && row.captureSource !== 'end') {", ANALYTICS_SOURCE)
+        self.assertIn("if (row.buzzIndex !== null || row.captureSource === 'end') {", ANALYTICS_SOURCE)
+        # No index means no depth and no highlighted word: the final word is not marked.
+        self.assertIn("buzz.buzzIndex !== null && buzz.buzzIndex - 1 === index", ANALYTICS_SOURCE)
+
+    def test_the_end_line_is_a_count_and_opens_the_buzzer_list(self):
+        card = function_source(ANALYTICS_SOURCE, "bbxQuestionCard")
+        self.assertIn("const endBuzzes = question.buzzes.filter((buzz) => buzz.captureSource === 'end');", card)
+        self.assertIn(r"`END \u00b7 ${endBuzzes.length}`", card)
+        self.assertIn("bbxShowTooltip(endBadge, endBuzzes,", card)
+        self.assertIn("endBadge.addEventListener('mouseleave', bbxHideTooltip);", card)
+        # The members live in the hover card: no inline name chips in the footer.
+        footer = card[card.index("// Footer:"):card.index("const answerBtn")]
+        self.assertNotIn("hit.member", footer)
+        self.assertNotIn("'inline-flex items-center gap-1 px-1.5", footer)
+        # Runs that never buzzed are counted separately, not folded into END.
+        self.assertIn(r"`NO BUZZ \u00b7 ${question.noBuzz}`", card)
+
+
+class BuzzTooltipTests(unittest.TestCase):
+    """The popup must name every member who buzzed on a word, each with their own verdict.
+
+    It used to print the first member once and stack every answer under that single header,
+    so the second and third buzzers saw a result that carried no name.
+    """
+
+    def test_every_buzz_gets_its_own_name_and_verdict(self):
+        body = function_source(ANALYTICS_SOURCE, "bbxShowTooltip")
+        self.assertIn("hits.forEach((hit, index) => {", body)
+        self.assertIn("bbxAppend(row, 'span', 'font-bold text-white tracking-wide', hit.member);", body)
+        self.assertIn("const hitCorrect = hit.verdict === 'correct';", body)
+        self.assertIn("if (index > 0) bbxAppend(tip, 'div', 'border-t border-white/20 my-1.5');", body)
+        # The single header was the bug: it named only hits[0].
+        self.assertNotIn("const primary = hits[0];", body)
+        self.assertNotIn("primary.member", body)
+
+    def test_the_card_carries_only_the_name_and_verdict(self):
+        body = function_source(ANALYTICS_SOURCE, "bbxShowTooltip")
+        # The word already marks the position, and the verdict already implies the answer
+        # and the points, so none of those rows belong on the card.
+        for redundant in ("'Given Answer:'", "'Buzz Position:'", "'Point Impact:'"):
+            self.assertNotIn(redundant, body)
+
+    def test_a_wrong_end_buzz_is_incorrect_not_a_neg(self):
+        body = function_source(ANALYTICS_SOURCE, "bbxShowTooltip")
+        self.assertIn("hit.captureSource === 'end' ? 'Incorrect' : 'Neg'", body)
+
+    def test_the_native_title_does_not_open_a_second_tooltip(self):
+        self.assertNotIn("span.title =", ANALYTICS_SOURCE)
+        self.assertIn("span.setAttribute('aria-label'", ANALYTICS_SOURCE)
+
+    def test_the_tooltip_is_drawn_as_the_lighter_popup(self):
+        self.assertIn('id="bbx-tooltip"', INDEX_SOURCE)
+        self.assertIn("bg-slate-700/95", INDEX_SOURCE)
+        self.assertIn("border-slate-500", INDEX_SOURCE)
 
 
 class ReadAloudUnavailableTests(unittest.TestCase):
