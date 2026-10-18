@@ -396,6 +396,56 @@ class BuzzedReadFreezeTests(unittest.TestCase):
         self.assertIn("bukRun.tracker.noteCounted(bukRun.revealIndex);", body)
 
 
+class BuzzpointLifetimeTests(unittest.TestCase):
+    """The buzzpoint lives for exactly one question, and only while it is being read.
+
+    Measured before this: the button was enabled when the read *finished* (a five-second
+    post-read window) and disabled forever after the first buzz \u2014 so from the second
+    question on, the one control meant for buzzing could not be clicked mid-read at all, while
+    an already-answered question could still be buzzed.
+    """
+
+    def test_the_buzz_button_opens_with_the_read(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukStartQuestion")
+        self.assertIn("if (question.phase !== 'bonus') bukOpenBuzzpoint();", body)
+        opener = function_source(BUZZPOINT_SOURCE, "bukOpenBuzzpoint")
+        self.assertIn("buzzBtn.disabled = false;", opener)
+        self.assertIn("bukRun.windowOpen = true;", opener)
+
+    def test_the_buzzpoint_ends_when_the_question_is_over(self):
+        finish = function_source(BUZZPOINT_SOURCE, "bukFinishDelivery")
+        self.assertIn("bukEndBuzzpoint();", finish)
+        # An unbuzzed tossup is over at the end of the read, not five seconds later: no burst
+        # of buzzing on a question the member has already heard in full.
+        self.assertIn("bukSubmitToServer('', null, true, 'expired');", finish)
+        self.assertLess(finish.index("bukEndBuzzpoint();"),
+                        finish.index("bukSubmitToServer('', null, true, 'expired');"))
+        self.assertNotIn("BUK_TOSSUP_WINDOW_S", BUZZPOINT_SOURCE)
+
+    def test_an_answered_question_cannot_be_buzzed_again(self):
+        submit = function_source(BUZZPOINT_SOURCE, "bukSubmitToServer")
+        self.assertIn("bukRun.answered = true;", submit)
+        self.assertIn("bukEndBuzzpoint();", submit)
+        self.assertLess(submit.index("if (!bukRun.question || bukRun.submitting) return;"),
+                        submit.index("bukRun.answered = true;"))
+
+    def test_a_new_question_clears_the_previous_buzzpoint(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukStartQuestion")
+        self.assertIn("bukResetBuzzpoint();", body)
+        reset = function_source(BUZZPOINT_SOURCE, "bukResetBuzzpoint")
+        self.assertIn("bukEndBuzzpoint();", reset)
+        self.assertIn("bukRun.pendingBuzz = null;", reset)
+        self.assertIn("wordEl.textContent = '';", reset)
+        self.assertIn("srcEl.textContent = '';", reset)
+
+    def test_the_buzz_is_refused_outside_a_read(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukBuzz")
+        self.assertIn("if (!bukRun.question || bukRun.answered) return false;", body)
+        self.assertIn("if (!bukRun.windowOpen && !bukRun.delivering) return false;", body)
+        # A bonus never takes a buzz.
+        self.assertIn("if (bukRun.question.phase === 'bonus') return false;", body)
+
+
 class ReadAloudUnavailableTests(unittest.TestCase):
     """A device that cannot read the question aloud must refuse the read, not fake it.
 
@@ -422,8 +472,10 @@ class ReadAloudUnavailableTests(unittest.TestCase):
 
     def test_a_refused_read_reveals_nothing_and_records_nothing(self):
         body = function_source(BUZZPOINT_SOURCE, "bukReadUnavailable")
-        self.assertIn("bukRun.windowOpen = false;", body)
-        self.assertIn("buzzBtn.disabled = true;", body)
+        self.assertIn("bukEndBuzzpoint();", body)
+        closer = function_source(BUZZPOINT_SOURCE, "bukEndBuzzpoint")
+        self.assertIn("bukRun.windowOpen = false;", closer)
+        self.assertIn("buzzBtn.disabled = true;", closer)
         self.assertIn("panel.classList.add('hidden');", body)
         # No answer is submitted, so the attempt stays unspent for a device that speaks.
         self.assertNotIn("bukSubmitToServer", body)
@@ -732,41 +784,69 @@ class MultipleChoiceReadTests(unittest.TestCase):
     choices were neither read nor shown. Measured on a real sample packet: every choice
     question reached the member with its choices missing.
 
-    The fix composes ONE read — stem then every choice — so the spoken text, the word clock
-    that logs the buzz-point word, and the word-by-word reveal all cover the same words.
+    The choices are now part of the question text itself: the stem followed by one line per
+    choice. That keeps the read as ONE word stream, so the speech, the word clock that logs the
+    buzz-point word and the word-by-word reveal all keep running through the choices instead of
+    stopping where a separate options panel would begin.
     """
 
-    def test_the_read_is_the_stem_followed_by_every_choice(self):
-        body = function_source(BUZZPOINT_SOURCE, "bukReadParts")
+    def test_the_question_text_carries_its_choices(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukReadText")
         self.assertIn("question.options", body)
-        self.assertIn("parts.push", body)
-        # One string, so the utterance and the reveal cannot disagree about the words.
-        self.assertIn("join(' ')", body)
+        # One string: the stem, a blank line, then every choice on its own line.
+        self.assertIn("`${stem}\\n\\n${options.join('\\n')}`", body)
 
     def test_the_read_is_composed_once_and_used_by_both_channels(self):
         body = function_source(BUZZPOINT_SOURCE, "bukStartQuestion")
-        self.assertIn("const read = bukReadParts(question);", body)
-        self.assertIn("bukSpeak(read.text)", body)
-        self.assertIn("createBuzzWordTracker(read.text", body)
-        self.assertIn("buzzTokenizeWords(read.text)", body)
-        # The stem alone must never be spoken again.
+        self.assertIn("const readText = bukReadText(question);", body)
+        self.assertIn("bukSpeak(readText)", body)
+        self.assertIn("createBuzzWordTracker(readText", body)
+        self.assertIn("buzzTokenizeWords(readText)", body)
+        # The stem alone must never be spoken again, and nothing may split the word stream.
         self.assertNotIn("bukSpeak(question.text", body)
         self.assertNotIn("createBuzzWordTracker(question.text", body)
+        self.assertNotIn("readParts", body)
 
-    def test_each_choice_is_drawn_on_its_own_line(self):
+    def test_the_choices_are_drawn_in_the_question_block_on_their_own_lines(self):
+        # One block keeps the line breaks, so a choice line is part of the question, not a panel.
+        self.assertIn("whitespace-pre-line", INDEX_SOURCE)
+        self.assertNotIn('id="buk-question-options"', INDEX_SOURCE)
         body = function_source(BUZZPOINT_SOURCE, "bukPrepareReveal")
-        self.assertIn("buk-question-options", body)
-        # A choice line exists before the read reaches it, but stays invisible.
-        self.assertIn("line.style.display = 'none'", body)
-        self.assertIn("optionsEl.classList.remove('hidden')", body)
+        self.assertIn("const textEl = bukEl('buk-question-text');", body)
+        # The gap (line break and choice label) is part of the word that starts it.
+        self.assertIn("bukRun.readText.slice(previousEnd, word.start)", body)
+        # Punctuation and a closing colon ride along with the word they follow.
+        self.assertIn("const tail = bukRun.readText.slice(previousEnd);", body)
 
     def test_a_choice_appears_only_when_the_read_reaches_it(self):
-        body = function_source(BUZZPOINT_SOURCE, "bukRevealUpTo")
-        self.assertIn("bukRun.wordHosts[i]", body)
-        self.assertIn("host.style.display = ''", body)
+        # The line break lives in the choice's first word, so an unread choice is fully invisible:
+        # there is no separate host to switch on ahead of the read.
+        body = function_source(BUZZPOINT_SOURCE, "bukPrepareReveal")
+        self.assertIn("span.style.visibility = 'hidden';", body)
+        reveal = function_source(BUZZPOINT_SOURCE, "bukRevealUpTo")
+        self.assertIn("bukRun.wordSpans[i].style.visibility = 'visible';", reveal)
+        self.assertNotIn("wordHosts", BUZZPOINT_SOURCE)
 
-    def test_the_run_screen_has_a_place_for_the_choices(self):
-        self.assertIn('id="buk-question-options"', INDEX_SOURCE)
+    def test_every_word_of_every_choice_is_in_the_one_word_list(self):
+        """The buzz-point clock is the word list, so it must be the composed read."""
+        body = function_source(BUZZPOINT_SOURCE, "bukStartQuestion")
+        self.assertIn("bukRun.words = buzzTokenizeWords(readText);", body)
+        self.assertIn("bukRun.readText = readText;", body)
+
+    def test_the_export_carries_the_choices_so_a_choice_buzz_has_a_word_to_sit_on(self):
+        # Analytics highlights the buzz at BuzzWordIndex in QuestionText, so the export must
+        # carry the text that was actually read — otherwise an option buzz points past the end.
+        body = function_source(BUZZPOINT_SOURCE, "bukBoardCsvRows")
+        self.assertIn("bukReadText({", body)
+        self.assertIn("question.tossup_options", body)
+        # The row itself writes the composed text, never the bare stem field.
+        self.assertIn("\n        questionText,\n", body)
+        self.assertNotIn("\n        question.tossup_text,\n", body)
+
+    def test_a_short_answer_question_is_read_exactly_as_before(self):
+        body = function_source(BUZZPOINT_SOURCE, "bukReadText")
+        # No choices means the stem, unchanged.
+        self.assertIn("if (!options.length) return stem;", body)
 
     def test_the_choices_are_served_with_the_question_for_both_phases(self):
         bank = [{
@@ -784,11 +864,6 @@ class MultipleChoiceReadTests(unittest.TestCase):
         # The answer key still never travels with them.
         self.assertNotIn("tossup_answer", tossup)
         self.assertNotIn("bonus_answer", bonus)
-
-    def test_a_short_answer_question_is_read_exactly_as_before(self):
-        body = function_source(BUZZPOINT_SOURCE, "bukReadParts")
-        # No choices means one part: the stem, unchanged.
-        self.assertIn("filter(Boolean)", body)
 
 
 if __name__ == "__main__":

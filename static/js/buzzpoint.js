@@ -235,9 +235,9 @@ const bukRun = {
   delivering: false, windowOpen: false, answered: false,
   readStart: 0, buzzAt: 0, firstKeystrokeAt: 0,
   wordStreamDone: false, speechDone: false, displayMode: 'hybrid',
-  streamTimer: null, windowTimer: null, lockoutTimer: null, speechPoll: null,
-  utterance: null, words: [], shownWords: 0, wordSpans: [], wordHosts: [], revealIndex: -1,
-  readText: '', readParts: [],
+  streamTimer: null, lockoutTimer: null, speechPoll: null,
+  utterance: null, words: [], shownWords: 0, wordSpans: [], revealIndex: -1,
+  readText: '',
   sawBoundary: false, fallbackTimer: null, fallbackInterval: null,
   answering: false, awaitingNext: false,
   // The last word the read was allowed to show. A buzz sets it, so the rest of the question
@@ -248,7 +248,6 @@ const bukRun = {
   stage: null, claimedCode: null, joinStatus: null, displayName: '',
 };
 
-const BUK_TOSSUP_WINDOW_S = 5.0;
 const BUK_ANSWER_WINDOW_S = 5.0;
 const BUK_BONUS_WINDOW_S = 20.0;
 // Realistic spoken pace (chars/sec at rate 1) for the reveal fallback when the engine gives
@@ -265,6 +264,32 @@ function bukStopSpeech() {
   if (bukRun.speechPoll) { clearInterval(bukRun.speechPoll); bukRun.speechPoll = null; }
 }
 
+// The buzzpoint is live for exactly one question, and only while that question is being read.
+// It opens with the first word of the read and ends with the read: once the question is over
+// there is nothing left to buzz on, so the button closes instead of staying armed against a
+// question that has already been scored.
+function bukOpenBuzzpoint() {
+  bukRun.windowOpen = true;
+  const buzzBtn = bukEl('buk-buzz-btn');
+  if (buzzBtn) buzzBtn.disabled = false;
+}
+
+function bukEndBuzzpoint() {
+  bukRun.windowOpen = false;
+  const buzzBtn = bukEl('buk-buzz-btn');
+  if (buzzBtn) buzzBtn.disabled = true;
+}
+
+// A fresh question starts with no buzz on record: the previous question's word must not sit
+// under a live button and read as if it belonged to the question being read now.
+function bukResetBuzzpoint() {
+  bukEndBuzzpoint();
+  bukRun.pendingBuzz = null;
+  bukRun.buzzAt = 0;
+  const wordEl = bukEl('buk-buzz-word'); if (wordEl) wordEl.textContent = '';
+  const srcEl = bukEl('buk-buzz-source'); if (srcEl) srcEl.textContent = '';
+}
+
 function bukStopDelivery() {
   bukRun.delivering = false;
   if (bukRun.streamTimer) { clearInterval(bukRun.streamTimer); bukRun.streamTimer = null; }
@@ -274,31 +299,18 @@ function bukStopDelivery() {
 }
 
 // A multiple-choice question is unreadable without its choices: the stem ends in a colon and
-// the choices ARE the rest of the question. They arrive as their own field, so the read is
-// the stem followed by every choice — one utterance, one word list, one buzz clock — rather
-// than a stem that stops at "which of the following" and is never finished.
-function bukReadParts(question) {
-  const stem = String((question && question.text) || '');
+// the choices ARE the rest of the question. They are folded into the question text as its last
+// lines, so the read is one string with one word list — the speech, the word-by-word reveal and
+// the buzz-point tracker all run straight through the choices instead of stopping at the stem.
+function bukReadText(question) {
+  const stem = String((question && question.text) || '').trimEnd();
   const options = (Array.isArray(question && question.options) ? question.options : [])
     .map((option) => String(option == null ? '' : option).trim())
     .filter(Boolean);
-  const parts = [{ kind: 'stem', text: stem, start: 0 }];
-  let cursor = stem.length + 1;
-  options.forEach((option) => {
-    parts.push({ kind: 'option', text: option, start: cursor });
-    cursor += option.length + 1;
-  });
-  return { parts, text: parts.map((part) => part.text).join(' ') };
-}
-
-// Which part of the read a word at this character offset belongs to. Used to put each choice
-// on its own line without splitting the single word list the tracker counts.
-function bukPartIndexFor(parts, charIndex) {
-  let found = 0;
-  for (let i = 0; i < parts.length; i += 1) {
-    if (parts[i].start <= charIndex) found = i;
-  }
-  return found;
+  if (!options.length) return stem;
+  // Each choice is its own line. The tokens and the utterance ignore the line breaks, so this
+  // formatting changes nothing about what is spoken or how far the read has got.
+  return `${stem}\n\n${options.join('\n')}`;
 }
 
 // Stream the words on a timer (the deterministic counted source) and speak aloud in
@@ -306,23 +318,27 @@ function bukPartIndexFor(parts, charIndex) {
 function bukStartQuestion(question) {
   bukRun.question = question;
   bukRun.answered = false;
-  bukRun.windowOpen = false;
+  bukResetBuzzpoint();
+  // Buzzable from the first word: the buzzpoint runs for the whole read, choices included.
+  if (question.phase !== 'bonus') bukOpenBuzzpoint();
   bukRun.delivering = true;
   bukRun.wordStreamDone = false;
   bukRun.speechDone = false;
   bukRun.firstKeystrokeAt = 0;
   bukRun.buzzAt = 0;
   // The choices are part of the question being read, not a caption under it.
-  const read = bukReadParts(question);
-  bukRun.readText = read.text;
-  bukRun.readParts = read.parts;
-  bukRun.words = buzzTokenizeWords(read.text);
+  const readText = bukReadText(question);
+  bukRun.readText = readText;
+  bukRun.words = buzzTokenizeWords(readText);
   bukRun.shownWords = 0;
   bukRun.frozenAt = null;
   // The captain chose this at creation; the server repeats it on every question payload.
   bukRun.displayMode = question.displayMode === 'audio-only' ? 'audio-only' : 'hybrid';
-  bukRun.tracker = createBuzzWordTracker(read.text, { wordsPerSecond: 2.6 });
+  bukRun.tracker = createBuzzWordTracker(readText, { wordsPerSecond: 2.6 });
 
+  if (question.phase !== 'bonus') {
+    bukStatus('buk-run-status', 'Reading \u2014 buzz any time before the question is over.', '#00f3ff');
+  }
   const progressLabel = bukEl('buk-run-progress');
   if (progressLabel) {
     progressLabel.textContent = question.phase === 'bonus'
@@ -337,19 +353,13 @@ function bukStartQuestion(question) {
   bukRun.readStart = performance.now();
   bukRun.tracker.noteStart();
   bukPrepareReveal();
-  bukSpeak(read.text);
+  bukSpeak(readText);
 }
 
 function bukPrepareReveal() {
   const textEl = bukEl('buk-question-text');
-  const optionsEl = bukEl('buk-question-options');
   if (textEl) textEl.replaceChildren();
-  if (optionsEl) {
-    optionsEl.replaceChildren();
-    optionsEl.classList.add('hidden');
-  }
   bukRun.wordSpans = [];
-  bukRun.wordHosts = [];
   if (bukRun.displayMode === 'audio-only') {
     // Audio-only: the words are never shown. A status line and the progress bar are the
     // only on-screen record of the read; the tracker still follows the audio for the buzz.
@@ -363,29 +373,27 @@ function bukPrepareReveal() {
   }
   // Pre-create every word as a hidden text node so the reveal only toggles visibility:
   // the layout stays put and untrusted packet text stays text (never markup).
-  // Each choice gets its own line, hidden until the read reaches it: a choice that has not
-  // been spoken yet must not appear.
-  const parts = bukRun.readParts && bukRun.readParts.length
-    ? bukRun.readParts
-    : [{ kind: 'stem', text: bukRun.readText || '', start: 0 }];
-  const hosts = parts.map((part, index) => {
-    if (index === 0) return textEl;
-    const line = document.createElement('div');
-    line.className = 'mt-1';
-    line.style.display = 'none';
-    if (optionsEl) optionsEl.appendChild(line);
-    return line;
-  });
-  if (optionsEl && parts.length > 1) optionsEl.classList.remove('hidden');
+  // Each span carries the text between the previous word and itself, so a choice's line break
+  // and its label (the "W)" of "W) dxy") are revealed together with that choice's first word.
+  // A choice that has not been read yet has neither text nor a line of its own, while the words
+  // are still one continuous stream. The block keeps the breaks (white-space: pre-line).
+  let previousEnd = 0;
   bukRun.words.forEach((word) => {
-    const host = hosts[bukPartIndexFor(parts, word.start)] || textEl;
     const span = document.createElement('span');
-    span.textContent = `${word.word} `;
+    // The gap is the read's own text between the previous word and this one: the spaces, the
+    // punctuation (the ")" in "W) dxy") and the line breaks that begin each choice. Nothing is
+    // invented, so the block reads exactly as the question does.
+    span.textContent = `${bukRun.readText.slice(previousEnd, word.start)}${word.word}`;
     span.style.visibility = 'hidden';
-    if (host) host.appendChild(span);
+    if (textEl) textEl.appendChild(span);
     bukRun.wordSpans.push(span);
-    bukRun.wordHosts.push(host || null);
+    previousEnd = word.end;
   });
+  // Whatever follows the last word (a closing colon, say) belongs to that word.
+  const tail = bukRun.readText.slice(previousEnd);
+  if (tail && bukRun.wordSpans.length) {
+    bukRun.wordSpans[bukRun.wordSpans.length - 1].textContent += tail;
+  }
   bukRun.revealIndex = -1;
   if (!bukRun.words.length) bukRun.wordStreamDone = true;
 }
@@ -403,8 +411,6 @@ function bukRevealUpTo(index) {
   if (bukRun.displayMode !== 'audio-only') {
     for (let i = bukRun.revealIndex + 1; i <= target; i += 1) {
       if (bukRun.wordSpans[i]) bukRun.wordSpans[i].style.visibility = 'visible';
-      const host = bukRun.wordHosts[i];
-      if (host && host.style.display === 'none') host.style.display = '';
     }
   }
   bukRun.revealIndex = target;
@@ -456,13 +462,10 @@ function bukCanReadAloud() {
 // whole question on screen and then recorded a timeout against a question nobody had heard.
 function bukReadUnavailable() {
   bukStopDelivery();
-  if (bukRun.windowTimer) { clearTimeout(bukRun.windowTimer); bukRun.windowTimer = null; }
   if (bukRun.lockoutTimer) { clearInterval(bukRun.lockoutTimer); bukRun.lockoutTimer = null; }
-  bukRun.windowOpen = false;
+  bukEndBuzzpoint();
   bukRun.answering = false;
   bukRun.awaitingNext = false;
-  const buzzBtn = bukEl('buk-buzz-btn');
-  if (buzzBtn) buzzBtn.disabled = true;
   const panel = bukEl('buk-answer-panel');
   if (panel) panel.classList.add('hidden');
   const feedback = bukEl('buk-feedback');
@@ -540,18 +543,16 @@ function bukFinishDelivery() {
   if (bukRun.answered || !bukRun.delivering) return;
   if (!bukRun.wordStreamDone || !bukRun.speechDone) return;
   bukRun.delivering = false;
+  // The read is the question: when it ends, the buzzpoint ends with it. An unbuzzed tossup is
+  // over, so it is recorded as expired instead of leaving a buzz window open on a question
+  // the member has already heard in full.
+  bukEndBuzzpoint();
   if (bukRun.question && bukRun.question.phase === 'bonus') {
     bukStatus('buk-run-status', `Read complete \u2014 ${BUK_BONUS_WINDOW_S}s to type your bonus answer.`, '#00f3ff');
     bukOpenAnswerPanel(BUK_BONUS_WINDOW_S, 'bonus');
   } else {
-    bukRun.windowOpen = true;
-    bukStatus('buk-run-status', `Read complete \u2014 buzz window open (${BUK_TOSSUP_WINDOW_S.toFixed(1)}s)`, '#00f3ff');
-    const buzzBtn = bukEl('buk-buzz-btn'); if (buzzBtn) buzzBtn.disabled = false;
-    bukRun.windowTimer = setTimeout(() => {
-      if (bukRun.answered) return;
-      bukRun.windowOpen = false;
-      bukSubmitToServer('', null, true, 'expired');  // no buzz: wrong, no answer
-    }, BUK_TOSSUP_WINDOW_S * 1000);
+    bukStatus('buk-run-status', 'Read complete \u2014 no buzz, question over.', '#ffaa00');
+    bukSubmitToServer('', null, true, 'expired');  // no buzz: wrong, no answer
   }
 }
 
@@ -566,13 +567,11 @@ function bukBuzz() {
   // Freeze before the read is stopped: the words on screen now are the ones the member heard.
   bukRun.frozenAt = bukRun.revealIndex;
   bukStopDelivery();
-  if (bukRun.windowTimer) { clearTimeout(bukRun.windowTimer); bukRun.windowTimer = null; }
-  bukRun.windowOpen = false;
+  bukEndBuzzpoint();
   bukRun.buzzAt = performance.now();
   const reactionSeconds = (bukRun.buzzAt - bukRun.readStart) / 1000;
 
   bukRun.pendingBuzz = { ...snapshot, reactionSeconds: Number(reactionSeconds.toFixed(3)) };
-  const buzzBtn = bukEl('buk-buzz-btn'); if (buzzBtn) buzzBtn.disabled = true;
   const wordEl = bukEl('buk-buzz-word');
   if (wordEl) wordEl.textContent = snapshot && snapshot.word ? snapshot.word : '(no word)';
   const srcEl = bukEl('buk-buzz-source');
@@ -619,6 +618,10 @@ function bukSubmitTyped() {
 // Every submission goes to the server, which grades and is the only writer of the run.
 async function bukSubmitToServer(typedAnswer, buzz, expired, outcome) {
   if (!bukRun.question || bukRun.submitting) return;
+  // The answer closes the question: no buzz may start on it after this point, and the button
+  // must not stay live while the next question is being fetched.
+  bukRun.answered = true;
+  bukEndBuzzpoint();
   bukRun.submitting = true;
   if (bukRun.lockoutTimer) { clearInterval(bukRun.lockoutTimer); bukRun.lockoutTimer = null; }
   bukStopDelivery();
@@ -759,6 +762,10 @@ function bukBoardCsvRows(runs, questions) {
   for (const run of runs) {
     for (const r of run.questions || []) {
       const question = questions[r.qIndex] || {};
+      // The exported text is the text that was read: choices included, as their own lines.
+      // Analytics rebuilds the card from this, so a buzz that landed in a choice still has a
+      // word to sit on instead of pointing past the end of a stem-only question.
+      const questionText = bukReadText({ text: question.tossup_text || '', options: question.tossup_options || [] });
       const depth = (typeof r.buzzWordIndex === 'number' && r.totalWords)
         ? Math.round(((r.buzzWordIndex + 1) / r.totalWords) * 100)
         : '';
@@ -767,7 +774,7 @@ function bukBoardCsvRows(runs, questions) {
         r.subject || bukSubjectFor(r.category),
         r.category || question.category || '',
         r.type || question.type || '',
-        question.tossup_text || '',
+        questionText,
         question.tossup_answer || '',
         run.displayName || run.uid,
         r.buzzWord == null ? '' : r.buzzWord,
@@ -1001,7 +1008,7 @@ async function bukStartChallenge() {
 function bukLeaveChallengeScreen() {
   if (!bukRun.question && !bukRun.delivering) return;
   bukStopDelivery();
-  if (bukRun.windowTimer) { clearTimeout(bukRun.windowTimer); bukRun.windowTimer = null; }
+  bukEndBuzzpoint();
   if (bukRun.lockoutTimer) { clearInterval(bukRun.lockoutTimer); bukRun.lockoutTimer = null; }
   bukRun.question = null;
   bukRun.answering = false;
