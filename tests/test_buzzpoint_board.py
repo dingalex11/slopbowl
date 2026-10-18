@@ -557,6 +557,41 @@ class BuzzTooltipTests(unittest.TestCase):
         self.assertIn("border-slate-500", INDEX_SOURCE)
 
 
+class NumericalStatlineTests(unittest.TestCase):
+    """The candidate statline carries the correct count and the run's overall points."""
+
+    def test_points_use_the_same_weighting_as_the_ppth_columns(self):
+        body = function_source(ANALYTICS_SOURCE, "bbxPlayerPoints")
+        self.assertIn("player.correct * BBX_CORRECT_POINTS + player.negs * BBX_NEG_POINTS;", body)
+        # PPTH is the same points divided by toss-ups heard, not a second formula.
+        ppth = function_source(ANALYTICS_SOURCE, "bbxPlayerPpth")
+        self.assertIn("return bbxPlayerPoints(player) / player.attempts;", ppth)
+
+    def test_the_matrix_shows_correct_incorrect_and_points_columns(self):
+        matrix = function_source(ANALYTICS_SOURCE, "bbxRenderMatrix")
+        self.assertIn("th(headRow, 'Correct',", matrix)
+        self.assertIn("th(headRow, 'Incorrect',", matrix)
+        self.assertIn("th(headRow, 'Pts',", matrix)
+        self.assertIn("bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono text-slate-200', player.correct);", matrix)
+        self.assertIn("bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono text-slate-400', player.incorrect);", matrix)
+        self.assertIn("const points = bbxPlayerPoints(player);", matrix)
+        self.assertIn("pointsCell.style.color = points > 0 ? '#00ff66' : (points < 0 ? '#ff0055' : '#94a3b8');", matrix)
+
+    def test_the_new_columns_can_sort(self):
+        body = function_source(ANALYTICS_SOURCE, "bbxSortValue")
+        self.assertIn("if (key === 'correct') return player.correct;", body)
+        self.assertIn("if (key === 'incorrect') return player.incorrect;", body)
+        self.assertIn("if (key === 'pts') return bbxPlayerPoints(player);", body)
+
+    def test_a_wrong_end_buzz_never_counts_as_a_neg(self):
+        """The points column follows the wording: incorrect after the read is not a neg."""
+        build = function_source(ANALYTICS_SOURCE, "bbxBuildModels")
+        self.assertIn("player.incorrect += 1;", build)
+        self.assertIn("player.negs += 1;", build)
+        stats = function_source(ANALYTICS_SOURCE, "bbxQuestionStats")
+        self.assertIn("const negs = question.buzzes.filter((b) => b.verdict === 'wrong' && b.captureSource !== 'end').length;", stats)
+
+
 class ReadAloudUnavailableTests(unittest.TestCase):
     """A device that cannot read the question aloud must refuse the read, not fake it.
 

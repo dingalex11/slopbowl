@@ -564,6 +564,7 @@ function bbxBuildModels() {
         attempts: 0,
         buzzes: 0,
         correct: 0,
+        incorrect: 0,
         negs: 0,
         depthSum: 0,
         depthCount: 0,
@@ -581,7 +582,14 @@ function bbxBuildModels() {
     if (row.buzzIndex !== null || row.captureSource === 'end') {
       player.buzzes += 1;
       if (row.depth !== null) { player.depthSum += row.depth; player.depthCount += 1; }
-      if (row.verdict === 'wrong') { player.negs += 1; bucket.negs += 1; }
+      // A wrong answer after the full read is just incorrect, not a neg: only an interrupt
+      // carries the neg and its penalty.
+      if (row.verdict === 'wrong' && row.captureSource === 'end') {
+        player.incorrect += 1;
+      } else if (row.verdict === 'wrong') {
+        player.negs += 1;
+        bucket.negs += 1;
+      }
     }
   }
 
@@ -618,10 +626,15 @@ function bbxPlayerSubjectPpth(player, subject) {
   return points / bucket.attempts;
 }
 
+// Overall points for the run: a correct toss-up is +4 and a neg is -4, the same weighting
+// the per-subject PPTH columns use.
+function bbxPlayerPoints(player) {
+  return player.correct * BBX_CORRECT_POINTS + player.negs * BBX_NEG_POINTS;
+}
+
 function bbxPlayerPpth(player) {
   if (!player.attempts) return null;
-  const points = player.correct * BBX_CORRECT_POINTS + player.negs * BBX_NEG_POINTS;
-  return points / player.attempts;
+  return bbxPlayerPoints(player) / player.attempts;
 }
 
 function bbxPlayerSpeed(player) {
@@ -858,7 +871,9 @@ function bbxQuestionCard(question) {
 function bbxQuestionStats(question) {
   const buzzes = question.buzzes.length;
   const interrupts = question.buzzes.filter((b) => b.wordsHeard !== null && b.totalWords !== null && b.wordsHeard < b.totalWords).length;
-  const negs = question.wrong;
+  // Only interrupts are negs; an end buzz answered wrong is incorrect but not a neg, and an
+  // expired toss-up was never buzzed at all.
+  const negs = question.buzzes.filter((b) => b.verdict === 'wrong' && b.captureSource !== 'end').length;
   const avgBuzz = question.depthCount ? question.depthSum / question.depthCount : null;
   const celerity = question.correctDepthCount ? question.correctDepthSum / question.correctDepthCount : null;
   const power = question.buzzes.filter((b) => b.verdict === 'correct' && b.depth !== null && b.depth <= 25).length;
@@ -1060,6 +1075,9 @@ function bbxSortBy(key) {
 function bbxSortValue(player, key) {
   if (key === 'name') return player.name;
   if (key === 'acc') return bbxPlayerAccuracy(player);
+  if (key === 'correct') return player.correct;
+  if (key === 'incorrect') return player.incorrect;
+  if (key === 'pts') return bbxPlayerPoints(player);
   if (key === 'speed') return bbxPlayerSpeed(player);
   if (key === 'negs') return player.negs;
   if (key === 'ppth') return bbxPlayerPpth(player);
@@ -1087,8 +1105,11 @@ function bbxRenderMatrix() {
       () => bbxSortBy(subject), 'text-center');
   });
   th(headRow, 'Acc %', 'Accuracy: correct \u00f7 buzzes', () => bbxSortBy('acc'), 'text-center');
+  th(headRow, 'Correct', 'Tossups answered correctly', () => bbxSortBy('correct'), 'text-center');
+  th(headRow, 'Incorrect', 'Wrong answers after the question was fully read \u2014 incorrect, not a neg', () => bbxSortBy('incorrect'), 'text-center');
+  th(headRow, 'Negs', 'Interrupts answered wrong, which carry the neg penalty', () => bbxSortBy('negs'), 'text-center');
+  th(headRow, 'Pts', `Overall points: +${BBX_CORRECT_POINTS} per correct tossup, ${BBX_NEG_POINTS} per neg`, () => bbxSortBy('pts'), 'text-center');
   th(headRow, 'Speed', 'Average buzz depth: how far into the question the buzz landed (higher = later)', () => bbxSortBy('speed'), 'text-center');
-  th(headRow, 'Negs', 'Total incorrect buzzes', () => bbxSortBy('negs'), 'text-center');
   th(headRow, 'Primary Specialty', 'Best subject by PPTH', null, 'text-right px-3');
 
   const body = bbxAppend(table, 'tbody', 'divide-y divide-borderDark');
@@ -1122,7 +1143,7 @@ function bbxRenderMatrix() {
   if (!list.length) {
     const row = bbxAppend(body, 'tr');
     bbxAppend(row, 'td', 'py-4 text-center text-slate-600', 'Awaiting data...')
-      .setAttribute('colspan', String(3 + bbxState.subjects.length));
+      .setAttribute('colspan', String(9 + bbxState.subjects.length));
     return;
   }
 
@@ -1164,10 +1185,18 @@ function bbxRenderMatrix() {
     const accCell = bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono');
     bbxAppend(accCell, 'span', acc !== null && acc >= 80 ? 'font-bold text-neonGreen' : 'text-slate-300', bbxPctText(acc));
 
-    const speed = bbxPlayerSpeed(player);
-    bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono text-slate-400', speed === null ? '\u2014' : `${Math.round(speed)}%`);
+    bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono text-slate-200', player.correct);
+
+    bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono text-slate-400', player.incorrect);
 
     bbxAppend(row, 'td', `py-1.5 px-2 text-center font-mono ${player.negs >= 4 ? 'text-neonPink font-bold' : 'text-slate-400'}`, player.negs);
+
+    const points = bbxPlayerPoints(player);
+    const pointsCell = bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono font-bold', `${points > 0 ? '+' : ''}${points}`);
+    pointsCell.style.color = points > 0 ? '#00ff66' : (points < 0 ? '#ff0055' : '#94a3b8');
+
+    const speed = bbxPlayerSpeed(player);
+    bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono text-slate-400', speed === null ? '\u2014' : `${Math.round(speed)}%`);
 
     const specialty = bbxPrimarySpecialty(player);
     bbxAppend(row, 'td', 'py-1.5 px-3 text-right')
