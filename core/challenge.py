@@ -171,3 +171,87 @@ def advance_after_bonus(run, total, now_iso):
     run["cursor"] = int(run.get("cursor", 0)) + 1
     run["phase"] = "tossup"
     return _close_if_done(run, total, now_iso)
+
+
+# ------------------------------------------------------------------- reports
+# A member who thinks the answer key graded them wrongly can flag the toss-up or its
+# bonus. The report lives on the member's own run, and only the captain who owns the
+# challenge may resolve it by setting the verdict by hand.
+
+REPORT_PHASES = ("tossup", "bonus")
+
+
+def add_report(run, q_index, phase, reason, now_iso):
+    """Attach one unresolved report to a run, or return the one already open.
+
+    ``q_index`` is the toss-up the report belongs to; a bonus report is the same index
+    with ``phase="bonus"``. A repeat report of the same phase is idempotent, so a member
+    double-clicking the flag cannot fill the captain's queue with copies.
+    """
+    if phase not in REPORT_PHASES:
+        raise ValueError("Report phase must be 'tossup' or 'bonus'")
+    try:
+        q_index = int(q_index)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid question index") from exc
+    records = run.get("questions") or []
+    if q_index < 0 or q_index >= len(records):
+        raise ValueError("That question has not been answered")
+    record = records[q_index]
+    if phase == "bonus" and record.get("bonusVerdict") is None:
+        raise ValueError("That question has no bonus answer to report")
+    reports = run.setdefault("reports", [])
+    for report in reports:
+        if int(report.get("qIndex", -1)) == q_index and report.get("phase") == phase \
+                and not report.get("resolved"):
+            return report
+    report = {
+        "qIndex": q_index,
+        "phase": phase,
+        "reason": reason,
+        "reportedAt": now_iso,
+        "resolved": False,
+    }
+    reports.append(report)
+    return report
+
+
+def resolve_report(run, q_index, phase, correct, now_iso, captain_uid):
+    """Set a verdict by hand and mark that attempt's report resolved.
+
+    The verdict is labelled with who set it — ``captain-correct`` / ``captain-wrong`` —
+    so the record keeps the difference between the automatic grader and a person. Every
+    override is appended to the run's ``judgements`` audit trail.
+    """
+    if phase not in REPORT_PHASES:
+        raise ValueError("Judgement phase must be 'tossup' or 'bonus'")
+    try:
+        q_index = int(q_index)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid question index") from exc
+    records = run.get("questions") or []
+    if q_index < 0 or q_index >= len(records):
+        raise ValueError("That question has not been answered")
+    record = records[q_index]
+    if phase == "bonus" and record.get("bonusVerdict") is None:
+        raise ValueError("That question has no bonus answer to judge")
+    previous = record.get("bonusVerdict") if phase == "bonus" else record.get("verdict")
+    verdict = "captain-correct" if correct else "captain-wrong"
+    if phase == "bonus":
+        record["bonusVerdict"] = verdict
+    else:
+        record["verdict"] = verdict
+    run.setdefault("judgements", []).append({
+        "qIndex": q_index,
+        "phase": phase,
+        "verdict": verdict,
+        "previousVerdict": previous,
+        "judgedAt": now_iso,
+        "judgedBy": captain_uid,
+    })
+    for report in run.get("reports", []):
+        if int(report.get("qIndex", -1)) == q_index and report.get("phase") == phase:
+            report["resolved"] = True
+            report["resolvedAt"] = now_iso
+            report["resolvedBy"] = captain_uid
+    return verdict

@@ -217,6 +217,9 @@ function bbxIngestCsv(csvText) {
       typedAnswer: row['TypedAnswer'] || '',
       verdict: bbxVerdict(row),
       bonusVerdict: String(row['BonusVerdict'] || '').toLowerCase(),
+      uid: String(row['RunUid'] || ''),
+      reported: String(row['Reported'] || '').toLowerCase(),
+      reportReason: String(row['ReportReason'] || ''),
     });
     added += 1;
   }
@@ -236,12 +239,13 @@ function bbxIngestCsv(csvText) {
 // code that produced them, which is what makes a refresh safe — it can neither double-count a
 // run nor disturb a CSV dropped by hand.
 
-async function bbxApi(path) {
+async function bbxApi(path, options) {
+  const opts = options || {};
   const token = window.getFirebaseIdToken ? await window.getFirebaseIdToken() : null;
-  const headers = {};
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
   // A board is live data, never a cached document.
-  const response = await fetch(path, { headers, cache: 'no-store' });
+  const response = await fetch(path, { ...opts, headers, cache: 'no-store' });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(result.detail || 'Request failed');
@@ -528,6 +532,7 @@ function bbxBuildModels() {
         correct: 0,
         wrong: 0,
         noBuzz: 0,
+        reportCount: 0,
         depthSum: 0,
         depthCount: 0,
         correctDepthSum: 0,
@@ -536,6 +541,7 @@ function bbxBuildModels() {
       bbxState.questions.set(key, question);
     }
     question.attempts += 1;
+    if (row.reported) question.reportCount += 1;
     if (row.verdict === 'correct') question.correct += 1;
     if (row.verdict === 'wrong') question.wrong += 1;
     // An 'end' buzz has no word index but is still a buzz: the member heard the whole
@@ -666,6 +672,7 @@ function bbxPrimarySpecialty(player) {
 // ------------------------------------------------------------ rendering: shell
 
 function bbxRenderAll() {
+  bbxRenderReports();
   bbxRenderParticipantPills();
   bbxRenderQuestions();
   bbxRenderSubjectFilters();
@@ -759,6 +766,103 @@ function bbxToggleAnswers() {
   bbxRenderQuestions();
 }
 
+// ------------------------------------------------------------ reported questions
+// The member's flag is a request, not a verdict. This queue is where the captain answers
+// it: each open report names the attempt and offers the two judgements, and the server
+// records who overrode what. Only a board loaded by code carries the run uid needed to
+// correct it; a CSV dropped by hand is a snapshot, so it says so instead of pretending.
+
+function bbxReportPhases(row) {
+  return String(row.reported || '')
+    .split('+')
+    .filter((phase) => phase === 'tossup' || phase === 'bonus');
+}
+
+function bbxPhaseVerdict(row, phase) {
+  const raw = phase === 'bonus' ? row.bonusVerdict : row.verdict;
+  return bbxVerdict({ Verdict: raw });
+}
+
+function bbxRenderReports() {
+  const holder = bbxEl('bbx-report-queue');
+  const list = bbxEl('bbx-report-list');
+  if (!holder || !list) return;
+  list.replaceChildren();
+  const reported = bbxState.rows.filter((row) => bbxReportPhases(row).length);
+  holder.classList.toggle('hidden', !reported.length);
+  if (!reported.length) return;
+
+  reported.forEach((row) => {
+    bbxReportPhases(row).forEach((phase) => {
+      const item = document.createElement('div');
+      item.className = 'flex flex-wrap items-center justify-between gap-2 border-t border-borderDark first:border-t-0 py-2';
+      const info = bbxAppend(item, 'div', 'min-w-0');
+      const line = bbxAppend(info, 'div', 'flex flex-wrap items-center gap-2 text-[11px] font-mono');
+      bbxAppend(line, 'span', 'font-black text-neonPink', `\u2691 Q${row.qNum}`);
+      bbxAppend(line, 'span', 'font-bold text-slate-200', row.member || 'Unknown member');
+      bbxAppend(line, 'span', 'px-1.5 py-0.5 rounded bg-panel text-slate-400 uppercase tracking-wider', phase === 'bonus' ? 'Bonus' : 'Toss-up');
+      const current = bbxPhaseVerdict(row, phase);
+      bbxAppend(line, 'span', `font-bold ${current === 'correct' ? 'text-neonGreen' : (current === 'wrong' ? 'text-neonPink' : 'text-slate-500')}`,
+        current === 'correct' ? 'Currently correct' : (current === 'wrong' ? 'Currently incorrect' : 'Not judged'));
+      if (row.reportReason) bbxAppend(info, 'p', 'mt-1 text-[10px] font-mono text-slate-500', row.reportReason);
+
+      const actions = bbxAppend(item, 'div', 'flex items-center gap-2');
+      const fixable = Boolean(row.uid) && String(row.source || '').startsWith('challenge:');
+      if (!fixable) {
+        bbxAppend(actions, 'span', 'text-[10px] font-mono text-slate-500', 'Load this board by code to fix it');
+        return;
+      }
+      const make = (label, correct, tone) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `px-2.5 py-1 rounded border text-[10px] font-mono font-black uppercase transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${
+          tone === 'correct'
+            ? 'bg-black border-neonGreen/70 text-neonGreen hover:bg-neonGreen/10'
+            : 'bg-black border-neonPink/70 text-neonPink hover:bg-neonPink/10'
+        }`;
+        btn.textContent = label;
+        btn.disabled = (correct && current === 'correct') || (!correct && current === 'wrong');
+        btn.addEventListener('click', () => bbxJudgeReport(row, phase, correct));
+        actions.appendChild(btn);
+      };
+      make('Mark correct', true, 'correct');
+      make('Mark incorrect', false, 'wrong');
+      list.appendChild(item);
+    });
+  });
+}
+
+async function bbxJudgeReport(row, phase, correct) {
+  const source = String(row.source || '');
+  const code = source.startsWith('challenge:') ? source.slice('challenge:'.length) : '';
+  if (!code || !row.uid) {
+    bbxStatus('Load this board by code to correct a reported attempt.', 'bad');
+    return;
+  }
+  const label = correct ? 'correct' : 'incorrect';
+  bbxStatus(`Marking Q${row.qNum} ${phase} ${label}\u2026`, 'busy');
+  try {
+    await bbxApi(`/api/challenges/${encodeURIComponent(code)}/judge`, {
+      method: 'POST',
+      body: JSON.stringify({ uid: row.uid, qIndex: row.qNum - 1, phase, correct }),
+    });
+    bbxStatus(`Q${row.qNum} ${phase} marked ${label}.`, 'good');
+    const refreshed = await bbxRefreshChallengeBoard(code);
+    if (!refreshed && !bbxLive.boards.has(code)) {
+      const board = await bbxApi(`/api/challenges/${encodeURIComponent(code)}/board`);
+      const csv = bbxBoardCsvText(board);
+      bbxState.rows = bbxState.rows.filter((item) => item.source !== source);
+      bbxIngestBoardCsv(code, csv);
+      bbxBuildModels();
+      bbxRenderAll();
+      bbxUpdateCountBadge();
+    }
+  } catch (error) {
+    bbxRenderReports();
+    bbxStatus(bbxBoardError(error, code), 'bad');
+  }
+}
+
 function bbxRenderQuestions() {
   const holder = bbxEl('bbx-questions-container');
   if (!holder) return;
@@ -781,6 +885,9 @@ function bbxQuestionCard(question) {
   bbxAppend(chips, 'span', 'px-2.5 py-0.5 rounded text-xs font-semibold bg-panelHover text-neonGreen', question.category || question.subject || 'GENERAL');
   bbxAppend(chips, 'span', 'px-2.5 py-0.5 rounded text-xs font-medium bg-panelHover text-neonCyan', question.type ? `Tossup \u00b7 ${question.type}` : 'Tossup');
   bbxAppend(chips, 'span', 'text-xs text-neonAmber font-mono font-bold', `Q${question.qNum}`);
+  if (question.reportCount) {
+    bbxAppend(chips, 'span', 'px-2 py-0.5 rounded text-[10px] font-mono font-black uppercase border border-neonPink/60 bg-panel text-neonPink', `\u2691 ${question.reportCount} reported`);
+  }
   bbxAppend(head, 'span', 'text-[11px] font-mono text-slate-500', `${question.attempts} attempt${question.attempts === 1 ? '' : 's'}`);
 
   const body = bbxAppend(card, 'div', 'p-4 space-y-3');

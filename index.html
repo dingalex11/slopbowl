@@ -1193,13 +1193,16 @@
         <div class="bg-panel border border-borderDark rounded-2xl p-6 mb-5">
           <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
             <span id="solo-q-label" class="text-xs font-black font-mono text-neonAmber tracking-widest uppercase">Toss-up #1</span>
-            <div class="flex items-center space-x-4 text-[11px] font-mono font-bold">
+            <div class="flex flex-wrap items-center gap-4 text-[11px] font-mono font-bold">
               <span id="solo-word-count" class="text-slate-500">Word 0 of 0</span>
               <span id="solo-lockout" class="text-slate-500">Lockout: 5.0s</span>
+              <span class="text-slate-500">Buzzed on:</span>
+              <span id="solo-buzz-word" class="text-neonAmber"></span>
+              <span id="solo-buzz-source" class="text-slate-500"></span>
             </div>
           </div>
 
-          <div id="solo-question-text" class="min-h-[132px] bg-black border border-borderDark rounded-xl p-5 text-lg md:text-xl text-slate-200 font-sans leading-relaxed">
+          <div id="solo-question-text" class="min-h-[132px] bg-black border border-borderDark rounded-xl p-5 text-lg md:text-xl text-slate-200 font-sans leading-relaxed whitespace-pre-line">
             Ready. Hit "START QUESTION DRILL" to launch delivery.
           </div>
 
@@ -1216,25 +1219,25 @@
 
         <div id="solo-answer-panel" class="hidden mt-5 bg-black border border-neonAmber/60 rounded-2xl p-5">
           <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <span class="text-[10px] font-mono font-bold tracking-widest text-neonAmber uppercase">Answer Locked Out</span>
+            <span id="solo-answer-title" class="text-[10px] font-mono font-bold tracking-widest text-neonAmber uppercase">Type your answer</span>
             <span id="solo-answer-timer" class="text-xs font-mono font-bold text-neonAmber">5.0s</span>
           </div>
           <div class="flex flex-wrap gap-2">
             <input id="solo-answer-input" type="text" autocomplete="off" placeholder="Type your answer and press Enter..." class="flex-1 min-w-[240px] bg-panel border border-borderDark rounded-xl px-4 py-3 text-sm text-neonCyan font-mono focus:outline-none focus:border-neonCyan">
             <button type="button" id="solo-answer-submit" class="px-5 py-3 bg-neonAmber hover:bg-amber-400 text-black text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Submit</button>
           </div>
-          <p class="text-[11px] text-slate-500 font-mono mt-3" id="solo-answer-hint">Keyword matcher armed. Enter submits, Escape forfeits.</p>
+          <p class="text-[11px] text-slate-500 font-mono mt-3" id="solo-answer-hint">Enter submits, Escape forfeits. When time runs out, whatever is in the box is still submitted and graded.</p>
         </div>
 
         <p id="solo-feedback" class="hidden mt-4 text-sm font-mono font-bold"></p>
 
         <div class="flex flex-wrap items-center justify-between gap-3 mt-5">
-          <button type="button" id="solo-start-question" class="px-7 py-3.5 bg-neonGreen hover:bg-emerald-400 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-green active:scale-95 transition flex items-center space-x-2">
+          <button type="button" id="solo-start-question" class="hidden px-7 py-3.5 bg-neonGreen hover:bg-emerald-400 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-green active:scale-95 transition flex items-center space-x-2">
             <span>&#9654;</span><span>Start Question Drill</span>
           </button>
           <div class="flex flex-wrap gap-3">
             <button type="button" id="solo-reveal-answer" class="px-5 py-3.5 bg-panel border border-borderDark text-slate-300 hover:text-white text-xs font-mono font-bold rounded-xl active:scale-95 transition">Reveal Answer</button>
-            <button type="button" id="solo-next-tossup" class="px-5 py-3.5 bg-black border border-neonCyan text-neonCyan hover:bg-neonCyan/10 text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Next Tossup &rarr;</button>
+            <button type="button" id="solo-next-tossup" class="px-5 py-3.5 bg-black border border-neonCyan text-neonCyan hover:bg-neonCyan/10 text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Next Question &rarr;</button>
           </div>
         </div>
 
@@ -1400,8 +1403,8 @@
           </div>
           <div id="buk-start-subjects" class="mt-3 flex flex-wrap gap-1.5"></div>
           <div class="mt-4 border-t border-borderDark pt-3 text-[11px] font-mono text-slate-400 leading-relaxed">
-            <p>One attempt per member. Buzz during the read &mdash; or in the 5 seconds after it &mdash; then type your answer within 5 seconds.</p>
-            <p class="mt-1 text-slate-500">Space buzzes &bull; Enter submits &bull; N goes to the next question.</p>
+            <p>One attempt per member. Buzz during the read &mdash; or in the 5 seconds after it &mdash; then type your answer within 5 seconds. If time runs out, whatever is in the box is still submitted and graded.</p>
+            <p class="mt-1 text-slate-500">Space buzzes &bull; Enter submits &bull; N goes to the next question. A wrong grading can be flagged with &#9873; Report question.</p>
           </div>
           <button type="button" id="buk-start-btn" class="mt-5 w-full py-4 bg-neonGreen text-black text-sm font-mono font-black uppercase rounded-xl active:scale-95 transition shadow-neon-green">Start challenge</button>
           <p id="buk-start-status" class="mt-2 text-[11px] font-mono text-slate-500"></p>
@@ -1444,6 +1447,10 @@
 
           <p id="buk-feedback" class="mt-4 text-sm font-mono font-bold"></p>
           <p id="buk-run-status" class="mt-2 text-[11px] font-mono text-slate-500 uppercase"></p>
+          <div class="mt-3 flex flex-wrap items-center gap-3">
+            <button type="button" id="buk-report-btn" class="hidden px-3 py-2 bg-black border border-neonPink/60 text-neonPink hover:border-neonPink text-[10px] font-mono font-black uppercase rounded-lg active:scale-95 transition disabled:opacity-60 disabled:cursor-not-allowed" title="Flag this question for the captain to review">&#9873; Report question</button>
+            <p id="buk-report-status" class="text-[11px] font-mono text-slate-500"></p>
+          </div>
           <button type="button" id="buk-next-btn" class="hidden mt-4 px-6 py-3 bg-black border border-neonCyan text-neonCyan text-xs font-mono font-black uppercase rounded-xl active:scale-95">Next &rarr;</button>
         </div>
 
@@ -1581,6 +1588,16 @@
           <input id="bbx-challenge-code" type="text" autocomplete="off" placeholder="challenge code" class="px-2.5 py-1 rounded border border-borderDark bg-black text-xs text-neonCyan font-mono placeholder-slate-600 focus:outline-none focus:border-neonCyan w-40">
           <button type="button" id="bbx-load-board" class="bg-black border border-neonAmber text-neonAmber hover:bg-neonAmber/10 text-[11px] font-mono font-black uppercase px-2.5 py-1 rounded transition active:scale-95">Load board</button>
           <span class="text-[10px] font-mono text-slate-600">Your own challenge &mdash; the server sends the same rows the CSV holds, and the board keeps itself current while you watch it.</span>
+        </div>
+
+        <!-- Reports are the members' flags. Only a board loaded by code can carry the run
+             ids that a correction needs; the queue says when a CSV is only a snapshot. -->
+        <div id="bbx-report-queue" class="hidden mb-4 bg-black border border-neonPink/50 rounded-xl p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-[11px] font-mono font-black uppercase tracking-widest text-neonPink">&#9873; Reported questions &mdash; captain review</p>
+            <span class="text-[10px] font-mono text-slate-500">Correcting a verdict updates that member's run and the board.</span>
+          </div>
+          <div id="bbx-report-list" class="mt-2"></div>
         </div>
 
         <div id="bbx-drop-zone" onclick="document.getElementById('bbx-file-input').click()" class="border-2 border-dashed border-borderDark rounded-xl flex flex-col items-center justify-center p-6 text-center cursor-pointer hover:border-neonAmber hover:bg-panelHover transition-all relative overflow-hidden min-h-[140px]">

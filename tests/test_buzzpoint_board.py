@@ -312,6 +312,51 @@ class ChallengeStateMachineTests(unittest.TestCase):
         self.assertFalse(record["bonusExpired"])
 
 
+class ChallengeReportTests(unittest.TestCase):
+    """A member's flag names the attempt; only the captain changes its verdict."""
+
+    def _run(self):
+        run = challenge.create_run_doc("c", "u", "n", 1, "now")
+        record = challenge.build_tossup_record(
+            {"category": "Life Science", "tossup_answer": "NUCLEUS"},
+            0, {"word": "the"}, "organelle", "auto-wrong", "answered", None,
+        )
+        challenge.apply_bonus_to_record(record, "hemoglobin", "auto-wrong", False)
+        run["questions"].append(record)
+        return run
+
+    def test_a_report_is_idempotent_until_it_is_resolved(self):
+        run = self._run()
+        first = challenge.add_report(run, 0, "tossup", "the key says nucleus", "t1")
+        again = challenge.add_report(run, 0, "tossup", "duplicate click", "t2")
+        self.assertEqual(first, again)
+        self.assertEqual(len(run["reports"]), 1)
+        self.assertFalse(run["reports"][0]["resolved"])
+
+    def test_a_bonus_report_needs_a_bonus_answer(self):
+        run = self._run()
+        with self.assertRaises(ValueError):
+            challenge.add_report(run, 1, "tossup", "", "t")
+        record = run["questions"][0]
+        record["bonusVerdict"] = None
+        with self.assertRaises(ValueError):
+            challenge.add_report(run, 0, "bonus", "", "t")
+
+    def test_the_captain_verdict_replaces_the_automatic_one(self):
+        run = self._run()
+        challenge.add_report(run, 0, "tossup", "", "t")
+        challenge.add_report(run, 0, "bonus", "", "t")
+        verdict = challenge.resolve_report(run, 0, "tossup", True, "t2", "captain")
+        bonus = challenge.resolve_report(run, 0, "bonus", False, "t2", "captain")
+        self.assertEqual(verdict, "captain-correct")
+        self.assertEqual(bonus, "captain-wrong")
+        self.assertEqual(run["questions"][0]["verdict"], "captain-correct")
+        self.assertEqual(run["questions"][0]["bonusVerdict"], "captain-wrong")
+        self.assertTrue(all(report["resolved"] for report in run["reports"]))
+        self.assertEqual(len(run["judgements"]), 2)
+        self.assertEqual(run["judgements"][0]["judgedBy"], "captain")
+
+
 class BuzzWordTrackerContractTests(unittest.TestCase):
     def test_a_cancel_is_never_recorded_as_a_completed_word(self):
         # Snapshot the word BEFORE cancelling, and a cancel must not settle the read or
@@ -463,7 +508,10 @@ class BuzzpointLifetimeTests(unittest.TestCase):
         self.assertIn("const deadline = performance.now() + seconds * 1000;", panel)
         # The window's full length shows at once instead of the panel's 5.0s placeholder.
         self.assertIn("label.textContent = `${seconds.toFixed(1)}s`;", panel)
-        self.assertIn("bukSubmitToServer(input ? input.value : '', bukRun.pendingBuzz, true, 'expired');", panel)
+        # Time running out submits the box, and the server grades it like any answer.
+        self.assertIn("const typed = input ? input.value : '';", panel)
+        self.assertIn("const hasText = Boolean(typed.trim());", panel)
+        self.assertIn("bukSubmitToServer(typed, bukRun.pendingBuzz, !hasText, hasText ? 'timeout' : 'expired');", panel)
         # Both windows have somewhere on the run screen to be seen.
         self.assertIn('id="buk-buzz-timer"', INDEX_SOURCE)
         self.assertIn('id="buk-answer-title"', INDEX_SOURCE)
@@ -590,6 +638,75 @@ class NumericalStatlineTests(unittest.TestCase):
         self.assertIn("player.negs += 1;", build)
         stats = function_source(ANALYTICS_SOURCE, "bbxQuestionStats")
         self.assertIn("const negs = question.buzzes.filter((b) => b.verdict === 'wrong' && b.captureSource !== 'end').length;", stats)
+
+
+class ChallengeTimeoutAndOverviewTests(unittest.TestCase):
+    """Time running out still submits the box; the last answer stops on an overview button."""
+
+    def test_the_typed_answer_is_submitted_when_time_runs_out(self):
+        panel = function_source(BUZZPOINT_SOURCE, "bukOpenAnswerPanel")
+        self.assertIn("const typed = input ? input.value : '';", panel)
+        self.assertIn("const hasText = Boolean(typed.trim());", panel)
+        self.assertIn("bukSubmitToServer(typed, bukRun.pendingBuzz, !hasText, hasText ? 'timeout' : 'expired');", panel)
+        # A written timeout is graded; only an empty box is a plain expiry.
+        self.assertIn("hasText ? 'timeout' : 'expired'", panel)
+
+    def test_the_last_question_offers_the_overview_instead_of_skipping_to_it(self):
+        advance = function_source(BUZZPOINT_SOURCE, "bukAdvance")
+        self.assertIn("bukRun.atEnd = true;", advance)
+        self.assertIn("nextBtn.textContent = 'Go to Overview';", advance)
+        self.assertNotIn("bukFinishRun();", advance)
+        nxt = function_source(BUZZPOINT_SOURCE, "bukNextQuestion")
+        self.assertIn("if (bukRun.atEnd) {", nxt)
+        self.assertIn("bukFinishRun();", nxt)
+        self.assertIn("nextBtn.textContent = 'Next \\u2192';", advance)
+
+    def test_the_member_can_flag_a_question_for_the_captain(self):
+        self.assertIn('id="buk-report-btn"', INDEX_SOURCE)
+        self.assertIn("function bukReportQuestion()", BUZZPOINT_SOURCE)
+        self.assertIn("await bukApi(`/api/challenges/${encodeURIComponent(bukRun.code)}/report`", BUZZPOINT_SOURCE)
+        self.assertIn("bukShowReport(bukRun.question.qIndex, bukRun.question.phase);", BUZZPOINT_SOURCE)
+        self.assertIn(r"\u2691 Report question", BUZZPOINT_SOURCE)
+
+    def test_the_board_export_carries_whose_attempt_and_which_phase_was_reported(self):
+        export = function_source(BUZZPOINT_SOURCE, "bukBoardCsvRows")
+        for column in ("'RunUid'", "'Reported'", "'ReportReason'"):
+            self.assertIn(column, export)
+        self.assertIn("run.reports", export)
+        self.assertIn("!report.resolved", export)
+
+
+class CaptainReviewQueueTests(unittest.TestCase):
+    """The captain sees the flag and can set that attempt's verdict by hand."""
+
+    def test_the_analytics_parser_keeps_the_reported_attempt(self):
+        body = function_source(ANALYTICS_SOURCE, "bbxIngestCsv")
+        self.assertIn("uid: String(row['RunUid'] || '')", body)
+        self.assertIn("reported: String(row['Reported'] || '').toLowerCase()", body)
+        self.assertIn("reportReason: String(row['ReportReason'] || '')", body)
+
+    def test_a_reported_question_is_flagged_on_its_card(self):
+        card = function_source(ANALYTICS_SOURCE, "bbxQuestionCard")
+        self.assertIn("if (question.reportCount)", card)
+        self.assertIn("reported", card)
+
+    def test_the_captain_can_mark_the_reported_phase(self):
+        body = function_source(ANALYTICS_SOURCE, "bbxRenderReports")
+        self.assertIn("bbxJudgeReport(row, phase, correct)", body)
+        self.assertIn("Mark correct", body)
+        self.assertIn("Mark incorrect", body)
+        # The row is built detached unless it is attached: the queue showed its heading and
+        # nothing else, so the captain had no control to press.
+        self.assertIn("list.appendChild(item);", body)
+        judge = function_source(ANALYTICS_SOURCE, "bbxJudgeReport")
+        self.assertIn("method: 'POST'", judge)
+        self.assertIn("/judge`", judge)
+        self.assertIn("qIndex: row.qNum - 1", judge)
+
+    def test_the_queue_is_wired_into_the_station(self):
+        self.assertIn('id="bbx-report-queue"', INDEX_SOURCE)
+        self.assertIn('id="bbx-report-list"', INDEX_SOURCE)
+        self.assertIn("bbxRenderReports();", ANALYTICS_SOURCE)
 
 
 class ReadAloudUnavailableTests(unittest.TestCase):

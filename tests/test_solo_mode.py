@@ -96,7 +96,7 @@ class SoloModeTests(unittest.TestCase):
     def test_packet_text_is_streamed_as_text_not_markup(self):
         """Packet text is untrusted: it must reach the page as text nodes only."""
         self.assertNotIn("innerHTML", SOLO_SOURCE)
-        self.assertIn("shown.textContent", SOLO_SOURCE)
+        self.assertIn("span.textContent", SOLO_SOURCE)
         self.assertIn("function soloNormalizeText(", SOLO_SOURCE)
 
     def test_leaving_the_drill_slides_releases_speech_and_timers(self):
@@ -139,7 +139,7 @@ class SoloModeTests(unittest.TestCase):
         for outcome in ("soloResolveEntry('expired', false);", "soloResolveEntry('revealed', false);"):
             self.assertIn(outcome, SOLO_SOURCE)
         self.assertIn("soloResolveEntry(outcome, correct);", SOLO_SOURCE)
-        self.assertIn("if (entry && typeof entry.reaction !== 'number') entry.reaction = soloDrill.lastReaction;", SOLO_SOURCE)
+        self.assertIn("if (typeof entry.reaction !== 'number') entry.reaction = soloDrill.lastReaction;", SOLO_SOURCE)
 
     def test_a_session_is_kept_on_the_device_and_can_be_saved_to_the_account(self):
         self.assertIn('id="solo-save-session"', INDEX_SOURCE)
@@ -170,6 +170,56 @@ class SoloModeTests(unittest.TestCase):
         self.assertTrue(bank)
         self.assertIn("tossup_text", bank[0])
         self.assertIn("tossup_answer", bank[0])
+
+
+class SoloChallengeParityTests(unittest.TestCase):
+    """The drill plays the same game as a buzzboard challenge.
+
+    Read, a five-second post-read buzz window, a five-second typed answer, a bonus after a
+    correct toss-up, and a Next that starts the next read — the same loop, with the solo
+    setup's delivery choices still applied.
+    """
+
+    def test_the_drill_has_the_challenge_s_two_answer_windows(self):
+        self.assertIn("const SOLO_BONUS_WINDOW_S = 20.0;", SOLO_SOURCE)
+        self.assertIn("function soloOpenAnswerPanel(seconds, phase)", SOLO_SOURCE)
+        self.assertIn("soloOpenAnswerPanel(SOLO_BONUS_WINDOW_S, 'bonus');", SOLO_SOURCE)
+        self.assertIn("soloOpenAnswerPanel(SOLO_LOCKOUT_SECONDS, 'tossup');", SOLO_SOURCE)
+
+    def test_time_running_out_grades_the_box(self):
+        self.assertIn("function soloAutoSubmitAnswer()", SOLO_SOURCE)
+        self.assertIn("if (typed.trim()) {", SOLO_SOURCE)
+        self.assertIn("soloSubmitAnswer(typed, 'timeout');", SOLO_SOURCE)
+        self.assertIn("soloSubmitBonus(typed, 'timeout');", SOLO_SOURCE)
+        self.assertIn("soloRecordResult(false, `Time expired", SOLO_SOURCE)
+
+    def test_a_correct_tossup_moves_into_its_bonus(self):
+        self.assertIn("function soloSubmitBonus(response, outcome = 'answered')", SOLO_SOURCE)
+        self.assertIn("function soloJudgeBonus(question, response)", SOLO_SOURCE)
+        self.assertIn("soloDrill.bonusPending = Boolean(correct", SOLO_SOURCE)
+        nxt = SOLO_SOURCE[SOLO_SOURCE.index("function soloNextTossup()"):]
+        nxt = nxt[:nxt.index("\n}\n")]
+        self.assertIn("soloStartQuestion('bonus');", nxt)
+        self.assertIn("soloStartQuestion('tossup');", nxt)
+
+    def test_next_starts_the_next_read_without_a_second_click(self):
+        self.assertIn("function soloStartQuestion(phase = 'tossup')", SOLO_SOURCE)
+        self.assertIn("soloStartQuestion('tossup');\n  playSound('click');", SOLO_SOURCE)
+        self.assertIn("// Auto-start the next read, exactly like the challenge's Next button.", SOLO_SOURCE)
+
+    def test_a_solo_buzz_uses_the_shared_word_tracker(self):
+        self.assertIn("window.BuzzWordTracker(readText", SOLO_SOURCE)
+        self.assertIn("soloDrill.tracker.snapshotAtEnd()", SOLO_SOURCE)
+        self.assertIn("soloDrill.frozenAt = soloDrill.revealIndex;", SOLO_SOURCE)
+        self.assertIn("function soloRevealFullQuestion()", SOLO_SOURCE)
+        # The answer closes the frozen read, exactly as on the challenge screen.
+        self.assertIn("soloRevealFullQuestion();", SOLO_SOURCE)
+
+    def test_the_answer_panel_names_the_phase_and_shows_the_buzz_word(self):
+        self.assertIn('id="solo-answer-title"', INDEX_SOURCE)
+        self.assertIn('id="solo-buzz-word"', INDEX_SOURCE)
+        self.assertIn('id="solo-buzz-source"', INDEX_SOURCE)
+        self.assertIn("Bonus answer —", SOLO_SOURCE)
 
 
 if __name__ == "__main__":

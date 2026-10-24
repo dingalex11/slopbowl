@@ -256,7 +256,11 @@ const bukRun = {
   utterance: null, words: [], shownWords: 0, wordSpans: [], revealIndex: -1,
   readText: '',
   sawBoundary: false, fallbackTimer: null, fallbackInterval: null,
-  answering: false, awaitingNext: false,
+  answering: false, awaitingNext: false, atEnd: false,
+  // The last question's answer stays on screen behind a "Go to Overview" button; the
+  // overview is a separate stage the member chooses, not something the last answer skips to.
+  lastReportContext: null,
+  reported: new Set(),
   // The last word the read was allowed to show. A buzz sets it, so the rest of the question
   // cannot appear while the member is answering it.
   frozenAt: null,
@@ -366,6 +370,8 @@ function bukReadText(question) {
 function bukStartQuestion(question) {
   bukRun.question = question;
   bukRun.answered = false;
+  bukRun.atEnd = false;
+  bukResetReport();
   bukResetBuzzpoint();
   // Buzzable from the first word: the buzzpoint runs for the whole read, choices included.
   if (question.phase !== 'bonus') bukOpenBuzzpoint();
@@ -647,6 +653,63 @@ function bukRevealFullQuestion() {
   bukRevealUpTo((bukRun.words || []).length - 1);
 }
 
+// ------------------------------------------------------------ report a question
+// A member who has just seen a verdict can flag that question for the captain. The flag is
+// deliberately small and appears beside the result: it is not another answer control, and
+// it never changes the record by itself — the captain decides the correction.
+function bukResetReport() {
+  bukRun.lastReportContext = null;
+  const btn = bukEl('buk-report-btn');
+  if (btn) {
+    btn.classList.add('hidden');
+    btn.disabled = false;
+    btn.textContent = '\u2691 Report question';
+  }
+  const status = bukEl('buk-report-status');
+  if (status) status.textContent = '';
+}
+
+function bukShowReport(qIndex, phase) {
+  bukRun.lastReportContext = { qIndex, phase };
+  const key = `${qIndex}:${phase}`;
+  const already = bukRun.reported.has(key);
+  const btn = bukEl('buk-report-btn');
+  if (btn) {
+    btn.classList.remove('hidden');
+    btn.disabled = already;
+    btn.textContent = already ? '\u2691 Reported' : '\u2691 Report question';
+    btn.title = phase === 'bonus'
+      ? 'Flag this bonus for the captain to review'
+      : 'Flag this question for the captain to review';
+  }
+  const status = bukEl('buk-report-status');
+  if (status) status.textContent = already ? 'Sent to the captain.' : '';
+}
+
+async function bukReportQuestion() {
+  const context = bukRun.lastReportContext;
+  if (!context || !bukRun.code) return;
+  const key = `${context.qIndex}:${context.phase}`;
+  if (bukRun.reported.has(key)) return;
+  const btn = bukEl('buk-report-btn');
+  const status = bukEl('buk-report-status');
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = 'Sending report\u2026';
+  try {
+    await bukApi(`/api/challenges/${encodeURIComponent(bukRun.code)}/report`, {
+      method: 'POST',
+      body: JSON.stringify({ qIndex: context.qIndex, phase: context.phase, reason: '' }),
+    });
+    bukRun.reported.add(key);
+    if (btn) { btn.textContent = '\u2691 Reported'; btn.disabled = true; }
+    if (status) { status.textContent = 'Sent to the captain.'; status.style.color = '#00ff66'; }
+  } catch (err) {
+    // A failed report is retryable: put the flag back so the member can try again.
+    if (btn) btn.disabled = false;
+    if (status) { status.textContent = err.message || 'Could not send the report.'; status.style.color = '#ff4d4d'; }
+  }
+}
+
 function bukOpenAnswerPanel(seconds, phase) {
   const panel = bukEl('buk-answer-panel');
   if (panel) panel.classList.remove('hidden');
@@ -666,7 +729,12 @@ function bukOpenAnswerPanel(seconds, phase) {
     if (label) label.textContent = `${remaining.toFixed(1)}s`;
     if (remaining <= 0) {
       clearInterval(bukRun.lockoutTimer); bukRun.lockoutTimer = null;
-      bukSubmitToServer(input ? input.value : '', bukRun.pendingBuzz, true, 'expired');
+      // Time is up, but the answer is in the box: submit what was written and grade it
+      // like any other answer. Losing a correct answer because Submit came a beat late is
+      // not a rule of the game, and the server — not the timer — decides correctness.
+      const typed = input ? input.value : '';
+      const hasText = Boolean(typed.trim());
+      bukSubmitToServer(typed, bukRun.pendingBuzz, !hasText, hasText ? 'timeout' : 'expired');
     }
   }, 100);
 }
@@ -713,13 +781,23 @@ async function bukSubmitToServer(typedAnswer, buzz, expired, outcome) {
     bukRun.records.push({ qIndex: bukRun.question.qIndex, phase: bukRun.question.phase, buzz: isBonus ? null : buzz, typedAnswer, verdict: result.verdict, correct: result.correct, answer: result.answer });
     const feedback = bukEl('buk-feedback');
     if (feedback) {
+      const timedOut = outcome === 'timeout';
       feedback.textContent = result.correct
         ? `Correct \u2014 "${result.answer}"`
-        : `${expired ? (isBonus ? 'Bonus time expired.' : 'Expired.') : 'Incorrect.'} Answer: "${result.answer}"`;
+        : `${expired ? (isBonus ? 'Bonus time expired.' : 'Expired.') : (timedOut ? 'Time expired.' : 'Incorrect.')} Answer: "${result.answer}"`;
       feedback.style.color = result.correct ? '#00ff66' : '#ff6b6b';
     }
+    // The verdict replaces "answer now": a timed-out answer is in and graded, so the status
+    // must not keep telling the member to answer a question that is already recorded.
+    bukStatus('buk-run-status', result.correct
+      ? 'Correct \u2014 answer recorded.'
+      : (outcome === 'timeout'
+        ? 'Time expired \u2014 the written answer was submitted and graded.'
+        : (expired ? 'Expired \u2014 no answer submitted.' : 'Incorrect \u2014 answer recorded.')),
+    result.correct ? '#00ff66' : '#ff4d4d');
     const panel = bukEl('buk-answer-panel'); if (panel) panel.classList.add('hidden');
     bukRevealFullQuestion();
+    bukShowReport(bukRun.question.qIndex, bukRun.question.phase);
     bukAdvance(result.next);
   } catch (err) {
     bukStatus('buk-run-status', err.message || 'Could not record that answer.', '#ff4d4d');
@@ -730,12 +808,25 @@ async function bukSubmitToServer(typedAnswer, buzz, expired, outcome) {
 }
 
 function bukAdvance(next) {
+  const nextBtn = bukEl('buk-next-btn');
   if (!next || next.done) {
-    bukFinishRun();
+    // The packet is over, but the member stays on the final answer and its feedback. The
+    // button becomes the way to the overview, so the last question is not skipped past.
+    bukRun.atEnd = true;
+    bukRun.pendingNext = null;
+    bukRun.awaitingNext = true;
+    if (nextBtn) {
+      nextBtn.classList.remove('hidden');
+      nextBtn.textContent = 'Go to Overview';
+    }
     return;
   }
   // Correct toss-up -> the bonus is next (same question); otherwise the next toss-up.
-  const nextBtn = bukEl('buk-next-btn'); if (nextBtn) nextBtn.classList.remove('hidden');
+  bukRun.atEnd = false;
+  if (nextBtn) {
+    nextBtn.classList.remove('hidden');
+    nextBtn.textContent = 'Next \u2192';
+  }
   bukRun.pendingNext = next;
   bukRun.awaitingNext = true;
 }
@@ -743,9 +834,14 @@ function bukAdvance(next) {
 function bukNextQuestion() {
   const nextBtn = bukEl('buk-next-btn'); if (nextBtn) nextBtn.classList.add('hidden');
   const feedback = bukEl('buk-feedback'); if (feedback) feedback.textContent = '';
+  if (bukRun.atEnd) {
+    bukFinishRun();
+    return;
+  }
   if (bukRun.pendingNext) {
-    const next = bukRun.pendingNext;      bukRun.pendingNext = null;
-      bukRun.awaitingNext = false;
+    const next = bukRun.pendingNext;
+    bukRun.pendingNext = null;
+    bukRun.awaitingNext = false;
     bukStartQuestion(next);
   } else {
     bukFinishRun();
@@ -825,6 +921,7 @@ function bukBoardCsvRows(runs, questions) {
     'Q_Num', 'Subject', 'Category', 'Type', 'QuestionText', 'Answer', 'Member',
     'BuzzWord', 'BuzzWordIndex', 'BuzzDepthPct', 'WordsHeard', 'TotalWords',
     'CaptureSource', 'ReactionSeconds', 'TypedAnswer', 'Verdict', 'BonusVerdict',
+    'RunUid', 'Reported', 'ReportReason',
   ]];
   for (const run of runs) {
     for (const r of run.questions || []) {
@@ -836,6 +933,17 @@ function bukBoardCsvRows(runs, questions) {
       const depth = (typeof r.buzzWordIndex === 'number' && r.totalWords)
         ? Math.round(((r.buzzWordIndex + 1) / r.totalWords) * 100)
         : '';
+      // A report belongs to the member's run, not to the packet. An open report travels
+      // with the attempt's row so the captain's review queue knows exactly whose verdict
+      // to change; a resolved one drops out of the export.
+      const reports = (Array.isArray(run.reports) ? run.reports : [])
+        .filter((report) => Number(report.qIndex) === r.qIndex && !report.resolved);
+      const reportedPhases = [...new Set(reports
+        .map((report) => String(report.phase || ''))
+        .filter((phase) => phase === 'tossup' || phase === 'bonus'))];
+      const reportReasons = [...new Set(reports
+        .map((report) => String(report.reason || '').trim())
+        .filter(Boolean))];
       rows.push([
         r.qIndex + 1,
         r.subject || bukSubjectFor(r.category),
@@ -856,6 +964,9 @@ function bukBoardCsvRows(runs, questions) {
         r.typedAnswer || '',
         r.verdict || '',
         r.bonusVerdict || '',
+        run.uid || '',
+        reportedPhases.join('+'),
+        reportReasons.join(' | '),
       ]);
     }
   }
@@ -962,6 +1073,7 @@ async function bukClaimAttempt(code, displayName) {
   bukRun.claimedCode = code;
   bukRun.joinStatus = result.status;
   bukRun.records = [];
+  bukRun.reported = new Set();
   bukRun.finished = false;
   return result;
 }
@@ -1082,7 +1194,9 @@ function bukLeaveChallengeScreen() {
   bukRun.question = null;
   bukRun.answering = false;
   bukRun.awaitingNext = false;
+  bukRun.atEnd = false;
   bukRun.pendingNext = null;
+  bukResetReport();
   bukShowStage('none');
 }
 
@@ -1173,6 +1287,8 @@ function bukInit() {
   if (buzzBtn) buzzBtn.addEventListener('click', () => { bukBuzz(); });
   const submitBtn = bukEl('buk-answer-submit');
   if (submitBtn) submitBtn.addEventListener('click', bukSubmitTyped);
+  const reportBtn = bukEl('buk-report-btn');
+  if (reportBtn) reportBtn.addEventListener('click', bukReportQuestion);
   const answerInput = bukEl('buk-answer-input');
   if (answerInput) {
     answerInput.addEventListener('keydown', (event) => {

@@ -506,6 +506,47 @@ function soloQuestionLabel(question) {
   return type === 'MC' ? 'MULTIPLE CHOICE' : 'SHORT ANSWER';
 }
 
+const SOLO_BONUS_WINDOW_S = 20.0;
+
+// The drill reads the same composed text the challenge does: the stem followed by every
+// choice on its own line, so a multiple-choice question never stops at "which of these".
+function soloReadText(question, phase) {
+  const bonus = phase === 'bonus';
+  const stem = String((bonus ? question.bonus_text : question.tossup_text) || '').trimEnd();
+  const rawOptions = bonus ? question.bonus_options : question.tossup_options;
+  const options = (Array.isArray(rawOptions) ? rawOptions : [])
+    .map((option) => String(option == null ? '' : option).trim())
+    .filter(Boolean);
+  if (!options.length) return stem;
+  return `${stem}\n\n${options.join('\n')}`;
+}
+
+// The same tokenizer and tracker the challenge uses, so a solo buzz-point means the same
+// thing as a buzz-point on the board. Both are loaded by buzzpoint.js before any drill runs.
+function soloTokenize(text) {
+  if (typeof window.buzzTokenizeWords === 'function') return window.buzzTokenizeWords(text);
+  const source = String(text || '');
+  const words = [];
+  const re = /[A-Za-z0-9]+(?:[.'\u2019][A-Za-z0-9]+)*/g;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    words.push({ word: match[0], start: match.index, end: match.index + match[0].length });
+  }
+  return words;
+}
+
+function soloWordIndexAt(words, charIndex) {
+  if (!words || !words.length) return 0;
+  let index = Number.isFinite(charIndex) ? Math.trunc(charIndex) : 0;
+  if (index < 0) index = 0;
+  let result = 0;
+  for (let i = 0; i < words.length; i += 1) {
+    if (words[i].start <= index) result = i;
+    if (words[i].start <= index && index < words[i].end) return i;
+  }
+  return result;
+}
+
 // =========================================================
 // DRILL: RUNTIME
 // =========================================================
@@ -589,7 +630,11 @@ function startSoloDrill() {
     streak: 0,
     bestReaction: null,
     lastReaction: null,
+    phase: 'tossup',
+    bonusPending: false,
+    bonusDone: false,
     answered: false,
+    answering: false,
     delivering: false,
     windowOpen: false,
     streamDone: false,
@@ -597,17 +642,28 @@ function startSoloDrill() {
     wordsShown: 0,
     totalWords: 0,
     startedAt: 0,
+    readText: '',
+    words: [],
+    wordSpans: [],
+    revealIndex: -1,
+    frozenAt: null,
+    pendingBuzz: null,
+    tracker: null,
     timers: [],
     intervals: [],
     wordTimer: null,
     speechPoll: null,
     lockoutTimer: null,
+    windowTimer: null,
+    windowTick: null,
     recognition: null,
   };
   navigateTo(12);
   soloRenderStats();
-  soloRenderQuestion({ ready: true });
   soloRenderTelemetry();
+  // The challenge starts reading as soon as the member presses Start; the drill does the
+  // same instead of asking for a second "start question" click on every toss-up.
+  soloStartQuestion('tossup');
   playSound('click');
 }
 
@@ -662,73 +718,88 @@ function soloRenderQuestion({ ready = false } = {}) {
   }
 }
 
-function soloStartQuestion() {
+function soloStartQuestion(phase = 'tossup') {
   if (!soloDrill) return;
-  if (soloDrill.delivering) return;
   const entry = soloDrill.queue[soloDrill.index];
   if (!entry) return;
-  soloStopDelivery();
   const question = entry.question;
-  soloRecordAsked(question);
+  // A correct toss-up offers its bonus as the next read. A packet without one simply
+  // advances, exactly as the challenge does.
+  if (phase === 'bonus' && !String(question.bonus_text || '').trim()) phase = 'tossup';
+  soloStopDelivery();
+  soloStopRecognition();
+  if (phase !== 'bonus') soloRecordAsked(question);
+  else if (soloCurrentEntry()) soloCurrentEntry().bonusAsked = true;
   soloRenderTelemetry();
-  const words = soloQuestionWords(question.tossup_text);
+
+  const readText = soloReadText(question, phase);
+  const words = soloTokenize(readText);
+  const streamsText = soloOptions.output !== 'spoken';
+  const speaksText = soloOptions.output !== 'typed';
+  soloDrill.phase = phase;
+  soloDrill.answerPhase = phase;
+  soloDrill.readText = readText;
+  soloDrill.words = words;
   soloDrill.totalWords = words.length;
   soloDrill.wordsShown = 0;
+  soloDrill.revealIndex = -1;
+  soloDrill.frozenAt = null;
+  soloDrill.pendingBuzz = null;
   soloDrill.answered = false;
-  soloDrill.windowOpen = true;
+  soloDrill.answering = false;
+  soloDrill.windowOpen = false;
   soloDrill.delivering = true;
   soloDrill.startedAt = performance.now();
   soloDrill.lastReaction = null;
-  soloRecordAsked(question);
+  soloDrill.streamDone = !streamsText;
+  soloDrill.speechDone = !speaksText;
 
-  const text = soloElement('solo-question-text');
+  // The same tracker the challenge uses: a solo buzz records the word the read was on,
+  // and a buzz in the post-read window is marked at the end with no word at all.
+  soloDrill.tracker = typeof window.BuzzWordTracker === 'function'
+    ? window.BuzzWordTracker(readText, { wordsPerSecond: Math.max(1, soloOptions.wpm / 60) })
+    : null;
+  if (soloDrill.tracker) soloDrill.tracker.noteStart();
+
   const counter = soloElement('solo-word-count');
   const status = soloElement('solo-drill-status');
   const bar = soloElement('solo-progress-bar');
   const buzz = soloElement('solo-buzz-btn');
   const feedback = soloElement('solo-feedback');
   const answerPanel = soloElement('solo-answer-panel');
+  const label = soloElement('solo-q-label');
   if (feedback) { feedback.className = 'hidden mt-4 text-sm font-mono font-bold'; feedback.innerText = ''; }
   if (answerPanel) answerPanel.classList.add('hidden');
   if (bar) bar.style.width = '0%';
   if (counter) counter.innerText = `Word 0 of ${words.length}`;
-  if (buzz) buzz.disabled = false;
-  if (status) {
-    status.innerText = soloOptions.output === 'spoken'
-      ? 'Delivering: spoken only'
-      : (soloOptions.output === 'typed' ? 'Delivering: typed stream' : 'Delivering: hybrid voice + stream');
+  if (label) {
+    label.innerText = phase === 'bonus'
+      ? `Bonus for Q${soloDrill.index + 1}`
+      : `Toss-up #${soloDrill.index + 1} (${soloQuestionLabel(question)})`;
   }
-  if (text) {
-    if (soloOptions.output === 'spoken') {
-      // Spoken delivery is audio-only by design: the question is never written to the page.
-      text.className = 'min-h-[132px] bg-black border border-neonCyan/40 rounded-xl p-5 flex flex-col items-center justify-center text-center';
-      const speaker = document.createElement('span');
-      speaker.className = 'text-4xl';
-      speaker.textContent = '\uD83D\uDD08';
-      const caption = document.createElement('span');
-      caption.className = 'text-[11px] text-neonCyan font-mono font-bold tracking-widest mt-3 uppercase';
-      caption.textContent = 'Audio-only delivery — no visible text';
-      text.replaceChildren(speaker, caption);
-    } else {
-      text.className = 'min-h-[132px] bg-black border border-borderDark rounded-xl p-5 text-lg md:text-xl text-slate-200 font-sans leading-relaxed';
-      text.textContent = '';
-    }
+  const lockout = soloElement('solo-lockout');
+  if (lockout) lockout.innerText = phase === 'bonus' ? `Bonus: ${SOLO_BONUS_WINDOW_S.toFixed(0)}s` : `Lockout: ${SOLO_LOCKOUT_SECONDS.toFixed(1)}s`;
+  if (buzz) buzz.disabled = phase === 'bonus';
+  const buzzWord = soloElement('solo-buzz-word');
+  if (buzzWord) buzzWord.innerText = '';
+  const buzzSource = soloElement('solo-buzz-source');
+  if (buzzSource) buzzSource.innerText = '';
+  if (status) {
+    status.innerText = phase === 'bonus'
+      ? 'Reading bonus — no buzz on this one'
+      : (soloOptions.output === 'spoken'
+        ? 'Delivering: spoken only'
+        : (soloOptions.output === 'typed' ? 'Delivering: typed stream' : 'Delivering: hybrid voice + stream'));
   }
 
-  // A hybrid read is over only when both channels are: the spoken question and the
-  // teleprompter run at their own paces, and the buzz window must not open before the
-  // last of them has finished.
-  const streamsText = soloOptions.output !== 'spoken';
-  const speaksText = soloOptions.output !== 'typed';
-  soloDrill.streamDone = !streamsText;
-  soloDrill.speechDone = !speaksText;
+  soloPrepareReveal(readText);
   if (streamsText) soloStartWordStream(words);
   if (soloOptions.output === 'spoken') {
     // Progress for a spoken-only read follows the estimate until the engine confirms.
-    soloAnimateSpokenProgress(question.tossup_text);
+    soloAnimateSpokenProgress(readText);
   }
   if (speaksText) {
-    soloSpeak(question.tossup_text, (spoke) => {
+    soloSpeak(readText, (spoke) => {
       if (!soloDrill || !soloDrill.delivering) return;
       if (!spoke && status) {
         status.innerText = 'Speech engine did not start — check the voice, or use typed delivery.';
@@ -740,17 +811,94 @@ function soloStartQuestion() {
   }
 }
 
+// The words are laid out once as hidden text spans, so a reveal (and a buzz freeze) only
+// toggles visibility and never rebuilds the block.
+function soloPrepareReveal(readText) {
+  const text = soloElement('solo-question-text');
+  if (!text) return;
+  soloDrill.wordSpans = [];
+  if (soloOptions.output === 'spoken') {
+    // Spoken delivery is audio-only by design: the question is never written to the page.
+    text.className = 'min-h-[132px] bg-black border border-neonCyan/40 rounded-xl p-5 flex flex-col items-center justify-center text-center';
+    const speaker = document.createElement('span');
+    speaker.className = 'text-4xl';
+    speaker.textContent = '\uD83D\uDD08';
+    const caption = document.createElement('span');
+    caption.className = 'text-[11px] text-neonCyan font-mono font-bold tracking-widest mt-3 uppercase';
+    caption.textContent = 'Audio-only delivery — no visible text';
+    text.replaceChildren(speaker, caption);
+    return;
+  }
+  text.className = 'min-h-[132px] bg-black border border-borderDark rounded-xl p-5 text-lg md:text-xl text-slate-200 font-sans leading-relaxed whitespace-pre-line';
+  text.replaceChildren();
+  let previousEnd = 0;
+  (soloDrill.words || []).forEach((word) => {
+    const span = document.createElement('span');
+    span.textContent = `${readText.slice(previousEnd, word.start)}${word.word}`;
+    span.style.visibility = 'hidden';
+    text.appendChild(span);
+    soloDrill.wordSpans.push(span);
+    previousEnd = word.end;
+  });
+  const tail = readText.slice(previousEnd);
+  if (tail && soloDrill.wordSpans.length) {
+    soloDrill.wordSpans[soloDrill.wordSpans.length - 1].textContent += tail;
+  }
+}
+
+function soloRevealUpTo(index) {
+  if (!soloDrill) return;
+  const words = soloDrill.words || [];
+  const last = words.length - 1;
+  // A buzz freezes the read where it was: the rest of the question stays hidden until
+  // the answer is submitted, exactly as on the challenge screen.
+  const ceiling = soloDrill.frozenAt === null ? last : Math.min(last, soloDrill.frozenAt);
+  const target = Math.max(-1, Math.min(index, ceiling));
+  if (target <= soloDrill.revealIndex) return;
+  if (soloOptions.output !== 'spoken') {
+    for (let i = soloDrill.revealIndex + 1; i <= target; i += 1) {
+      if (soloDrill.wordSpans[i]) soloDrill.wordSpans[i].style.visibility = 'visible';
+    }
+  }
+  soloDrill.revealIndex = target;
+  soloDrill.wordsShown = target + 1;
+  const counter = soloElement('solo-word-count');
+  if (counter && soloOptions.output !== 'spoken') counter.innerText = `Word ${Math.max(1, target + 1)} of ${words.length}`;
+  const bar = soloElement('solo-progress-bar');
+  if (bar) {
+    const share = Math.round(((target + 1) / Math.max(1, words.length)) * 100);
+    bar.style.width = `${soloOptions.output === 'hybrid' ? Math.min(99, share) : share}%`;
+  }
+  if (target >= last) {
+    soloDrill.streamDone = true;
+    soloFinishDelivery();
+  }
+}
+
+function soloRevealFullQuestion() {
+  if (!soloDrill) return;
+  soloDrill.frozenAt = null;
+  if (soloOptions.output === 'spoken') {
+    const text = soloElement('solo-question-text');
+    if (text) {
+      text.className = 'min-h-[132px] bg-black border border-borderDark rounded-xl p-5 text-lg md:text-xl text-slate-200 font-sans leading-relaxed whitespace-pre-line';
+      text.textContent = soloDrill.readText;
+    }
+    return;
+  }
+  soloRevealUpTo((soloDrill.words || []).length - 1);
+}
+
+
 // Packet text is untrusted content: it is streamed as text nodes, never as markup.
 function soloStartWordStream(words) {
+  if (!words.length) {
+    soloDrill.streamDone = true;
+    soloFinishDelivery();
+    return;
+  }
   const msPerWord = Math.max(50, Math.round(60000 / Math.max(120, soloOptions.wpm)));
-  const text = soloElement('solo-question-text');
-  const counter = soloElement('solo-word-count');
-  const bar = soloElement('solo-progress-bar');
   let index = 0;
-  if (text) text.replaceChildren();
-  const caret = document.createElement('span');
-  caret.className = 'text-neonCyan animate-pulse';
-  caret.textContent = '\u258c';
   soloDrill.wordTimer = setInterval(() => {
     if (!soloDrill || !soloDrill.delivering) {
       clearInterval(soloDrill.wordTimer);
@@ -758,29 +906,17 @@ function soloStartWordStream(words) {
       return;
     }
     index += 1;
-    soloDrill.wordsShown = index;
-    if (text && caret.parentNode === text) {
-      const shown = document.createElement('span');
-      shown.textContent = `${words[index - 1]} `;
-      text.insertBefore(shown, caret);
-    }
-    if (counter) counter.innerText = `Word ${index} of ${words.length}`;
-    // In hybrid delivery the spoken read outlasts the stream, so the bar only completes
-    // when the read itself is over.
-    if (bar) {
-      const share = Math.round((index / words.length) * 100);
-      bar.style.width = `${soloOptions.output === 'hybrid' ? Math.min(99, share) : share}%`;
-    }
+    soloRevealUpTo(index - 1);
+    // The stream is a counted word clock too, so a buzz between speech boundaries still
+    // records the word the reader had reached.
+    if (soloDrill.tracker) soloDrill.tracker.noteCounted(index - 1);
     if (index >= words.length) {
       clearInterval(soloDrill.wordTimer);
       soloDrill.wordTimer = null;
-      if (text && caret.parentNode === text) caret.remove();
-      if (counter) counter.innerText = `Word ${words.length} of ${words.length}`;
       soloDrill.streamDone = true;
       soloFinishDelivery();
     }
   }, msPerWord);
-  if (text) text.appendChild(caret);
 }
 
 function soloAnimateSpokenProgress(source) {
@@ -824,6 +960,15 @@ function soloSpeak(source, onDone) {
     onDone(spoke);
   };
   utterance.onstart = () => { spoke = true; };
+  // The audio's own boundary is the most accurate position available: it moves the
+  // buzz-point clock, and in hybrid delivery it also reveals the words as they are spoken.
+  utterance.onboundary = (event) => {
+    if (!event || event.name !== 'word') return;
+    if (soloDrill && soloDrill.tracker) soloDrill.tracker.noteBoundary(event.charIndex);
+    if (soloDrill && soloOptions.output === 'hybrid') {
+      soloRevealUpTo(soloWordIndexAt(soloDrill.words, event.charIndex));
+    }
+  };
   utterance.onend = settle;
   utterance.onerror = () => {
     // A read the browser refused (or another page interrupted) must still release the drill.
@@ -854,18 +999,39 @@ function soloFinishDelivery() {
   const status = soloElement('solo-drill-status');
   const bar = soloElement('solo-progress-bar');
   if (bar) bar.style.width = '100%';
-  if (status) status.innerText = 'Read complete — buzz window open (5.0s)';
   soloDrill.delivering = false;
+  if (soloDrill.phase === 'bonus') {
+    // A bonus is not buzzable: its read hands straight over to the 20-second answer window.
+    if (status) status.innerText = `Read complete — ${SOLO_BONUS_WINDOW_S.toFixed(0)}s to type your bonus answer.`;
+    soloDrill.windowOpen = false;
+    soloOpenAnswerPanel(SOLO_BONUS_WINDOW_S, 'bonus');
+    if (soloOptions.input === 'audio') soloStartRecognition();
+    return;
+  }
+  if (status) status.innerText = 'Read complete — buzz window open (5.0s)';
   soloDrill.windowOpen = true;
   soloStartWindowCountdown();
 }
 
 function soloStartWindowCountdown() {
-  const timer = setTimeout(() => {
-    if (!soloDrill || soloDrill.answered) return;
-    soloExpireQuestion('No buzz — question expired.');
-  }, SOLO_LOCKOUT_SECONDS * 1000);
-  soloDrill.timers.push(timer);
+  const header = soloElement('solo-lockout');
+  const deadline = performance.now() + SOLO_LOCKOUT_SECONDS * 1000;
+  const tick = setInterval(() => {
+    if (!soloDrill || soloDrill.answered || !soloDrill.windowOpen) {
+      clearInterval(tick);
+      if (soloDrill && soloDrill.windowTick === tick) soloDrill.windowTick = null;
+      return;
+    }
+    const remaining = Math.max(0, (deadline - performance.now()) / 1000);
+    if (header) header.innerText = `Buzz: ${remaining.toFixed(1)}s`;
+    if (remaining <= 0) {
+      clearInterval(tick);
+      soloDrill.windowTick = null;
+      soloExpireQuestion('No buzz — question expired.');
+    }
+  }, 100);
+  soloDrill.windowTick = tick;
+  soloDrill.intervals.push(tick);
 }
 
 // The drill stops at the end of a window; moving on is the trainee's call, exactly as a
@@ -873,7 +1039,10 @@ function soloStartWindowCountdown() {
 function soloExpireQuestion(message) {
   if (!soloDrill) return;
   soloStopDelivery();
+  soloDrill.windowOpen = false;
+  soloDrill.answering = false;
   soloDrill.answered = true;
+  soloRevealFullQuestion();
   soloDrill.streak = 0;
   soloResolveEntry('expired', false);
   soloRenderTelemetry();
@@ -881,35 +1050,63 @@ function soloExpireQuestion(message) {
   if (buzz) buzz.disabled = true;
   const status = soloElement('solo-drill-status');
   if (status) status.innerText = message;
+  const header = soloElement('solo-lockout');
+  if (header) header.innerText = `Lockout: ${SOLO_LOCKOUT_SECONDS.toFixed(1)}s`;
+  const entry = soloDrill.queue[soloDrill.index];
+  const answer = entry ? entry.question.tossup_answer : '';
   const feedback = soloElement('solo-feedback');
   if (feedback) {
     feedback.className = 'mt-4 text-sm font-mono font-bold text-slate-400';
-    feedback.innerText = 'No points — press NEXT TOSSUP to keep training.';
+    feedback.innerText = `No points — answer: "${answer}". Press NEXT QUESTION to keep training.`;
   }
   soloRenderStats();
 }
 
 function soloBuzz() {
-  if (!soloDrill || soloDrill.answered) return false;
+  if (!soloDrill || soloDrill.answered || soloDrill.answering) return false;
+  if (soloDrill.phase === 'bonus') return false;
   if (!soloDrill.windowOpen && !soloDrill.delivering) return false;
   if (!soloElement('slide-12') || soloElement('slide-12').classList.contains('hidden')) return false;
+  const atEnd = !soloDrill.delivering && soloDrill.streamDone && soloDrill.speechDone;
+  // THE rule, exactly as on the challenge screen: snapshot the word before cancelling.
+  const snapshot = soloDrill.tracker
+    ? (atEnd ? soloDrill.tracker.snapshotAtEnd() : soloDrill.tracker.snapshot())
+    : null;
+  if (soloDrill.tracker && !atEnd) soloDrill.tracker.markCancelled();
+  soloDrill.frozenAt = soloDrill.revealIndex;
   soloDrill.lastReaction = (performance.now() - soloDrill.startedAt) / 1000;
   const entry = soloCurrentEntry();
-  if (entry && typeof entry.reaction !== 'number') entry.reaction = soloDrill.lastReaction;
+  if (entry) {
+    if (typeof entry.reaction !== 'number') entry.reaction = soloDrill.lastReaction;
+    entry.buzz = snapshot;
+    entry.buzzWord = snapshot ? snapshot.word : null;
+    entry.buzzSource = snapshot ? snapshot.captureSource : null;
+  }
   soloStopDelivery();
-  soloDrill.answered = true;
   soloDrill.windowOpen = false;
+  soloDrill.pendingBuzz = snapshot ? { ...snapshot, reactionSeconds: Number(soloDrill.lastReaction.toFixed(3)) } : null;
   soloRenderStats();
   playSound('buzz');
 
   const buzz = soloElement('solo-buzz-btn');
   if (buzz) buzz.disabled = true;
+  const buzzWord = soloElement('solo-buzz-word');
+  if (buzzWord) {
+    buzzWord.innerText = snapshot && snapshot.captureSource === 'end'
+      ? '[end]'
+      : (snapshot && snapshot.word ? snapshot.word : '(no word)');
+  }
+  const buzzSource = soloElement('solo-buzz-source');
+  if (buzzSource) {
+    buzzSource.innerText = snapshot ? `${snapshot.captureSource} • ${snapshot.wordsHeard}/${snapshot.totalWords} words` : '';
+  }
   const status = soloElement('solo-drill-status');
-  if (status) status.innerText = `Locked out at ${soloDrill.lastReaction.toFixed(2)}s — answer now`;
-  const panel = soloElement('solo-answer-panel');
-  if (panel) panel.classList.remove('hidden');
-
-  soloStartLockoutCountdown();
+  if (status) {
+    status.innerText = atEnd
+      ? 'Buzzed at the end of the question — answer now'
+      : `Locked out at ${soloDrill.lastReaction.toFixed(2)}s on "${snapshot ? snapshot.word : ''}" — answer now`;
+  }
+  soloOpenAnswerPanel(SOLO_LOCKOUT_SECONDS, 'tossup');
   if (soloOptions.input === 'audio') soloStartRecognition();
   else {
     const input = soloElement('solo-answer-input');
@@ -918,20 +1115,51 @@ function soloBuzz() {
   return true;
 }
 
-function soloStartLockoutCountdown() {
+function soloOpenAnswerPanel(seconds, phase) {
+  const panel = soloElement('solo-answer-panel');
+  if (panel) panel.classList.remove('hidden');
+  const input = soloElement('solo-answer-input');
+  if (input) { input.value = ''; input.focus(); }
+  soloDrill.answerPhase = phase;
+  soloDrill.answering = true;
+  const title = soloElement('solo-answer-title');
+  if (title) title.innerText = phase === 'bonus' ? `Bonus answer — ${seconds.toFixed(0)}s` : `Type your answer — ${seconds.toFixed(0)}s`;
   const label = soloElement('solo-answer-timer');
   const header = soloElement('solo-lockout');
-  const deadline = performance.now() + SOLO_LOCKOUT_SECONDS * 1000;
+  if (label) label.innerText = `${seconds.toFixed(1)}s`;
+  if (header) header.innerText = phase === 'bonus' ? `Bonus: ${seconds.toFixed(0)}s` : `Lockout: ${seconds.toFixed(1)}s`;
+  if (soloDrill.lockoutTimer) clearInterval(soloDrill.lockoutTimer);
+  const deadline = performance.now() + seconds * 1000;
   soloDrill.lockoutTimer = setInterval(() => {
     const remaining = Math.max(0, (deadline - performance.now()) / 1000);
     if (label) label.innerText = `${remaining.toFixed(1)}s`;
-    if (header) header.innerText = `Lockout: ${remaining.toFixed(1)}s`;
+    if (header) header.innerText = phase === 'bonus' ? `Bonus: ${remaining.toFixed(1)}s` : `Lockout: ${remaining.toFixed(1)}s`;
     if (remaining <= 0) {
       clearInterval(soloDrill.lockoutTimer);
       soloDrill.lockoutTimer = null;
-      soloRecordResult(false, 'Lockout expired before an answer arrived.');
+      soloAutoSubmitAnswer();
     }
   }, 100);
+}
+
+// Time is up: whatever is in the box is submitted and graded, exactly as the challenge
+// does. An empty box is a timeout; a written answer is still an answer.
+function soloAutoSubmitAnswer() {
+  if (!soloDrill || !soloDrill.answering) return;
+  const input = soloElement('solo-answer-input');
+  const typed = input ? input.value : '';
+  if (typed.trim()) {
+    if (soloDrill.phase === 'bonus') soloSubmitBonus(typed, 'timeout');
+    else soloSubmitAnswer(typed, 'timeout');
+    return;
+  }
+  if (soloDrill.phase === 'bonus') {
+    soloSubmitBonus('', 'expired');
+    return;
+  }
+  const entry = soloDrill.queue[soloDrill.index];
+  const answer = entry ? entry.question.tossup_answer : '';
+  soloRecordResult(false, `Time expired — answer: "${answer}"`, 'expired');
 }
 
 function soloStartRecognition() {
@@ -953,7 +1181,8 @@ function soloStartRecognition() {
       if (status) status.innerText = `Heard: "${transcript}"`;
       if (event.results[event.results.length - 1].isFinal && transcript) {
         soloStopDelivery();
-        soloSubmitAnswer(transcript);
+        if (soloDrill.phase === 'bonus') soloSubmitBonus(transcript);
+        else soloSubmitAnswer(transcript);
       }
     };
     recognition.onerror = (event) => {
@@ -1303,12 +1532,64 @@ function soloJudgeAnswer(question, response) {
   return soloJudgeKeyword(answerText, response);
 }
 
-function soloSubmitAnswer(response) {
-  if (!soloDrill || !soloDrill.answered) return;
+function soloSubmitAnswer(response, outcome = 'answered') {
+  if (!soloDrill || !soloDrill.answering || soloDrill.phase === 'bonus') return;
   const entry = soloDrill.queue[soloDrill.index];
   if (!entry) return;
   const correct = soloJudgeAnswer(entry.question, response);
-  soloRecordResult(correct, correct ? `Correct — "${entry.question.tossup_answer}"` : `Incorrect — answer: "${entry.question.tossup_answer}"`);
+  const answerText = String(entry.question.tossup_answer || '');
+  const message = correct
+    ? `Correct — "${answerText}"`
+    : `${outcome === 'timeout' ? 'Time expired' : 'Incorrect'} — answer: "${answerText}"`;
+  soloRecordResult(correct, message, outcome);
+}
+
+function soloJudgeBonus(question, response) {
+  return soloJudgeAnswer(
+    { ...question, tossup_answer: String(question.bonus_answer || '') },
+    response,
+  );
+}
+
+function soloSubmitBonus(response, outcome = 'answered') {
+  if (!soloDrill || !soloDrill.answering || soloDrill.phase !== 'bonus') return;
+  const entry = soloDrill.queue[soloDrill.index];
+  if (!entry) return;
+  if (soloDrill.lockoutTimer) {
+    clearInterval(soloDrill.lockoutTimer);
+    soloDrill.lockoutTimer = null;
+  }
+  soloStopSpeech();
+  soloStopRecognition();
+  const correct = soloJudgeBonus(entry.question, response);
+  const answerText = String(entry.question.bonus_answer || '');
+  const current = soloCurrentEntry();
+  if (current) {
+    current.bonusAsked = true;
+    current.bonusCorrect = correct;
+    current.bonusOutcome = outcome;
+    current.bonusTypedAnswer = String(response || '');
+  }
+  if (correct) playSound('correct'); else playSound('buzz');
+  soloDrill.answered = true;
+  soloDrill.answering = false;
+  soloDrill.windowOpen = false;
+  soloRevealFullQuestion();
+  const panel = soloElement('solo-answer-panel');
+  if (panel) panel.classList.add('hidden');
+  const feedback = soloElement('solo-feedback');
+  if (feedback) {
+    feedback.className = `mt-4 text-sm font-mono font-bold ${correct ? 'text-neonGreen' : 'text-neonPink'}`;
+    feedback.innerText = correct
+      ? `✅ Correct — "${answerText}"`
+      : `❌ ${outcome === 'timeout' || outcome === 'expired' ? 'Bonus time expired' : 'Incorrect'} — answer: "${answerText}"`;
+  }
+  const status = soloElement('solo-drill-status');
+  if (status) status.innerText = 'Bonus recorded — press NEXT QUESTION';
+  const header = soloElement('solo-lockout');
+  if (header) header.innerText = `Bonus: ${SOLO_BONUS_WINDOW_S.toFixed(0)}s`;
+  soloRenderTelemetry();
+  soloRenderStats();
 }
 
 function soloRecordResult(correct, message, outcome = 'answered') {
@@ -1328,16 +1609,27 @@ function soloRecordResult(correct, message, outcome = 'answered') {
     playSound('buzz');
   }
   soloDrill.answered = true;
+  soloDrill.answering = false;
   soloDrill.windowOpen = false;
+  soloRevealFullQuestion();
+  // A correct toss-up earns the bonus on the same question, exactly as the challenge does.
+  const entry = soloDrill.queue[soloDrill.index];
+  soloDrill.bonusPending = Boolean(correct && entry && String(entry.question.bonus_text || '').trim());
   soloResolveEntry(outcome, correct);
   soloRenderTelemetry();
+  const panel = soloElement('solo-answer-panel');
+  if (panel) panel.classList.add('hidden');
   const feedback = soloElement('solo-feedback');
   if (feedback) {
     feedback.className = `mt-4 text-sm font-mono font-bold ${correct ? 'text-neonGreen' : 'text-neonPink'}`;
     feedback.innerText = `${correct ? '✅' : '❌'} ${message}`;
   }
   const status = soloElement('solo-drill-status');
-  if (status) status.innerText = correct ? 'Point awarded — press NEXT TOSSUP' : 'No points — press NEXT TOSSUP';
+  if (status) {
+    status.innerText = correct
+      ? (soloDrill.bonusPending ? 'Point awarded — press NEXT QUESTION for the bonus' : 'Point awarded — press NEXT QUESTION')
+      : 'No points — press NEXT QUESTION';
+  }
   const header = soloElement('solo-lockout');
   if (header) header.innerText = `Lockout: ${SOLO_LOCKOUT_SECONDS.toFixed(1)}s`;
   soloRenderStats();
@@ -1348,24 +1640,25 @@ function soloRevealAnswer() {
   const entry = soloDrill.queue[soloDrill.index];
   if (!entry) return;
   const wasAnswered = soloDrill.answered;
+  const isBonus = soloDrill.phase === 'bonus';
   soloStopDelivery();
   soloDrill.answered = true;
+  soloDrill.answering = false;
   soloDrill.windowOpen = false;
-  if (!wasAnswered) {
+  soloRevealFullQuestion();
+  if (!wasAnswered && !isBonus) {
     soloDrill.streak = 0;
     soloResolveEntry('revealed', false);
     soloRenderStats();
   }
   soloRenderTelemetry();
+  const panel = soloElement('solo-answer-panel');
+  if (panel) panel.classList.add('hidden');
+  const answerText = isBonus ? entry.question.bonus_answer : entry.question.tossup_answer;
   const feedback = soloElement('solo-feedback');
   if (feedback) {
     feedback.className = 'mt-4 text-sm font-mono font-bold text-neonAmber';
-    feedback.innerText = `💡 Answer: ${entry.question.tossup_answer}`;
-  }
-  const text = soloElement('solo-question-text');
-  if (text && soloOptions.output === 'spoken') {
-    text.className = 'min-h-[132px] bg-black border border-borderDark rounded-xl p-5 text-lg md:text-xl text-slate-200 font-sans leading-relaxed';
-    text.textContent = soloQuestionWords(entry.question.tossup_text).join(' ');
+    feedback.innerText = `💡 ${isBonus ? 'Bonus answer' : 'Answer'}: ${answerText}`;
   }
   const status = soloElement('solo-drill-status');
   if (status) status.innerText = 'Answer revealed';
@@ -1374,6 +1667,13 @@ function soloRevealAnswer() {
 function soloNextTossup() {
   if (!soloDrill) return;
   soloStopDelivery();
+  // A correct toss-up is followed by its bonus before the packet moves on.
+  if (soloDrill.phase === 'tossup' && soloDrill.bonusPending) {
+    soloDrill.bonusPending = false;
+    soloDrill.bonusDone = true;
+    soloStartQuestion('bonus');
+    return;
+  }
   soloDrill.index += 1;
   if (soloDrill.index >= soloDrill.queue.length) {
     soloDrill.queue = soloBuildQueue();
@@ -1384,9 +1684,14 @@ function soloNextTossup() {
     return;
   }
   soloDrill.answered = false;
+  soloDrill.answering = false;
   soloDrill.entryIndex = null;
-  soloRenderQuestion({ ready: true });
+  soloDrill.phase = 'tossup';
+  soloDrill.bonusPending = false;
+  soloDrill.bonusDone = false;
   soloRenderTelemetry();
+  // Auto-start the next read, exactly like the challenge's Next button.
+  soloStartQuestion('tossup');
 }
 
 // =========================================================
@@ -1415,6 +1720,13 @@ function soloRecordAsked(question) {
     outcome: 'pending',
     correct: null,
     reaction: null,
+    buzz: null,
+    buzzWord: null,
+    buzzSource: null,
+    bonusAsked: false,
+    bonusCorrect: null,
+    bonusOutcome: null,
+    bonusTypedAnswer: null,
     reReads: 0,
   });
   soloDrill.entryIndex = soloSession.questions.length - 1;
@@ -1787,17 +2099,21 @@ function soloBindSetup() {
   const submit = soloElement('solo-answer-submit');
   if (submit) submit.addEventListener('click', () => {
     const input = soloElement('solo-answer-input');
-    soloSubmitAnswer(input ? input.value : '');
+    const value = input ? input.value : '';
+    if (soloDrill && soloDrill.phase === 'bonus') soloSubmitBonus(value);
+    else soloSubmitAnswer(value);
   });
   const answerInput = soloElement('solo-answer-input');
   if (answerInput) {
     answerInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        soloSubmitAnswer(answerInput.value);
+        if (soloDrill && soloDrill.phase === 'bonus') soloSubmitBonus(answerInput.value);
+        else soloSubmitAnswer(answerInput.value);
       } else if (event.key === 'Escape') {
         event.preventDefault();
-        soloRecordResult(false, 'Answer forfeited.', 'forfeit');
+        if (soloDrill && soloDrill.phase === 'bonus') soloSubmitBonus('', 'forfeit');
+        else soloRecordResult(false, 'Answer forfeited.', 'forfeit');
       }
     });
   }

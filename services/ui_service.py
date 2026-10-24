@@ -539,6 +539,51 @@ async def submit_challenge_answer(code: str, request: Request):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@app.post("/api/challenges/{code}/report")
+async def report_challenge_question(code: str, request: Request):
+    """A member flags one answered question for the captain to review."""
+    code = _challenge_code(code)
+    user = await _authenticated_user(request)
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("Invalid question report")
+        return await asyncio.to_thread(
+            challenge_service.report_question, code, user.uid,
+            data.get("qIndex"), data.get("phase"), data.get("reason", ""),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to record a question report: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/challenges/{code}/judge")
+async def judge_challenge_answer(code: str, request: Request):
+    """The captain sets a toss-up or bonus verdict by hand."""
+    code = _challenge_code(code)
+    user = await _authenticated_user(request)
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("Invalid judgement")
+        return await asyncio.to_thread(
+            challenge_service.judge_answer, code, user.uid,
+            data.get("uid"), data.get("qIndex"), data.get("phase"),
+            bool(data.get("correct", False)),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to judge an answer: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @app.get("/api/challenges/{code}/board")
 async def challenge_board_endpoint(code: str, request: Request):
     code = _challenge_code(code)

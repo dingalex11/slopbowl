@@ -20,6 +20,7 @@ import time
 from firebase_admin import firestore
 
 from core.challenge import (
+    add_report,
     apply_bonus_to_record,
     advance_after_bonus,
     advance_after_tossup,
@@ -27,6 +28,7 @@ from core.challenge import (
     create_run_doc,
     join_outcome,
     next_question_payload,
+    resolve_report,
 )
 from core.grading import grade_bonus, grade_tossup
 from core.words import tokenize_words
@@ -291,6 +293,53 @@ def submit_answer(code, uid, q_index, phase, typed_answer="", buzz=None,
     }
 
 
+# --------------------------------------------------------------------------- reports
+
+def report_question(code, uid, q_index, phase, reason=""):
+    """Flag one answered question (or its bonus) for the captain to review.
+
+    A report is written onto the member's own run, so it is also what tells the captain
+    which run and which phase the correction applies to. It is allowed after the run
+    finishes: the last question can be reported from the summary screen.
+    """
+    run = _get_run(code, uid)
+    if not run:
+        raise PermissionError("Join this challenge before reporting a question")
+    reason = " ".join(str(reason or "").split())[:280]
+    add_report(run, q_index, phase, reason, _now_iso())
+    try:
+        _run_ref(code, uid).set(run)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("Challenge service is unavailable") from exc
+    return {"reported": True, "qIndex": int(q_index), "phase": phase}
+
+
+def judge_answer(code, requester_uid, member_uid, q_index, phase, correct):
+    """The captain's manual correction of one attempt's toss-up or bonus verdict."""
+    meta = get_challenge_meta(code)
+    if meta["ownerUid"] != requester_uid:
+        raise PermissionError("Only the challenge captain can judge an answer")
+    if not isinstance(member_uid, str) or not member_uid:
+        raise ValueError("Choose the member whose answer to judge")
+    run = _get_run(code, member_uid)
+    if not run:
+        raise PermissionError("That member has not played this challenge")
+    verdict = resolve_report(
+        run, q_index, phase, bool(correct), _now_iso(), requester_uid,
+    )
+    try:
+        _run_ref(code, member_uid).set(run)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("Challenge service is unavailable") from exc
+    return {
+        "judged": True,
+        "uid": member_uid,
+        "qIndex": int(q_index),
+        "phase": phase,
+        "verdict": verdict,
+    }
+
+
 # ----------------------------------------------------------------------------- board
 
 def get_board(code, requester_uid):
@@ -314,6 +363,7 @@ def get_board(code, requester_uid):
         "questions": bank,
         "runs": runs,
     }
+
 
 
 # -------------------------------------------------------------------------- dev seed
