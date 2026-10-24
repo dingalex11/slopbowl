@@ -160,6 +160,16 @@
     body.app-focus > header {
       display: none;
     }
+    /* The team scores belong to a two-team match in progress, not to the site chrome.
+       router.js and beginMatch() add .is-live only while one of those screens is open and
+       the BEGIN MATCH overlay is gone; every other page shows the connection pill alone. */
+    #header-match-score {
+      display: none;
+    }
+    #header-match-score.is-live {
+      display: inline-flex;
+      align-items: center;
+    }
   </style>
 
   <link rel="stylesheet" href="/static/css/style.css">
@@ -190,11 +200,13 @@
         <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-neonGreen opacity-75"></span>
         <span class="relative inline-flex rounded-full h-2 w-2 bg-neonGreen"></span>
       </span>
-      <span id="header-team-a-name" class="text-teamA font-bold tracking-wide">TEAM A</span>
-      <span id="score-header-a" class="text-neonCyan font-black text-sm digital-lcd">0</span>
-      <span class="text-slate-600">|</span>
-      <span id="score-header-b" class="text-neonAmber font-black text-sm digital-lcd">0</span>
-      <span id="header-team-b-name" class="text-teamB font-bold tracking-wide">TEAM B</span>
+      <span id="header-match-score" class="space-x-3">
+        <span id="header-team-a-name" class="text-teamA font-bold tracking-wide">TEAM A</span>
+        <span id="score-header-a" class="text-neonCyan font-black text-sm digital-lcd">0</span>
+        <span class="text-slate-600">|</span>
+        <span id="score-header-b" class="text-neonAmber font-black text-sm digital-lcd">0</span>
+        <span id="header-team-b-name" class="text-teamB font-bold tracking-wide">TEAM B</span>
+      </span>
     </div>
 
     <!-- Right Header Action Buttons -->
@@ -203,9 +215,10 @@
         <span>&#9889; SOLO</span>
       </button>
 
-      <a href="#/converter" class="moderator-nav-control flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-neonCyan bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
-        <svg class="w-3.5 h-3.5 text-neonCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-        <span>Converter</span>
+      <!-- The PDF parser is the packet upload: drop a packet PDF, get the JSON bank. -->
+      <a href="#/bank" data-route="bank" class="app-nav-link moderator-nav-control flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-neonCyan bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
+        <svg class="w-3.5 h-3.5 text-neonCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+        <span>PDF Upload</span>
       </a>
 
       <a href="#/analytics" class="flex items-center space-x-1 px-3 py-1.5 text-xs font-mono text-slate-300 hover:text-neonAmber bg-panel hover:bg-panelHover border border-borderDark rounded-lg active:scale-95 transition">
@@ -232,8 +245,7 @@
   </header>
 
   <!-- There is no bottom dock: every screen has its own URL, and the home page carries the
-       links to them (the four main cards, then the "Every other screen" index below), so the
-       address bar is the navigation. -->
+       four main cards while the header carries the rest, so the address bar is the navigation. -->
 
   <main class="flex-grow max-w-7xl mx-auto w-full p-4 md:p-6 lg:p-8 flex flex-col justify-center">
 
@@ -319,31 +331,11 @@
         </a>
       </div>
 
-      <!-- Every other screen. The four main cards above cover the top-level modes, so this
-           row holds the screens that have no other door (the question bank, the HUD) and
-           the stations. Each link is a real URL, so a screen can be bookmarked, shared,
-           refreshed and reached with the back button. -->
-      <div class="w-full max-w-5xl mb-8">
-        <p class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-3 text-center">Every other screen</p>
-        <div class="flex flex-wrap items-center justify-center gap-2">
-          <a href="#/online" data-route="online" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Online hub</a>
-          <a href="#/solo" data-route="solo" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonGreen transition active:scale-95">Solo practice</a>
-          <a href="#/analytics" data-route="analytics" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Analytics</a>
-          <a href="#/in-person" data-route="in-person" class="app-nav-link moderator-nav-control inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonCyan transition active:scale-95">In-person setup</a>
-          <a href="#/hud" data-route="hud" class="app-nav-link moderator-nav-control inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonGreen transition active:scale-95">Moderator HUD</a>
-          <a href="#/bank" data-route="bank" class="app-nav-link moderator-nav-control inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Question bank</a>
-          <a href="#/converter" data-route="converter" class="app-nav-link moderator-nav-control inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonCyan transition active:scale-95">Packet converter</a>
-          <a href="#/lobby" data-route="lobby" class="app-nav-link player-nav-control hidden items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonAmber transition active:scale-95">Lobby</a>
-          <a href="#/buzzer" data-route="buzzer" class="app-nav-link player-nav-control hidden items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonPink transition active:scale-95">Buzz station</a>
-          <a href="#/settings" data-route="settings" class="app-nav-link inline-flex items-center px-3.5 py-2 text-[11px] font-mono font-black uppercase rounded-xl bg-panel border border-borderDark text-slate-300 hover:text-white hover:border-neonCyan transition active:scale-95">Settings</a>
-        </div>
-      </div>
-
       <!-- Slide 1 Footer Buttons -->
       <div class="flex flex-wrap items-center justify-center gap-6 text-sm font-mono">
-        <a href="#/converter" class="moderator-nav-control flex items-center space-x-2 text-slate-300 hover:text-neonCyan transition py-2.5 px-5 rounded-xl bg-panel border border-borderDark hover:border-neonCyan active:scale-95 shadow-sm">
+        <a href="#/bank" class="moderator-nav-control flex items-center space-x-2 text-slate-300 hover:text-neonCyan transition py-2.5 px-5 rounded-xl bg-panel border border-borderDark hover:border-neonCyan active:scale-95 shadow-sm">
           <svg class="w-4 h-4 text-neonCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-          <span>Packet converter</span>
+          <span>PDF upload</span>
         </a>
 
         <a href="#/analytics" class="flex items-center space-x-2 text-slate-300 hover:text-neonAmber transition py-2.5 px-5 rounded-xl bg-panel border border-borderDark hover:border-neonAmber active:scale-95 shadow-sm">

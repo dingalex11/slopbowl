@@ -85,35 +85,48 @@ class ScreenLinkTests(unittest.TestCase):
         self.assertNotIn("nav-dock-btn", INDEX_SOURCE)
         self.assertNotIn("nav-btn-", INDEX_SOURCE)
 
-    def test_the_home_page_carries_a_link_to_every_screen(self):
-        for url in SCREEN_URLS:
-            self.assertIn(f'href="{url}"', INDEX_SOURCE, f"no link to {url}")
+    def test_the_home_page_carries_the_ways_in(self):
+        """The four main cards, then the header: no separate index row below them."""
+        for call in ("navigateTo(4)", "navigateTo(3)", "openSoloSetup()"):
+            self.assertIn(call, INDEX_SOURCE, f"no door for {call}")
+        self.assertIn('href="#/board"', INDEX_SOURCE)
+        # The header carries the packet upload and the stats station.
+        self.assertIn('href="#/bank"', INDEX_SOURCE)
+        self.assertIn('href="#/analytics"', INDEX_SOURCE)
         self.assertIn("data-route=", INDEX_SOURCE)
 
+    def test_the_every_other_screen_row_is_gone(self):
+        self.assertNotIn("Every other screen", INDEX_SOURCE)
+
     def test_the_buzzboard_challenge_is_a_main_card(self):
-        """The contest is a top-level mode, not one of the small links at the bottom."""
+        """The contest is a top-level mode, not a small link at the bottom."""
         grid = INDEX_SOURCE[INDEX_SOURCE.index('id="home-main-cards"')
-                            :INDEX_SOURCE.index("<!-- Every other screen")]
+                            :INDEX_SOURCE.index("<!-- Slide 1 Footer Buttons -->")]
         self.assertIn('href="#/board"', grid)
         self.assertIn('data-route="board"', grid)
         self.assertIn("Buzzboard Challenge", grid)
         # A real link, so it is keyboard-reachable and marks the screen it opens.
         self.assertIn("app-nav-link", grid)
 
-    def test_the_small_link_row_drops_the_link_the_card_replaced(self):
-        row = INDEX_SOURCE[INDEX_SOURCE.index("<!-- Every other screen")
-                           :INDEX_SOURCE.index("<!-- Slide 1 Footer Buttons -->")]
-        # The board is a main card now, so the row no longer duplicates it.
-        self.assertNotIn('data-route="board"', row)
-        # Everything else stays. The row cannot be dropped: the question bank and the HUD have
-        # no other door in the app, and the row is what marks the screen you are on.
-        for url in ("#/online", "#/solo", "#/analytics", "#/converter", "#/in-person",
-                    "#/hud", "#/bank", "#/settings"):
-            self.assertIn(f'href="{url}"', row, f"no link to {url}")
+    def test_the_packet_converter_button_is_the_pdf_upload(self):
+        """The PDF parser is the packet upload now: the button opens it instead of the
+        raw-text converter, which stays reachable from the parser screen itself."""
+        header = INDEX_SOURCE[INDEX_SOURCE.index('<header'):INDEX_SOURCE.index('</header>')]
+        footer = INDEX_SOURCE[INDEX_SOURCE.index("<!-- Slide 1 Footer Buttons -->")
+                              :INDEX_SOURCE.index('id="slide-2"')]
+        self.assertIn('href="#/bank"', header)
+        self.assertIn("PDF Upload", header)
+        self.assertNotIn('href="#/converter"', header)
+        self.assertIn('href="#/bank"', footer)
+        self.assertIn("PDF upload", footer)
+        self.assertNotIn('href="#/converter"', footer)
+        # The raw-text converter is still reachable from the parser screen it now sits behind.
+        self.assertIn('href="#/converter"', INDEX_SOURCE)
 
-    def test_screen_links_keep_the_role_gating_the_dock_had(self):
+    def test_screen_links_keep_their_role_gating(self):
         self.assertIn("app-nav-link moderator-nav-control", INDEX_SOURCE)
-        self.assertIn("app-nav-link player-nav-control", INDEX_SOURCE)
+        self.assertIn("querySelectorAll('.moderator-nav-control')", SHELL_SOURCE)
+        self.assertIn("querySelectorAll('.player-nav-control')", SHELL_SOURCE)
 
     def test_the_current_screen_is_marked_from_the_route(self):
         self.assertIn("function setActiveNav(name)", ROUTER_SOURCE)
@@ -249,6 +262,32 @@ class ChallengeScreenTests(unittest.TestCase):
                       ROUTER_SOURCE)
         self.assertIn("body.app-focus > header {", INDEX_SOURCE)
         self.assertIn('id="buk-exit"', INDEX_SOURCE)
+
+
+class HeaderScoreTests(unittest.TestCase):
+    """The team scores in the header belong to a match, not to the site chrome."""
+
+    def test_the_scores_are_hidden_unless_a_match_screen_is_open(self):
+        self.assertIn('id="header-match-score"', INDEX_SOURCE)
+        # Hidden by default: navigating anywhere starts from "no scores on screen".
+        self.assertIn("#header-match-score {\n      display: none;", INDEX_SOURCE)
+        self.assertIn("#header-match-score.is-live {", INDEX_SOURCE)
+        self.assertIn("const LIVE_SCORE_SCREENS = ['hud', 'buzzer'];\n", ROUTER_SOURCE)
+
+    def test_the_hud_keeps_its_scores_hidden_until_the_match_begins(self):
+        # router.js is written inside an IIFE, so its functions close on an indented brace.
+        start = ROUTER_SOURCE.index("function updateHeaderScore()")
+        body = ROUTER_SOURCE[start:ROUTER_SOURCE.index("\n  }\n", start)]
+        self.assertIn("const overlay = document.getElementById('match-start-overlay');", body)
+        self.assertIn("!overlay.classList.contains('hidden')", body)
+        self.assertIn("pill.classList.toggle('is-live', live);", body)
+
+    def test_every_screen_change_and_the_begin_button_re_ask(self):
+        self.assertIn("document.body.setAttribute('data-view', route.name);\n    updateHeaderScore();",
+                      ROUTER_SOURCE)
+        self.assertIn("window.updateHeaderScore = updateHeaderScore;", ROUTER_SOURCE)
+        body = function_source(UI_SOURCE, "beginMatch")
+        self.assertIn("if (typeof window.updateHeaderScore === 'function') window.updateHeaderScore();", body)
 
 
 class RoomLinkTests(unittest.TestCase):

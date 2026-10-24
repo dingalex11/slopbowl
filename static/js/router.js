@@ -35,6 +35,11 @@
     board: 13,
   };
 
+  // Screens where two teams are actually playing. The header's team scores mean nothing
+  // anywhere else, so a 0–0 pill over the home page, the stats board or solo practice is
+  // just noise: it is shown only on these, and only once the match has begun.
+  const LIVE_SCORE_SCREENS = ['hud', 'buzzer'];
+
   // Full-page stations that are not part of the numbered slide deck.
   const STATIONS = {
     converter: 'screen-converter',
@@ -122,6 +127,18 @@
     });
   }
 
+  // The HUD opens on a BEGIN MATCH overlay, so while that overlay is up the match has not
+  // started and the score is still meaningless. beginMatch() calls this again to reveal it.
+  function updateHeaderScore() {
+    const pill = document.getElementById('header-match-score');
+    if (!pill) return;
+    const view = document.body.getAttribute('data-view');
+    const overlay = document.getElementById('match-start-overlay');
+    const awaitingBegin = view === 'hud' && Boolean(overlay) && !overlay.classList.contains('hidden');
+    const live = Boolean(view) && LIVE_SCORE_SCREENS.indexOf(view) !== -1 && !awaitingBegin;
+    pill.classList.toggle('is-live', live);
+  }
+
   // ------------------------------------------------------------------ applying
 
   let currentRoute = null;
@@ -162,6 +179,7 @@
     // A challenge run owns the whole window: no site header, no half-visible station.
     document.body.classList.toggle('app-focus', route.name === 'challenge');
     document.body.setAttribute('data-view', route.name);
+    updateHeaderScore();
 
     const previous = currentRoute;
     currentRoute = route;
@@ -247,6 +265,7 @@
   window.routerCurrent = current;
   window.routerHashForSlide = hashForSlide;
   window.routerCloseLogin = closeLogin;
+  window.updateHeaderScore = updateHeaderScore;
   window.routerStart = start;
 
   if (document.readyState === 'loading') {

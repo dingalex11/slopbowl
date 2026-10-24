@@ -426,6 +426,9 @@ function confirmSetup() {
 function beginMatch() {
     const overlay = document.getElementById('match-start-overlay');
     if (overlay) overlay.classList.add('hidden');
+    // The match clock is not the only thing that starts here: the header scores become
+    // meaningful the moment the overlay goes, so ask the router to reveal them.
+    if (typeof window.updateHeaderScore === 'function') window.updateHeaderScore();
 }
 
 function togglePause() {
