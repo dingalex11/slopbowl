@@ -365,12 +365,13 @@
         <div class="bg-panel border border-borderDark rounded-2xl p-5 mb-5">
           <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-4">
             <h3 class="text-sm font-bold text-white font-display">Groq Judge API Key</h3>
-            <span class="text-[9px] font-mono font-bold bg-black text-neonCyan border border-neonCyan/60 rounded-full px-2 py-0.5 tracking-widest">SESSION ONLY</span>
+            <span id="settings-key-badge" class="text-[9px] font-mono font-bold bg-black text-neonAmber border border-neonAmber/60 rounded-full px-2 py-0.5 tracking-widest">SESSION ONLY</span>
           </div>
-          <p class="text-[11px] text-slate-400 font-mono leading-relaxed mb-3">Used for speech-to-text answer judging this browser session. It is sent to the match owner backend over the authenticated secure WebSocket and is not saved in your cloud profile.</p>
+          <p class="text-[11px] text-slate-400 font-mono leading-relaxed mb-3">Used for speech-to-text answer judging. Signed in, it is saved to your account and filled in automatically the next time you sign in on any device. Signed out, it only lasts this browser session. It is sent to the match owner backend over the authenticated secure WebSocket and is never shown to other players.</p>
           <div id="settings-status" class="hidden text-xs p-2 rounded font-mono mb-3"></div>
-          <input type="password" id="settings-api-key" placeholder="gsk_..." class="w-full bg-black border border-borderDark rounded-xl px-3 py-2.5 text-neonCyan font-mono text-sm focus:border-neonCyan outline-none transition">
+          <input type="password" id="settings-api-key" placeholder="gsk_..." autocomplete="off" class="w-full bg-black border border-borderDark rounded-xl px-3 py-2.5 text-neonCyan font-mono text-sm focus:border-neonCyan outline-none transition">
           <button id="btn-save-settings" class="w-full mt-3 py-2.5 bg-neonCyan hover:bg-cyan-300 text-black font-mono font-black text-xs uppercase rounded-xl active:scale-95 transition shadow-neon-cyan">Save Settings</button>
+          <button id="btn-clear-api-key" class="w-full mt-2 py-1.5 bg-black border border-borderDark text-slate-400 hover:text-neonPink hover:border-neonPink/60 font-mono text-[10px] uppercase tracking-wider rounded-xl active:scale-95 transition">Forget saved key</button>
         </div>
 
         <!-- Audio -->
@@ -391,7 +392,7 @@
           </div>
           <div class="flex items-center justify-between gap-3">
             <span id="settings-account-email" class="text-xs text-slate-300 font-mono">Not signed in</span>
-            <button onclick="openModal('auth-modal'); playSound('click');" class="px-4 py-2 bg-black border border-neonCyan text-neonCyan text-xs font-mono font-bold rounded-lg active:scale-95 transition">Sign in</button>
+            <button id="btn-settings-account" class="px-4 py-2 bg-black border border-neonCyan text-neonCyan text-xs font-mono font-bold rounded-lg active:scale-95 transition">Sign in</button>
           </div>
         </div>
       </div>
@@ -1709,14 +1710,33 @@
   <script src="/static/js/solo.js"></script>
   <script src="/static/js/buzzpoint.js"></script>
   <script>
-    window.FIREBASE_CONFIG = {
-      apiKey: "__FIREBASE_API_KEY__",
-      authDomain: "__FIREBASE_AUTH_DOMAIN__",
-      projectId: "__FIREBASE_PROJECT_ID__",
-      storageBucket: "__FIREBASE_STORAGE_BUCKET__",
-      messagingSenderId: "__FIREBASE_MESSAGING_SENDER_ID__",
-      appId: "__FIREBASE_APP_ID__"
-    };
+    // Firebase's web config is public by design: it names the project, it does not grant
+    // access to it. Firestore rules and the server decide what a caller may do.
+    // The server injects the values from its environment; the project's own config is the
+    // fallback so a checkout with no .env still gets a working Sign in button.
+    (function () {
+      const project = {
+        apiKey: "AIzaSyBWoq9NNYIejMv6D8JM_oP0g_SGdH_ykJc",
+        authDomain: "slopbowl-fe316.firebaseapp.com",
+        projectId: "slopbowl-fe316",
+        storageBucket: "slopbowl-fe316.firebasestorage.app",
+        messagingSenderId: "73153730852",
+        appId: "1:73153730852:web:e5eccfdc8fd8b4a6e23bb1"
+      };
+      const injected = {
+        apiKey: "__FIREBASE_API_KEY__",
+        authDomain: "__FIREBASE_AUTH_DOMAIN__",
+        projectId: "__FIREBASE_PROJECT_ID__",
+        storageBucket: "__FIREBASE_STORAGE_BUCKET__",
+        messagingSenderId: "__FIREBASE_MESSAGING_SENDER_ID__",
+        appId: "__FIREBASE_APP_ID__"
+      };
+      const config = {};
+      Object.keys(project).forEach((key) => {
+        config[key] = injected[key] || project[key];
+      });
+      window.FIREBASE_CONFIG = config;
+    })();
   </script>
   <script type="module" src="/static/js/auth.js"></script>
 </body>

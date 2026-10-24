@@ -104,5 +104,64 @@ class FrontendSecurityTests(unittest.TestCase):
         self.assertIn("window.joinOnlineRoomApi(roomId, name, 'Team A', false)", ui_source)
 
 
+class SignInAndSavedJudgeKeyTests(unittest.TestCase):
+    """The Settings page must sign in, and keep the judge key on the account.
+
+    Two failures are covered here. A missing Firebase config used to abort auth.js at
+    module scope, so every sign-in button was dead and said nothing; the page now carries
+    the project's own public web config as a fallback, and a config problem is reported on
+    screen instead of thrown. And the judge key used to be deleted from the profile on
+    every sign-in, so a captain re-pasted it each session.
+    """
+
+    def setUp(self):
+        self.auth = (ROOT / "static/js/auth.js").read_text(encoding="utf-8")
+        self.index = (ROOT / "index.html").read_text(encoding="utf-8")
+
+    def test_missing_firebase_config_does_not_abort_the_auth_module(self):
+        self.assertNotIn('throw new Error("Firebase configuration is missing', self.auth)
+        self.assertIn("if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {", self.auth)
+        self.assertIn("configError = error;", self.auth)
+        # The buttons are still wired, and explain the problem rather than doing nothing.
+        self.assertIn("if (!auth) {", self.auth)
+        self.assertIn("displayError(CONFIG_HELP);", self.auth)
+
+    def test_index_carries_the_project_config_as_an_injected_fallback(self):
+        self.assertIn('apiKey: "__FIREBASE_API_KEY__"', self.index)
+        self.assertIn('projectId: "__FIREBASE_PROJECT_ID__"', self.index)
+        self.assertIn("config[key] = injected[key] || project[key];", self.index)
+
+    def test_settings_sign_in_opens_the_login_overlay(self):
+        self.assertIn("btnSettingsAccount?.addEventListener('click'", self.auth)
+        self.assertIn("openModal('auth-modal')", self.auth)
+
+    def test_settings_account_row_tracks_the_signed_in_user(self):
+        self.assertIn('id="settings-account-email"', self.index)
+        self.assertIn('id="btn-settings-account"', self.index)
+        self.assertIn("settingsAccountEmail.innerText = user ? (user.email || 'Signed in') : 'Not signed in';", self.auth)
+        self.assertIn("btnSettingsAccount.innerText = user ? 'Sign out' : 'Sign in';", self.auth)
+
+    def test_judge_key_is_saved_to_the_signed_in_account(self):
+        self.assertIn("const JUDGE_KEY_FIELD = 'judgeApiKey';", self.auth)
+        self.assertIn("await setDoc(doc(db, 'users', user.uid), {", self.auth)
+        self.assertIn("[JUDGE_KEY_FIELD]: apiKey,", self.auth)
+        self.assertIn("settings-key-badge", self.index)
+        # Saving is offered, and so is taking the key back off the account.
+        self.assertIn('id="btn-clear-api-key"', self.index)
+        self.assertIn("[JUDGE_KEY_FIELD]: deleteField(),", self.auth)
+
+    def test_a_saved_key_is_loaded_on_sign_in_instead_of_being_wiped(self):
+        self.assertIn("async function loadJudgeKey(user)", self.auth)
+        self.assertIn("const key = await loadJudgeKey(user);", self.auth)
+        self.assertIn("settingsApiKeyInput.value = key;", self.auth)
+        self.assertIn("window.sessionGroqApiKey = key;", self.auth)
+        # Reading the key must never clear the stored one. Only the abandoned legacy field
+        # is removed, as part of moving it to the current one.
+        load_body = self.auth[self.auth.index("async function loadJudgeKey(user)"):]
+        load_body = load_body[:load_body.index("\n}")]
+        self.assertNotIn("[JUDGE_KEY_FIELD]: deleteField()", load_body)
+        self.assertIn("[LEGACY_JUDGE_KEY_FIELD]: deleteField()", load_body)
+
+
 if __name__ == "__main__":
     unittest.main()
