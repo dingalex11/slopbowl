@@ -13,12 +13,15 @@ let currentStageType = "TOSSUP";
 let assignedSeat = null;
 let currentUserRole = null;
 let currentRoomMode = 'in_person';
+let currentReadingMode = 'stations';
 let currentTeam = null;
 let currentReadingId = null;
 let onlineBuzzOpen = false;
 let isOnlineCaptain = false;
 let currentOnlineBuzzTeam = null;
 let onlineCaptainOnly = false;
+// True while the moderator's station is the room's only voice (shared-read mode).
+let moderatorReading = { active: false, kind: null };
 let isReadingOnline = false;
 let onlineReadCompletions = new Set();
 // Every read gets its own generation: restarting or stopping speech bumps it, so an
@@ -142,6 +145,10 @@ function connectWebSocket(roomId, apiKey = null) {
         if (data.type === 'CONNECTED') {
             currentUserRole = payload.role || 'viewer';
             currentRoomMode = payload.mode || 'in_person';
+            currentReadingMode = payload.reading_mode || 'stations';
+            if (typeof renderReadingMode === 'function') renderReadingMode(currentReadingMode);
+            // A station that joins mid-read still learns that the room's voice is the moderator's.
+            renderModeratorReading(payload.moderator_reading?.active, payload.moderator_reading?.kind);
             assignedSeat = payload.seat || null;
             currentTeam = payload.team || null;
             isOnlineCaptain = Boolean(payload.captain);
@@ -396,6 +403,14 @@ function connectWebSocket(roomId, apiKey = null) {
                 }
             }
         }
+        else if (data.type === 'MODERATOR_READING') {
+            renderModeratorReading(payload.active, payload.kind);
+        }
+        else if (data.type === 'READING_MODE') {
+            // The moderator's choice, echoed to every station in the room.
+            currentReadingMode = payload.mode || 'stations';
+            if (typeof renderReadingMode === 'function') renderReadingMode(currentReadingMode);
+        }
         else if (data.type === 'START_READING') {
             if (payload.moderator_only && currentUserRole !== 'owner') return;
             if (currentRoomMode === 'online') {
@@ -422,6 +437,8 @@ function connectWebSocket(roomId, apiKey = null) {
         else if (data.type === 'START_LISTENING') {
             // In-person requests only reach the moderator; online requests only reach the answerer.
             const timeout = payload.timeout || 5.0;
+            // The answer window replaces the read, so the "moderator is reading" banner is done.
+            renderModeratorReading(false);
             
             if (timeout > 15.0) {
                 currentStageType = "BONUS";
@@ -475,6 +492,7 @@ function connectWebSocket(roomId, apiKey = null) {
         }
         else if (data.type === 'BUZZ') {
             stopActionTimer(); 
+            renderModeratorReading(false);
             if (isReading) {
                 const spokenWord = currentSpokenWord;
                 // Stopping the read must not report a completion: the server takes the
@@ -635,6 +653,33 @@ function advancePlayerToBuzzer() {
     if (currentUserRole !== 'player' || typeof navigateTo !== 'function') return;
     const preMatch = document.getElementById('slide-7');
     if (preMatch && !preMatch.classList.contains('hidden')) navigateTo(8);
+}
+
+function renderModeratorReading(active, kind = null) {
+    moderatorReading = { active: Boolean(active), kind: active ? (kind || null) : null };
+
+    const banner = document.getElementById('player-read-banner');
+    if (banner) {
+        banner.classList.toggle('hidden', !moderatorReading.active);
+        const text = document.getElementById('player-read-banner-text');
+        if (text) {
+            text.innerText = moderatorReading.kind === 'bonus'
+                ? 'Listen to the shared audio — the captain answers when the read ends.'
+                : 'Listen to the shared audio — buzz in when you know it.';
+        }
+    }
+
+    const label = document.getElementById('player-stage-label');
+    const dot = document.getElementById('player-stage-dot');
+    if (!label) return;
+    if (moderatorReading.active) {
+        label.innerText = moderatorReading.kind === 'bonus' ? 'MODERATOR READING BONUS' : 'MODERATOR IS READING';
+        if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-neonCyan animate-pulse';
+    } else if (/^MODERATOR (IS READING|READING BONUS)/.test(label.innerText)) {
+        // Do not clobber a BUZZ label the same message may have just set.
+        label.innerText = 'AWAITING QUESTION';
+        if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-slate-600';
+    }
 }
 
 function renderOnlineRoster(players) {

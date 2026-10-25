@@ -213,6 +213,35 @@ class ChallengeScreenTests(unittest.TestCase):
                       BUZZPOINT_SOURCE)
         self.assertIn("bukRun.joinStatus = 'resumed';", BUZZPOINT_SOURCE)
 
+    def test_a_challenge_query_redirects_like_a_room_query(self):
+        # ?challenge=CODE is a pasted link the same way ?room=CODE is: it must land on the
+        # challenge screen, not the home page and not a blank route.
+        self.assertIn("const search = new URLSearchParams(window.location.search);", ROUTER_SOURCE)
+        self.assertIn("const challenge = (search.get('challenge') || '').trim().toLowerCase();", ROUTER_SOURCE)
+        self.assertIn("replace(`#/challenge/${encodeURIComponent(challenge)}`, { force: true, instant: true });",
+                      ROUTER_SOURCE)
+        self.assertIn("if (challenge && atHome)", ROUTER_SOURCE)
+
+    def test_the_join_form_shows_the_code_from_the_link(self):
+        self.assertIn('id="buk-join-code"', INDEX_SOURCE)
+        self.assertIn("const joinCode = bukEl('buk-join-code');", BUZZPOINT_SOURCE)
+        self.assertIn("joinCode.value = bukRun.code || '';", BUZZPOINT_SOURCE)
+        body = function_source(BUZZPOINT_SOURCE, "bukJoinFromScreen")
+        self.assertIn("const codeEl = bukEl('buk-join-code');", body)
+        self.assertIn("Enter the challenge code from your link.", body)
+        enter = function_source(BUZZPOINT_SOURCE, "bukEnterChallenge")
+        self.assertIn("if (!clean) { bukRun.code = ''; bukShowStage('join'); return; }", enter)
+
+    def test_a_shared_link_is_handled_on_the_first_load(self):
+        # The router applies the address from its own DOMContentLoaded listener, which runs
+        # before bukInit's. An app:view listener added inside bukInit therefore missed a
+        # freshly opened link and left the challenge screen empty. It must be registered at
+        # parse time instead.
+        self.assertNotIn("document.addEventListener('app:view'", function_source(BUZZPOINT_SOURCE, "bukInit"))
+        self.assertIn("document.addEventListener('app:view'", BUZZPOINT_SOURCE)
+        self.assertLess(BUZZPOINT_SOURCE.index("document.addEventListener('app:view'"),
+                        BUZZPOINT_SOURCE.index("if (document.readyState === 'loading') {"))
+
     def test_a_shared_link_asks_for_a_name_and_resumes_a_claimed_attempt(self):
         body = function_source(BUZZPOINT_SOURCE, "bukEnterChallenge")
         # 403 is "join this challenge before playing": the member has not claimed it yet.

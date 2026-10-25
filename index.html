@@ -946,6 +946,21 @@
           </div>
         </div>
 
+        <!-- Shared-read indicator: in moderator-reads mode this station stays silent,
+             so the page must say why instead of looking broken. -->
+        <div id="player-read-banner" class="hidden mb-5 rounded-2xl border border-neonCyan bg-black px-4 py-3 shadow-neon-cyan">
+          <div class="flex items-center gap-3">
+            <span class="relative flex h-2.5 w-2.5 shrink-0">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-neonCyan opacity-75"></span>
+              <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-neonCyan"></span>
+            </span>
+            <div class="min-w-0">
+              <p class="text-[11px] font-mono font-black text-neonCyan uppercase tracking-widest">Moderator is reading</p>
+              <p id="player-read-banner-text" class="text-[10px] font-mono text-slate-400">Listen to the shared audio — buzz in when you know it.</p>
+            </div>
+          </div>
+        </div>
+
         <!-- Giant buzzer -->
         <button class="js-online-buzz buzz-btn w-full h-32 md:h-40 rounded-2xl bg-gradient-to-b from-slate-900 via-black to-slate-950 hover:border-neonCyan border-4 border-borderDark text-white hover:text-neonCyan font-display font-black text-4xl md:text-5xl tracking-wider transition-all duration-150 shadow-2xl flex items-center justify-center relative cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed" onclick="sendEvent('BUZZ', {}); playSound('buzz');" disabled>
           BUZZ
@@ -990,6 +1005,21 @@
           <button onclick="proceedToLobby(); playSound('click');" class="w-full mt-4 py-3.5 bg-neonAmber hover:bg-amber-400 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-amber transition flex items-center justify-center space-x-2">
             <span>Proceed to lobby &rarr;</span>
           </button>
+        </div>
+
+        <!-- Reading mode: one voice for the room, or each device reading at its own pace. -->
+        <div class="mt-5 bg-panel border border-borderDark rounded-2xl p-5">
+          <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-3">
+            <h3 class="text-sm font-bold text-white font-display">Question Reading</h3>
+            <span id="reading-mode-badge" class="text-[9px] font-mono font-bold bg-black text-neonCyan border border-neonCyan/60 rounded-full px-2 py-0.5 tracking-widest">EACH DEVICE</span>
+          </div>
+          <p id="reading-mode-note" class="text-[11px] text-slate-400 font-mono leading-relaxed mb-3">
+            Each player's browser speaks the tossup with its own voice, so read speeds differ. Moderator mode keeps every player device silent and runs the read, the interrupt boundary and the buzz clock off one voice.
+          </p>
+          <div class="grid grid-cols-2 gap-3">
+            <button type="button" id="reading-mode-stations" onclick="setReadingMode('stations'); playSound('click');" class="py-2.5 text-[11px] font-mono font-black uppercase rounded-xl border transition active:scale-95">EACH DEVICE</button>
+            <button type="button" id="reading-mode-moderator" onclick="setReadingMode('moderator'); playSound('click');" class="py-2.5 text-[11px] font-mono font-black uppercase rounded-xl border transition active:scale-95">MODERATOR READS</button>
+          </div>
         </div>
       </div>
     </section>
@@ -1370,6 +1400,8 @@
         <!-- Join: only when the link was opened without a claimed attempt -->
         <div id="challenge-stage-join" class="hidden bg-black border border-borderDark rounded-2xl p-5">
           <p class="text-xs font-mono font-black text-neonGreen uppercase tracking-widest mb-3">Member &bull; join this challenge</p>
+          <label class="block text-[10px] font-mono text-slate-500 uppercase mb-1">Challenge code</label>
+          <input id="buk-join-code" type="text" autocomplete="off" class="w-full bg-panel border border-borderDark rounded-xl px-3 py-2 text-sm text-neonCyan font-mono mb-3 focus:outline-none focus:border-neonGreen" placeholder="abc123">
           <label class="block text-[10px] font-mono text-slate-500 uppercase mb-1">Display name</label>
           <input id="buk-join-name" type="text" class="w-full bg-panel border border-borderDark rounded-xl px-3 py-2 text-sm text-slate-200 font-mono mb-3 focus:outline-none focus:border-neonGreen" placeholder="Your name">
           <button type="button" id="buk-join-submit" class="w-full py-3 bg-neonGreen text-black text-xs font-mono font-black uppercase rounded-xl active:scale-95 transition">Join challenge</button>

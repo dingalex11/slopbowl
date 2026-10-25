@@ -63,7 +63,17 @@ ADMIN_EVENTS = (
     "EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE",
     "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE",
     "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT",
+    "SET_READING_MODE",
 ) + MANUAL_START_EVENTS
+
+# The two ways an online tossup can be delivered:
+#   stations  - every player's browser speaks the text with its own voice (the default).
+#   moderator - only the moderator's station speaks; players stay silent and hear the
+#               moderator's audio through the call. That makes the owner's read the
+#               room's single clock: the interrupt boundary and the 5-second buzz window
+#               are the same instant for both teams, instead of tracking the moderator's
+#               voice while a slower station is still mid-question.
+READING_MODES = ("stations", "moderator")
 
 
 class ScienceBowlModerator:
@@ -108,8 +118,23 @@ class ScienceBowlModerator:
         self.online_buzz_open = False
         self.online_buzz_team = None
         self.online_buzz_captain_only = False
+        self.reading_mode = "stations"
+        # Broadcast to player stations while the moderator's station is the one speaking.
+        self.moderator_reading = {"active": False, "kind": None}
         self.answer_audio_open = False
         self.ui_state = {"show": "NONE", "overrides": False}
+
+    async def _set_moderator_reading(self, active: bool, kind: str | None = None):
+        """Tell player stations that the moderator's voice is the one being heard.
+
+        In shared-reading mode players get no START_READING of their own, so without this
+        their station would sit silent and look broken. The state is kept so a player who
+        reconnects mid-read is told the truth when they attach (see CONNECTED).
+        """
+        if not self.online_mode or self.reading_mode != "moderator":
+            return
+        self.moderator_reading = {"active": bool(active), "kind": kind if active else None}
+        await self.outbound_queue.put({"type": "MODERATOR_READING", "payload": dict(self.moderator_reading)})
 
     async def _set_online_buzz_window(self, opened: bool, *, team=None, captain_only=False):
         if not self.online_mode:
@@ -185,6 +210,18 @@ class ScienceBowlModerator:
             # A start that arrives while a question is live must not vanish: it is not
             # the loop's turn to accept one yet, so say so.
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ A question is already in progress — finish or challenge it before starting the next one."}})
+
+        elif evt_type == "SET_READING_MODE":
+            mode = event.payload.get("mode")
+            if mode not in READING_MODES:
+                return
+            self.reading_mode = mode
+            await self.outbound_queue.put({"type": "READING_MODE", "payload": {"mode": mode}})
+            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": (
+                "🔊 Moderator reads aloud — player devices stay silent. Share this station's audio with the room."
+                if mode == "moderator" else
+                "🔊 Each player's device reads the question in its own voice."
+            )}})
 
         elif evt_type == "MATCH_BEGIN":
             if self.question_bank and self.current_q_idx < len(self.question_bank):
@@ -344,12 +381,12 @@ class ScienceBowlModerator:
             expected_event_types = [expected_event_types]
             
         # NEW: Added LOAD_BANK, SAVE_ROSTER, and EDIT_LOG_ENTRY to prevent them from being ignored
-        admin_events = ["EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE", "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT"]
+        admin_events = ["EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE", "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT", "SET_READING_MODE"]
         
         while True:
             event = await self.inbound_queue.get()
             evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
-            print(f"📥 [DEBUG]: Queue received event -> {evt_type}")
+            print(f"[DEBUG]: Queue received event -> {evt_type}")
             if evt_type in admin_events:
                 if evt_type not in ["PING", "PAUSE_MATCH"]:
                     await self.process_admin_event(event)
@@ -380,9 +417,13 @@ class ScienceBowlModerator:
         for event in kept:
             self.inbound_queue.put_nowait(event)
 
-    async def _speak_and_wait(self, text: str, *, moderator_only: bool = False):
+    async def _speak_and_wait(self, text: str, *, moderator_only: bool = False, announce_kind: str | None = None):
         if not self.use_audio or not text:
             return
+        # In shared-reading mode the moderator's station is the room's only voice:
+        # announcements, bonus reads and reveals are not spoken on player devices.
+        if self.online_mode and self.reading_mode == "moderator":
+            moderator_only = True
 
         self._drop_stale_reading_completions()
 
@@ -391,6 +432,9 @@ class ScienceBowlModerator:
         if reading_id:
             payload["reading_id"] = reading_id
         self._set_read_window(text)
+        indicator = announce_kind if (self.online_mode and self.reading_mode == "moderator") else None
+        if indicator:
+            await self._set_moderator_reading(True, indicator)
         await self.outbound_queue.put({"type": "START_READING", "payload": payload})
         
         while True:
@@ -418,6 +462,9 @@ class ScienceBowlModerator:
             else:
                 self.inbound_queue.put_nowait(reply)
                 await asyncio.sleep(0.05)
+
+        if indicator:
+            await self._set_moderator_reading(False)
 
     def _set_read_window(self, text: str, *, immediate: bool = False) -> None:
         """Record when a report about this read can be believed, and when to give up.
@@ -511,6 +558,7 @@ class ScienceBowlModerator:
         }})
         
         await self._set_online_buzz_window(True, team=allowed_team)
+        shared_read = False
         if not skip_read:
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "🔊 Reading Tossup..."}})
             if self.use_audio and text_to_read:
@@ -519,7 +567,14 @@ class ScienceBowlModerator:
                 reading_payload = {"text": text_to_read}
                 if reading_id:
                     reading_payload["reading_id"] = reading_id
+                if self.reading_mode == "moderator":
+                    # One reader for the room: players do not speak this tossup, so the
+                    # owner's completion is everyone's read end (the interrupt boundary).
+                    reading_payload["moderator_only"] = True
+                    shared_read = True
                 self._set_read_window(text_to_read)
+                if shared_read:
+                    await self._set_moderator_reading(True, "tossup")
                 await self.outbound_queue.put({"type": "START_READING", "payload": reading_payload})
             else:
                 print("[DEBUG]: Audio skipped (disabled or text was empty). Jumping to Buzz phase.")
@@ -546,6 +601,8 @@ class ScienceBowlModerator:
                     continue  # Still within the read's time: wake again shortly.
                 print("[DEBUG]: Read watchdog expired; opening the buzz window.")
                 read_warning = READ_TIMEOUT_WARNING
+                if shared_read:
+                    await self._set_moderator_reading(False)
                 break
             evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
             
@@ -556,6 +613,8 @@ class ScienceBowlModerator:
                 
             if evt_type in ("FORCE_RESET_STATE", "CHALLENGE"):
                 await self._set_online_buzz_window(False)
+                if shared_read:
+                    await self._set_moderator_reading(False)
                 return None, False, False, evt_type, 0.0, ""
 
             reading_result = self._reading_result(event)
@@ -568,6 +627,8 @@ class ScienceBowlModerator:
                 self.current_reading_id = None
                 if reading_result == "failed":
                     read_warning = READ_FAILED_WARNING
+                if shared_read:
+                    await self._set_moderator_reading(False)
                 break
             elif evt_type == "BUZZ":
                 team = event.payload.get('team', 'Unknown')
@@ -579,6 +640,8 @@ class ScienceBowlModerator:
                     buzz_event = event
                     is_interrupt = True
                     await self._set_online_buzz_window(False)
+                    if shared_read:
+                        await self._set_moderator_reading(False)
                     break
 
         if not buzz_event:
@@ -664,6 +727,8 @@ class ScienceBowlModerator:
             reading_payload = {"text": phrase}
             if reading_id:
                 reading_payload["reading_id"] = reading_id
+            if self.reading_mode == "moderator":
+                reading_payload["moderator_only"] = True
             self._set_read_window(phrase)
             await self.outbound_queue.put({"type": "START_READING", "payload": reading_payload})
 
@@ -950,7 +1015,7 @@ class ScienceBowlModerator:
                     bonus_text_to_read = f"Bonus, " + raw_bonus + "  " + bonus_options_spoken if raw_bonus else ""
                     
                     if self.use_audio and bonus_text_to_read:
-                        await self._speak_and_wait(bonus_text_to_read)
+                        await self._speak_and_wait(bonus_text_to_read, announce_kind="bonus")
 
                     self.state.transition_to(GameState.BONUS_CONFERRING) 
                     spoken_bonus = ""

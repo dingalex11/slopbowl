@@ -241,8 +241,17 @@
 
   function start() {
     const hash = window.location.hash;
-    const room = (new URLSearchParams(window.location.search).get('room') || '').toLowerCase();
+    const search = new URLSearchParams(window.location.search);
+    const challenge = (search.get('challenge') || '').trim().toLowerCase();
+    const room = (search.get('room') || '').toLowerCase();
     const atHome = !hash || hash === '#' || hash === '#/';
+    // ?challenge= is the challenge's version of ?room=: a pasted link lands on the
+    // challenge screen with its code ready, instead of the home page. A page that has
+    // already navigated itself is left alone.
+    if (challenge && atHome) {
+      replace(`#/challenge/${encodeURIComponent(challenge)}`, { force: true, instant: true });
+      return;
+    }
     // ?room= keeps working: it lands on the online hub with the code already filled in. A
     // page that has already navigated itself (the room join does) is left alone.
     if (room && atHome) {

@@ -1048,7 +1048,13 @@ function bukShowStage(stage) {
     if (el) el.classList.toggle('hidden', key !== stage);
   });
   const codeEl = bukEl('buk-screen-code');
-  if (codeEl && bukRun.code) codeEl.textContent = bukRun.code.toUpperCase();
+  if (codeEl) codeEl.textContent = bukRun.code ? bukRun.code.toUpperCase() : '';
+  // The join form's code is part of the link: whatever address opened this screen is what
+  // the member sees (and can correct) before claiming the attempt.
+  const joinCode = bukEl('buk-join-code');
+  if (joinCode && joinCode.value.trim().toLowerCase() !== (bukRun.code || '')) {
+    joinCode.value = bukRun.code || '';
+  }
 }
 
 function bukScreenCode() {
@@ -1111,8 +1117,10 @@ async function bukJoinFromBoard() {
 // The challenge screen's own form: how a shared link is played.
 async function bukJoinFromScreen() {
   const nameEl = bukEl('buk-join-name');
+  const codeEl = bukEl('buk-join-code');
   const displayName = (nameEl ? nameEl.value : '').trim();
-  const code = (bukRun.code || bukScreenCode() || '').toLowerCase();
+  const code = ((codeEl ? codeEl.value : '') || bukRun.code || bukScreenCode() || '').trim().toLowerCase();
+  if (!code) { bukStatus('buk-join-status', 'Enter the challenge code from your link.', '#ffaa00'); return; }
   bukStatus('buk-join-status', 'Joining\u2026');
   try {
     const result = await bukClaimAttempt(code, displayName);
@@ -1213,7 +1221,7 @@ function bukExitChallenge() {
 // a member who has not joined yet gets the join form with the code already filled in.
 async function bukEnterChallenge(code) {
   const clean = String(code || '').trim().toLowerCase();
-  if (!clean) { bukShowStage('join'); return; }
+  if (!clean) { bukRun.code = ''; bukShowStage('join'); return; }
   bukRun.code = clean;
   if (bukIsEntered(clean)) return;
   // The board's join card already claimed this attempt: no second probe needed.
@@ -1273,16 +1281,6 @@ function bukInit() {
       if (event.key === 'Enter') { event.preventDefault(); bukJoinFromScreen(); }
     });
   }
-  // The router owns which screen is visible; this screen just has to fill itself in.
-  document.addEventListener('app:view', (event) => {
-    const detail = event.detail || {};
-    if (detail.name !== 'challenge') {
-      // Any other route — a link, or the back button — releases the play screen.
-      bukLeaveChallengeScreen();
-      return;
-    }
-    bukEnterChallenge(detail.params ? detail.params.code : '');
-  });
   const buzzBtn = bukEl('buk-buzz-btn');
   if (buzzBtn) buzzBtn.addEventListener('click', () => { bukBuzz(); });
   const submitBtn = bukEl('buk-answer-submit');
@@ -1342,6 +1340,20 @@ function bukInit() {
     }
   });
 }
+
+// The router owns which screen is visible; this screen just has to fill itself in. This
+// listener is registered at parse time, not in bukInit: the router applies a shared link's
+// route from its own DOMContentLoaded listener first, and a listener added after that has
+// already missed the opening app:view event (leaving the challenge shell empty).
+document.addEventListener('app:view', (event) => {
+  const detail = event.detail || {};
+  if (detail.name !== 'challenge') {
+    // Any other route — a link, or the back button — releases the play screen.
+    bukLeaveChallengeScreen();
+    return;
+  }
+  bukEnterChallenge(detail.params ? detail.params.code : '');
+});
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', bukInit);

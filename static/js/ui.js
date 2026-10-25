@@ -241,6 +241,40 @@ async function createOnlineRoom() {
     }
 }
 
+// --- READING MODE (online matches) ---
+// stations: every player's browser speaks the question itself (the old behaviour).
+// moderator: only the moderator's station speaks; the room listens to that one voice, so
+// the read, the interrupt boundary and the 5-second buzz clock are shared by both teams.
+const READING_MODE_ON = 'bg-neonCyan text-black border-neonCyan shadow-neon-cyan';
+const READING_MODE_OFF = 'bg-black text-slate-300 border-borderDark hover:border-neonCyan';
+const READING_MODE_BUTTON = 'py-2.5 text-[11px] font-mono font-black uppercase rounded-xl border transition active:scale-95';
+
+function renderReadingMode(mode) {
+    const shared = mode === 'moderator';
+    const stationsBtn = document.getElementById('reading-mode-stations');
+    const moderatorBtn = document.getElementById('reading-mode-moderator');
+    const badge = document.getElementById('reading-mode-badge');
+    const note = document.getElementById('reading-mode-note');
+    if (stationsBtn) stationsBtn.className = `${READING_MODE_BUTTON} ${shared ? READING_MODE_OFF : READING_MODE_ON}`;
+    if (moderatorBtn) moderatorBtn.className = `${READING_MODE_BUTTON} ${shared ? READING_MODE_ON : READING_MODE_OFF}`;
+    if (badge) {
+        badge.innerText = shared ? 'MODERATOR READS' : 'EACH DEVICE';
+        badge.className = `text-[9px] font-mono font-bold bg-black ${shared ? 'text-neonGreen border-neonGreen/60' : 'text-neonCyan border-neonCyan/60'} border rounded-full px-2 py-0.5 tracking-widest`;
+    }
+    if (note) {
+        note.innerText = shared
+            ? "Player devices stay silent. Share this station's audio with the call (whole screen + system audio, not tab audio): the read, the interrupt boundary and the 5-second buzz clock all follow this voice."
+            : "Each player's browser speaks the tossup with its own voice, so read speeds differ. Moderator mode keeps every player device silent and runs the read off one voice.";
+    }
+}
+
+function setReadingMode(mode) {
+    if (mode !== 'stations' && mode !== 'moderator') return;
+    // Draw it immediately; the server echo (READING_MODE) is what makes it true for the room.
+    renderReadingMode(mode);
+    sendEvent('SET_READING_MODE', { mode });
+}
+
 // --- PRE-MATCH SETTINGS -> LOBBY -> MATCH ---
 function proceedToLobby() {
     updateRoomCodeDisplay();
