@@ -918,9 +918,9 @@ function bukRenderBoard(data) {
 // buzzboard view can rebuild the highlighted question cards and the player matrix.
 function bukBoardCsvRows(runs, questions) {
   const rows = [[
-    'Q_Num', 'Subject', 'Category', 'Type', 'QuestionText', 'Answer', 'Member',
+    'Q_Num', 'Subject', 'Category', 'Type', 'QuestionText', 'Answer', 'BonusAnswer', 'Member',
     'BuzzWord', 'BuzzWordIndex', 'BuzzDepthPct', 'WordsHeard', 'TotalWords',
-    'CaptureSource', 'ReactionSeconds', 'TypedAnswer', 'Verdict', 'BonusVerdict',
+    'CaptureSource', 'ReactionSeconds', 'TypedAnswer', 'BonusTypedAnswer', 'Verdict', 'BonusVerdict',
     'RunUid', 'Reported', 'ReportReason',
   ]];
   for (const run of runs) {
@@ -951,6 +951,9 @@ function bukBoardCsvRows(runs, questions) {
         r.type || question.type || '',
         questionText,
         question.tossup_answer || '',
+        // The bonus is a separate answer, and a reported bonus needs its own target: the captain
+        // cannot judge it against the toss-up's key.
+        question.bonus_answer || '',
         run.displayName || run.uid,
         // An end-of-question buzz has no word: it is marked [end] with no index, so the
         // captain's export cannot read it as a buzz on the final word.
@@ -962,6 +965,7 @@ function bukBoardCsvRows(runs, questions) {
         r.captureSource || '',
         r.reactionSeconds == null ? '' : r.reactionSeconds,
         r.typedAnswer || '',
+        r.bonusTypedAnswer || '',
         r.verdict || '',
         r.bonusVerdict || '',
         run.uid || '',

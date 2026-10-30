@@ -46,8 +46,8 @@ const BBX_MEMBER_COLORS = ['#00f3ff', '#ffaa00', '#00ff66', '#ff0055', '#b026ff'
 
 const BBX_TAB_ON = 'px-3 py-1.5 rounded-lg text-[11px] font-mono font-black uppercase border transition bg-neonAmber text-black border-neonAmber';
 const BBX_TAB_OFF = 'px-3 py-1.5 rounded-lg text-[11px] font-mono font-black uppercase border transition bg-black text-slate-300 border-borderDark hover:text-white';
-const BBX_PAGE_ON = 'px-3 py-1.5 rounded-lg text-[11px] font-mono font-black uppercase border transition bg-neonCyan text-black border-neonCyan';
-const BBX_PAGE_OFF = 'px-3 py-1.5 rounded-lg text-[11px] font-mono font-black uppercase border transition bg-black text-slate-300 border-borderDark hover:text-white';
+const BBX_PAGE_ON = 'px-3.5 py-2 rounded-lg text-[11px] font-mono font-black uppercase tracking-wide border transition bg-neonCyan text-black border-neonCyan flex items-center gap-2';
+const BBX_PAGE_OFF = 'px-3.5 py-2 rounded-lg text-[11px] font-mono font-black uppercase tracking-wide border transition bg-black text-slate-400 border-borderDark hover:text-white flex items-center gap-2';
 
 const bbxState = {
   rows: [],
@@ -60,10 +60,20 @@ const bbxState = {
   showBuzzpoints: true,
   showAnswers: false,
   subjectFilter: 'ALL',
+  questionSubject: 'ALL',
   search: '',
   sortKey: 'ppth',
   sortAsc: false,
+  // The team-builder view follows the template: every candidate's overall PPTH first, the
+  // six subject columns on request, and question cards closed until one is opened.
+  rawColumns: false,
+  openQuestions: new Set(),
+  boardCode: '',
 };
+
+// A row dragged from the matrix. The drop handlers read the key rather than the data
+// transfer alone, because a browser may refuse to expose custom data on dragover.
+let bbxDraggedPlayer = null;
 
 // ------------------------------------------------------------ small helpers
 
@@ -95,7 +105,8 @@ function bbxStatus(message, tone) {
   const el = bbxEl('bbx-status-text');
   if (!el) return;
   el.textContent = message;
-  el.className = 'text-xs font-mono uppercase';
+  // Keep the bar's own spacing: this line sits inside the compact ingestion strip.
+  el.className = 'px-3 pb-2 text-[10px] font-mono uppercase tracking-wide';
   el.classList.add(tone === 'bad' ? 'text-neonPink' : (tone === 'good' ? 'text-neonGreen' : (tone === 'busy' ? 'text-neonAmber' : 'text-slate-400')));
 }
 
@@ -215,6 +226,10 @@ function bbxIngestCsv(csvText) {
       captureSource: row['CaptureSource'] || '',
       reactionSeconds: bbxNumber(row['ReactionSeconds']),
       typedAnswer: row['TypedAnswer'] || '',
+      // A bonus's own answer and target, so a bonus report can be judged on what the member
+      // actually typed rather than the toss-up's answer.
+      bonusTypedAnswer: row['BonusTypedAnswer'] || '',
+      bonusAnswer: row['BonusAnswer'] || '',
       verdict: bbxVerdict(row),
       bonusVerdict: String(row['BonusVerdict'] || '').toLowerCase(),
       uid: String(row['RunUid'] || ''),
@@ -321,6 +336,7 @@ function bbxLivePlaying() {
 // The pill is written from the live state and nowhere else, so the text can never claim the
 // board is following the members when the poll is stopped.
 function bbxRenderLivePill() {
+  bbxRenderBoardIdentity();
   const pill = bbxLivePill();
   if (!pill) return;
   if (!bbxLive.boards.size) {
@@ -434,8 +450,11 @@ async function bbxLoadChallengeBoard(code) {
     // so the first member to finish appears without anyone reloading the page.
     bbxLive.boards.set(clean, { csv: csv, playing: bbxPlayingRuns(board) });
     bbxLive.updatedAt = Date.now();
+    bbxState.boardCode = clean;
     bbxLiveStart();          // a no-op while the captain has the poll paused
     bbxRenderLivePill();
+    // The code is loaded; the drawer has done its job and yields the page back to the stats.
+    bbxToggleDrawer(false);
     if (!added) {
       bbxRenderAll();
       bbxStatus(`Board ${clean.toUpperCase()} has no runs yet \u2014 it will fill in as members play.`, 'busy');
@@ -672,12 +691,15 @@ function bbxPrimarySpecialty(player) {
 // ------------------------------------------------------------ rendering: shell
 
 function bbxRenderAll() {
+  bbxRenderBoardIdentity();
   bbxRenderReports();
+  bbxRenderQuestionSubjectFilters();
   bbxRenderParticipantPills();
   bbxRenderQuestions();
   bbxRenderSubjectFilters();
   bbxRenderHud();
   bbxRenderMatrix();
+  bbxRenderDatasetLabel();
 }
 
 function bbxShowPage(page) {
@@ -690,6 +712,115 @@ function bbxShowPage(page) {
   if (numbersPanel) numbersPanel.classList.toggle('hidden', bbxState.page !== 'numbers');
   if (questionsBtn) questionsBtn.className = bbxState.page === 'questions' ? BBX_PAGE_ON : BBX_PAGE_OFF;
   if (numbersBtn) numbersBtn.className = bbxState.page === 'numbers' ? BBX_PAGE_ON : BBX_PAGE_OFF;
+  bbxRenderDatasetLabel();
+}
+
+// The header line the template puts beside the tabs: what this dataset is made of, so the
+// captain never has to guess how many questions or candidates are behind the view.
+function bbxRenderDatasetLabel() {
+  const label = bbxEl('bbx-dataset-label');
+  if (!label) return;
+  if (!bbxState.rows.length) {
+    label.textContent = 'Awaiting board data';
+    return;
+  }
+  const attempts = `${bbxState.rows.length} attempt${bbxState.rows.length === 1 ? '' : 's'}`;
+  if (bbxState.page === 'questions') {
+    const count = bbxState.questions.size;
+    label.textContent = `${count} question${count === 1 ? '' : 's'} \u00b7 ${attempts}`;
+  } else {
+    const count = bbxState.players.size;
+    label.textContent = `${count} candidate${count === 1 ? '' : 's'} \u00b7 ${attempts}`;
+  }
+}
+
+// The compact bar's identity: the board code (or CSV when the rows were dropped by hand) and
+// whether this page is following a live challenge.
+function bbxRenderBoardIdentity() {
+  const code = bbxEl('bbx-active-code');
+  if (code) {
+    code.textContent = bbxState.boardCode
+      ? bbxState.boardCode.toUpperCase()
+      : (bbxState.rows.length ? 'CSV' : '\u2014');
+  }
+  const label = bbxEl('bbx-connection-label');
+  const pill = bbxEl('bbx-connection-pill');
+  const dot = bbxEl('bbx-connection-dot');
+  if (!label || !pill) return;
+  if (bbxLive.boards.size) {
+    label.textContent = bbxLive.paused ? 'PAUSED' : `LIVE \u00b7 ${bbxLivePlaying()} PLAYING`;
+    pill.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black border border-neonGreen/40 text-neonGreen font-semibold tracking-wide';
+    if (dot) dot.className = 'w-2 h-2 rounded-full bg-neonGreen animate-pulse';
+  } else if (bbxState.rows.length) {
+    label.textContent = 'LOADED';
+    pill.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black border border-neonCyan/40 text-neonCyan font-semibold tracking-wide';
+    if (dot) dot.className = 'w-2 h-2 rounded-full bg-neonCyan';
+  } else {
+    label.textContent = 'STANDBY';
+    pill.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black border border-borderDark text-slate-400 font-semibold tracking-wide';
+    if (dot) dot.className = 'w-2 h-2 rounded-full bg-slate-600';
+  }
+}
+
+function bbxToggleDrawer(force) {
+  const drawer = bbxEl('bbx-ingestion-drawer');
+  if (!drawer) return;
+  const show = force === undefined ? drawer.classList.contains('hidden') : Boolean(force);
+  drawer.classList.toggle('hidden', !show);
+  const button = bbxEl('bbx-toggle-drawer');
+  if (button) button.textContent = show ? 'Hide ingest' : 'Change board / Ingest CSV';
+}
+
+function bbxSetRawColumns(checked) {
+  bbxState.rawColumns = Boolean(checked);
+  bbxRenderMatrix();
+}
+
+// Accordion cards remember which ones were opened, so a render (a filter click, a live
+// refresh) does not close the question the captain is reading.
+function bbxToggleQuestion(key, body, arrow) {
+  if (!body) return;
+  const opening = body.classList.contains('hidden');
+  body.classList.toggle('hidden', !opening);
+  if (arrow) arrow.style.transform = opening ? 'rotate(180deg)' : 'rotate(0deg)';
+  if (opening) bbxState.openQuestions.add(key);
+  else bbxState.openQuestions.delete(key);
+}
+
+function bbxExpandAllQuestions(expand) {
+  bbxState.openQuestions = new Set();
+  if (expand) {
+    [...bbxState.questions.values()].forEach((question) => bbxState.openQuestions.add(question.key));
+  }
+  bbxRenderQuestions();
+}
+
+function bbxRenderQuestionSubjectFilters() {
+  const holder = bbxEl('bbx-question-subject-filters');
+  if (!holder) return;
+  holder.replaceChildren();
+  const subjects = new Set();
+  [...bbxState.questions.values()].forEach((question) => {
+    const subject = question.subject || question.category;
+    if (subject) subjects.add(subject);
+  });
+  const options = ['ALL', ...subjects];
+  options.forEach((subject) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = subject === 'ALL' ? 'All subjects' : subject;
+    btn.className = `px-2.5 py-1 rounded text-[10px] font-mono uppercase border transition ${
+      bbxState.questionSubject === subject
+        ? 'bg-neonCyan text-black border-neonCyan font-bold'
+        : 'bg-black text-slate-400 border-borderDark hover:text-white'
+    }`;
+    btn.addEventListener('click', () => {
+      bbxState.questionSubject = subject;
+      bbxRenderQuestionSubjectFilters();
+      bbxRenderQuestions();
+    });
+    holder.appendChild(btn);
+  });
 }
 
 function showAnalyticsView(view) {
@@ -719,11 +850,19 @@ function resetBuzzboardAnalytics() {
   bbxState.subjects = [];
   bbxState.selectedPlayer = 'ALL';
   bbxState.subjectFilter = 'ALL';
+  bbxState.questionSubject = 'ALL';
   bbxState.search = '';
+  bbxState.boardCode = '';
+  bbxState.rawColumns = false;
+  bbxState.openQuestions = new Set();
   const search = bbxEl('bbx-search');
   if (search) search.value = '';
+  const raw = bbxEl('bbx-raw-columns');
+  if (raw) raw.checked = false;
   const badge = bbxEl('bbx-count-badge');
   if (badge) badge.style.display = 'none';
+  bbxToggleDrawer(false);
+  bbxShowPage('questions');
   bbxRenderAll();
   bbxStatus('SYSTEM READY // WAITING FOR A BUZZBOARD CSV OR CHALLENGE CODE');
 }
@@ -738,8 +877,10 @@ function bbxRenderParticipantPills() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = label;
-    btn.className = `px-2 py-0.5 rounded text-[11px] font-medium transition ${
-      active ? 'bg-neonCyan text-black font-bold' : 'bg-black border border-borderDark text-slate-300 hover:text-white'
+    btn.className = `px-3 py-1 rounded border text-[10px] font-mono uppercase whitespace-nowrap transition ${
+      active
+        ? 'bg-neonCyan text-black border-neonCyan font-bold'
+        : 'bg-black text-slate-300 border-borderDark hover:border-slate-500 hover:text-white'
     }`;
     btn.addEventListener('click', () => {
       bbxState.selectedPlayer = key;
@@ -748,21 +889,21 @@ function bbxRenderParticipantPills() {
     });
     holder.appendChild(btn);
   };
-  make('All Buzzers', 'ALL', bbxState.selectedPlayer === 'ALL');
+  make('All buzzers', 'ALL', bbxState.selectedPlayer === 'ALL');
   players.forEach((player) => make(player.name, player.key, bbxState.selectedPlayer === player.key));
 }
 
 function bbxToggleBuzzpoints() {
   bbxState.showBuzzpoints = !bbxState.showBuzzpoints;
   const label = bbxEl('bbx-toggle-buzz');
-  if (label) label.textContent = bbxState.showBuzzpoints ? 'Hide Buzzpoints' : 'Show Buzzpoints';
+  if (label) label.textContent = bbxState.showBuzzpoints ? 'Hide buzzpoints' : 'Show buzzpoints';
   bbxRenderQuestions();
 }
 
 function bbxToggleAnswers() {
   bbxState.showAnswers = !bbxState.showAnswers;
   const label = bbxEl('bbx-toggle-ans');
-  if (label) label.textContent = bbxState.showAnswers ? 'Hide Answers' : 'Show Answers';
+  if (label) label.textContent = bbxState.showAnswers ? 'Hide answers' : 'Show answers';
   bbxRenderQuestions();
 }
 
@@ -795,8 +936,10 @@ function bbxRenderReports() {
   reported.forEach((row) => {
     bbxReportPhases(row).forEach((phase) => {
       const item = document.createElement('div');
-      item.className = 'flex flex-wrap items-center justify-between gap-2 border-t border-borderDark first:border-t-0 py-2';
-      const info = bbxAppend(item, 'div', 'min-w-0');
+      item.className = 'border-t border-borderDark first:border-t-0 py-3';
+      const top = bbxAppend(item, 'div', 'flex flex-wrap items-start justify-between gap-3');
+
+      const info = bbxAppend(top, 'div', 'min-w-0 flex-1 space-y-1.5');
       const line = bbxAppend(info, 'div', 'flex flex-wrap items-center gap-2 text-[11px] font-mono');
       bbxAppend(line, 'span', 'font-black text-neonPink', `\u2691 Q${row.qNum}`);
       bbxAppend(line, 'span', 'font-bold text-slate-200', row.member || 'Unknown member');
@@ -804,9 +947,38 @@ function bbxRenderReports() {
       const current = bbxPhaseVerdict(row, phase);
       bbxAppend(line, 'span', `font-bold ${current === 'correct' ? 'text-neonGreen' : (current === 'wrong' ? 'text-neonPink' : 'text-slate-500')}`,
         current === 'correct' ? 'Currently correct' : (current === 'wrong' ? 'Currently incorrect' : 'Not judged'));
-      if (row.reportReason) bbxAppend(info, 'p', 'mt-1 text-[10px] font-mono text-slate-500', row.reportReason);
 
-      const actions = bbxAppend(item, 'div', 'flex items-center gap-2');
+      // The question itself, so the captain can judge without opening the card.
+      bbxAppend(info, 'p', 'text-[11px] font-sans leading-snug text-slate-400 max-h-16 overflow-y-auto pr-1',
+        row.questionText || 'This export did not carry the question text.');
+
+      // What the member actually typed, next to what the packet expected. A bare verdict
+      // is not enough to override the grader; a near-miss and a blank look identical there.
+      const answers = bbxAppend(info, 'div', 'flex flex-wrap items-center gap-2 text-[10px] font-mono');
+      const answerCell = (label, value, tone) => {
+        const cell = bbxAppend(answers, 'div', 'bg-panel border border-borderDark rounded px-2 py-1 min-w-0');
+        bbxAppend(cell, 'span', 'text-slate-500 uppercase tracking-wider mr-1', `${label}:`);
+        bbxAppend(cell, 'span', `font-bold ${tone} break-words`, value);
+      };
+      const typed = phase === 'bonus' ? row.bonusTypedAnswer : row.typedAnswer;
+      const target = phase === 'bonus' ? row.bonusAnswer : row.answer;
+      const hasTyped = Boolean(typed && String(typed).trim());
+      answerCell('answered', hasTyped ? typed : '(blank)', hasTyped ? 'text-neonCyan' : 'text-slate-500');
+      answerCell('target', target || '\u2014', 'text-neonGreen');
+
+      if (phase !== 'bonus' && (row.buzzWord || row.captureSource === 'end')) {
+        const depth = (row.depth === null || row.depth === undefined) ? '' : ` at ${Math.round(row.depth)}%`;
+        const where = row.captureSource === 'end'
+          ? 'Buzzed after the read'
+          : `Buzzed on \u201c${row.buzzWord}\u201d${depth}`;
+        bbxAppend(info, 'p', 'text-[10px] font-mono text-slate-500', where);
+      }
+      if (row.reportReason) bbxAppend(info, 'p', 'text-[10px] font-mono text-slate-500', `Why: ${row.reportReason}`);
+
+      const actions = bbxAppend(top, 'div', 'flex flex-wrap items-center gap-2');
+      // The strip is the report, even when this dataset cannot act on it: a dropped CSV must
+      // still show what was flagged and the answers behind it.
+      list.appendChild(item);
       const fixable = Boolean(row.uid) && String(row.source || '').startsWith('challenge:');
       if (!fixable) {
         bbxAppend(actions, 'span', 'text-[10px] font-mono text-slate-500', 'Load this board by code to fix it');
@@ -827,7 +999,6 @@ function bbxRenderReports() {
       };
       make('Mark correct', true, 'correct');
       make('Mark incorrect', false, 'wrong');
-      list.appendChild(item);
     });
   });
 }
@@ -867,8 +1038,15 @@ function bbxRenderQuestions() {
   const holder = bbxEl('bbx-questions-container');
   if (!holder) return;
   holder.replaceChildren();
-  const questions = [...bbxState.questions.values()].sort((a, b) => (a.qNum - b.qNum) || a.text.localeCompare(b.text));
+  const questions = [...bbxState.questions.values()]
+    .filter((question) => bbxState.questionSubject === 'ALL'
+      || (question.subject || question.category) === bbxState.questionSubject)
+    .sort((a, b) => (a.qNum - b.qNum) || a.text.localeCompare(b.text));
   if (!questions.length) {
+    if (bbxState.questions.size) {
+      bbxAppend(holder, 'p', 'text-xs font-mono text-slate-500', 'No questions match this subject filter.');
+      return;
+    }
     bbxAppend(holder, 'p', 'text-xs font-mono text-slate-500', 'No buzzboard data yet \u2014 drop a CSV exported from the Buzzpoint Board, or load a board by its challenge code above.');
     return;
   }
@@ -877,30 +1055,51 @@ function bbxRenderQuestions() {
 
 function bbxQuestionCard(question) {
   const card = document.createElement('article');
-  card.className = 'bg-black border border-borderDark rounded-xl overflow-hidden';
+  card.className = 'bg-panel border border-borderDark rounded-xl overflow-hidden';
+  const open = bbxState.openQuestions.has(question.key);
 
-  // Header: the question's own labels plus the scoreline.
-  const head = bbxAppend(card, 'div', 'px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-borderDark bg-panel');
+  // Header: a one-line telemetry summary, as in the template. The whole strip is the
+  // accordion control, so a card opens without hunting for a small caret.
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'w-full text-left px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-3 hover:bg-panelHover transition select-none';
+  card.appendChild(head);
+
   const chips = bbxAppend(head, 'div', 'flex flex-wrap items-center gap-2');
-  bbxAppend(chips, 'span', 'px-2.5 py-0.5 rounded text-xs font-semibold bg-panelHover text-neonGreen', question.category || question.subject || 'GENERAL');
-  bbxAppend(chips, 'span', 'px-2.5 py-0.5 rounded text-xs font-medium bg-panelHover text-neonCyan', question.type ? `Tossup \u00b7 ${question.type}` : 'Tossup');
-  bbxAppend(chips, 'span', 'text-xs text-neonAmber font-mono font-bold', `Q${question.qNum}`);
+  bbxAppend(chips, 'span', 'px-2 py-0.5 rounded bg-black border border-borderDark text-neonGreen font-mono text-[10px] font-bold uppercase', question.category || question.subject || 'General');
+  bbxAppend(chips, 'span', 'px-2 py-0.5 rounded bg-black border border-borderDark text-slate-300 font-mono text-[10px] uppercase', question.type ? `Tossup \u00b7 ${question.type}` : 'Tossup');
+  bbxAppend(chips, 'span', 'text-neonAmber font-mono font-bold text-xs', `Q${question.qNum}`);
+  bbxAppend(chips, 'span', 'text-slate-500 font-mono text-[10px]', `${question.attempts} attempt${question.attempts === 1 ? '' : 's'}`);
   if (question.reportCount) {
-    bbxAppend(chips, 'span', 'px-2 py-0.5 rounded text-[10px] font-mono font-black uppercase border border-neonPink/60 bg-panel text-neonPink', `\u2691 ${question.reportCount} reported`);
+    bbxAppend(chips, 'span', 'px-2 py-0.5 rounded text-[10px] font-mono font-black uppercase border border-neonPink/60 bg-black text-neonPink', `\u2691 ${question.reportCount} reported`);
   }
-  bbxAppend(head, 'span', 'text-[11px] font-mono text-slate-500', `${question.attempts} attempt${question.attempts === 1 ? '' : 's'}`);
 
-  const body = bbxAppend(card, 'div', 'p-4 space-y-3');
+  const summary = bbxAppend(head, 'div', 'flex flex-wrap items-center gap-3 text-[10px] font-mono');
+  const stats = new Map(bbxQuestionStats(question));
+  const pair = (label, key, tone) => {
+    const item = bbxAppend(summary, 'div', 'flex items-center gap-1');
+    bbxAppend(item, 'span', 'text-slate-500 uppercase', `${label}:`);
+    bbxAppend(item, 'span', `font-bold ${tone}`, stats.get(key));
+  };
+  pair('plays', 'PLAYS', 'text-slate-200');
+  pair('buzz', 'BUZZES', 'text-slate-200');
+  pair('conv', 'CONVERSION', 'text-neonCyan');
+  pair('acc', 'ACCURACY', 'text-neonGreen');
+  pair('avg', 'AVG BUZZ', 'text-slate-300');
+  pair('celerity', 'CELERITY', 'text-slate-300');
+  const arrow = bbxAppend(summary, 'span', 'text-slate-500 transition-transform duration-200', '\u25be');
+  if (open) arrow.style.transform = 'rotate(180deg)';
 
-  // Stats ribbon.
-  const ribbon = bbxAppend(body, 'div', 'border border-borderDark rounded bg-panel px-3 py-2');
-  const grid = bbxAppend(ribbon, 'div', 'grid grid-cols-5 sm:grid-cols-10 gap-2 text-center font-mono');
-  const stats = bbxQuestionStats(question);
-  for (const [label, value] of stats) {
+  const body = bbxAppend(card, 'div', `border-t border-borderDark p-4 space-y-3 bg-black/40 ${open ? '' : 'hidden'}`);
+
+  // Stats ribbon: the full telemetry, only once the card is open.
+  const ribbon = bbxAppend(body, 'div', 'border border-borderDark rounded-lg bg-black px-3 py-2');
+  const grid = bbxAppend(ribbon, 'div', 'grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-10 gap-2 text-center font-mono');
+  bbxQuestionStats(question).forEach(([label, value]) => {
     const cell = bbxAppend(grid, 'div', 'flex flex-col items-center');
-    bbxAppend(cell, 'span', 'text-[10px] font-mono text-slate-500 uppercase tracking-widest border-b border-dotted border-slate-600', label);
+    bbxAppend(cell, 'span', 'text-[9px] font-mono text-slate-500 uppercase tracking-widest border-b border-dotted border-slate-700 pb-0.5', label);
     bbxAppend(cell, 'span', 'text-xs font-bold text-slate-100 mt-1', value);
-  }
+  });
 
   // Prose with every buzz highlighted at the word it was captured on.
   const prose = bbxAppend(body, 'div', 'text-[15px] leading-relaxed text-slate-300 font-sans pt-1 select-text');
@@ -917,7 +1116,7 @@ function bbxQuestionCard(question) {
       const matches = bbxState.selectedPlayer === 'ALL' || showHits.some((hit) => hit.member === bbxState.selectedPlayer);
       const span = bbxAppend(prose, 'span', null, `${word} `);
       const correct = showHits.some((hit) => hit.verdict === 'correct');
-      span.style.background = correct ? 'rgba(0,255,102,0.18)' : 'rgba(255,0,85,0.18)';
+      span.style.background = correct ? 'rgba(0,255,102,0.16)' : 'rgba(255,0,85,0.16)';
       span.style.borderBottom = `2.5px solid ${correct ? '#00ff66' : '#ff0055'}`;
       span.style.borderRadius = '2px';
       span.style.padding = '0 3px';
@@ -944,7 +1143,7 @@ function bbxQuestionCard(question) {
   // An end buzz has no word to hover, so the END badge carries the whole list in its tooltip
   // rather than repeating every member inline.
   const endBuzzes = question.buzzes.filter((buzz) => buzz.captureSource === 'end');
-  const endBadge = bbxAppend(footLeft, 'span', 'px-2 py-0.5 rounded text-[11px] font-mono font-medium border border-neonPink/50 bg-panel text-neonPink', `END \u00b7 ${endBuzzes.length}`);
+  const endBadge = bbxAppend(footLeft, 'span', 'px-2 py-0.5 rounded text-[11px] font-mono font-medium border border-neonPink/50 bg-black text-neonPink', `END \u00b7 ${endBuzzes.length}`);
   if (endBuzzes.length) {
     endBadge.className += ' cursor-help';
     endBadge.setAttribute('aria-label', `${endBuzzes.length} end buzz${endBuzzes.length === 1 ? '' : 'es'}`);
@@ -955,23 +1154,25 @@ function bbxQuestionCard(question) {
   }
   // A run that ended without any buzz is not an end buzz: it keeps its own count.
   if (question.noBuzz) {
-    bbxAppend(footLeft, 'span', 'px-2 py-0.5 rounded text-[11px] font-mono text-slate-500 border border-borderDark bg-panel', `NO BUZZ \u00b7 ${question.noBuzz}`);
+    bbxAppend(footLeft, 'span', 'px-2 py-0.5 rounded text-[11px] font-mono text-slate-500 border border-borderDark bg-black', `NO BUZZ \u00b7 ${question.noBuzz}`);
   }
   const answerBtn = document.createElement('button');
   answerBtn.type = 'button';
   answerBtn.className = 'inline-flex items-center text-slate-400 hover:text-white font-medium';
-  answerBtn.textContent = 'Show Answer';
-  answerBtn.addEventListener('click', () => {
-    if (answerBox) answerBox.classList.toggle('hidden');
-  });
+  answerBtn.textContent = bbxState.showAnswers ? 'Hide answer' : 'Show answer';
   footLeft.appendChild(answerBtn);
   bbxAppend(foot, 'span', 'text-slate-500 font-mono text-[11px]', `Target: ${question.answer || '\u2014'}`);
 
-  const answerBox = bbxAppend(body, 'div', 'bg-panel border border-borderDark rounded p-2.5 text-xs font-mono text-slate-200 hidden');
+  const answerBox = bbxAppend(body, 'div', 'bg-black border border-borderDark rounded-lg p-2.5 text-xs font-mono text-slate-200 hidden');
   bbxAppend(answerBox, 'span', 'font-bold text-neonGreen', 'Answer: ');
   bbxAppend(answerBox, 'span', null, question.answer || '\u2014');
   if (bbxState.showAnswers) answerBox.classList.remove('hidden');
+  answerBtn.addEventListener('click', () => {
+    const hidden = answerBox.classList.toggle('hidden');
+    answerBtn.textContent = hidden ? 'Show answer' : 'Hide answer';
+  });
 
+  head.addEventListener('click', () => bbxToggleQuestion(question.key, body, arrow));
   return card;
 }
 
@@ -1053,11 +1254,11 @@ function bbxRenderSubjectFilters() {
   options.forEach((subject) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = subject === 'ALL' ? 'All Subjects' : subject;
-    btn.className = `px-2.5 py-1 rounded text-[11px] font-mono border transition ${
+    btn.textContent = subject === 'ALL' ? 'All subjects' : subject;
+    btn.className = `px-2.5 py-1 rounded text-[10px] font-mono uppercase border transition ${
       bbxState.subjectFilter === subject
         ? 'bg-neonCyan text-black border-neonCyan font-bold'
-        : 'bg-black text-slate-300 border-borderDark hover:text-white'
+        : 'bg-black text-slate-400 border-borderDark hover:text-white'
     }`;
     btn.addEventListener('click', () => {
       bbxState.subjectFilter = subject;
@@ -1068,39 +1269,56 @@ function bbxRenderSubjectFilters() {
   });
 }
 
+// ------------------------------------------------------------ the team draft
+// The template's right-hand column: three persistent team cards, each with subject coverage
+// and four slots. A challenge's runs are individual, so teams are a manual draft the captain
+// builds here; the stats underneath never change when a member moves.
+
 function bbxRenderHud() {
   const holder = bbxEl('bbx-hud');
   if (!holder) return;
   holder.replaceChildren();
   if (!bbxState.players.size) {
-    bbxAppend(holder, 'p', 'text-xs font-mono text-slate-500 col-span-3', 'Assign candidates once a board CSV is loaded.');
+    bbxAppend(holder, 'div', 'bg-panel border border-dashed border-borderDark rounded-xl p-4 text-center text-[11px] font-mono text-slate-500',
+      'Load a board to draft teams.');
     return;
   }
+
   [1, 2, 3].forEach((teamId) => {
     const accent = BBX_TEAM_ACCENTS[teamId];
     const members = bbxTeamMembers(teamId);
-    const card = bbxAppend(holder, 'div', 'border border-borderDark bg-black rounded-lg p-2');
-    const head = bbxAppend(card, 'div', 'flex items-center justify-between mb-1.5');
-    const left = bbxAppend(head, 'div', 'flex items-center gap-1.5');
+    const card = bbxAppend(holder, 'div', 'bg-panel rounded-xl border-2 p-3 space-y-2.5 transition');
+    card.style.borderColor = `${accent}55`;
+    const rest = () => { card.style.borderColor = `${accent}55`; card.style.background = ''; };
+    card.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      card.style.borderColor = accent;
+      card.style.background = `${accent}14`;
+    });
+    card.addEventListener('dragleave', rest);
+    card.addEventListener('drop', (event) => {
+      event.preventDefault();
+      rest();
+      const key = event.dataTransfer.getData('text/plain') || bbxDraggedPlayer;
+      bbxDraggedPlayer = null;
+      if (key) bbxAssignToTeam(key, teamId);
+    });
+
+    const head = bbxAppend(card, 'div', 'flex items-center justify-between');
+    const left = bbxAppend(head, 'div', 'flex items-center gap-2');
     const dot = bbxAppend(left, 'span', 'w-2.5 h-2.5 rounded-full');
     dot.style.background = accent;
-    const title = bbxAppend(left, 'span', 'font-bold text-xs font-mono tracking-tight text-slate-100', `TEAM ${teamId}`);
-    bbxAppend(left, 'span', 'text-[11px] font-mono font-semibold', `(${members.length}/${BBX_SQUAD_SIZE})`).style.color = accent;
-    const covered = bbxState.subjects.filter((subject) => members.some((m) => m.subjects[subject] && m.subjects[subject].attempts));
+    bbxAppend(left, 'span', 'text-[11px] font-mono font-bold text-white uppercase', `Team ${teamId}`);
+    bbxAppend(left, 'span', 'text-[10px] font-mono text-slate-400', `(${members.length}/${BBX_SQUAD_SIZE})`);
+    const covered = bbxState.subjects.filter((subject) => members.some((member) => member.subjects[subject] && member.subjects[subject].attempts));
     const overall = bbxState.subjects.length ? Math.round((covered.length / bbxState.subjects.length) * 100) : 0;
-    const right = bbxAppend(head, 'div', 'flex items-center gap-1');
-    bbxAppend(right, 'span', 'font-mono text-xs font-bold', `${overall}%`).style.color = accent;
-    bbxAppend(right, 'span', 'text-[10px] font-mono uppercase text-slate-500', 'cov');
+    const cov = bbxAppend(head, 'span', 'text-[10px] font-mono font-bold', `${overall}% cov`);
+    cov.style.color = accent;
 
-    const barTrack = bbxAppend(card, 'div', 'w-full bg-panel rounded-full h-1.5 overflow-hidden');
-    const bar = bbxAppend(barTrack, 'div', 'h-full rounded-full');
-    bar.style.width = `${overall}%`;
-    bar.style.background = accent;
-
-    const meters = bbxAppend(card, 'div', 'grid grid-cols-5 gap-1 pt-2');
+    const meters = bbxAppend(card, 'div', 'grid grid-cols-6 gap-1 text-[9px] font-mono text-center text-slate-500 bg-black/50 rounded px-1.5 py-1');
     bbxState.subjects.forEach((subject) => {
-      const cell = bbxAppend(meters, 'div', 'flex flex-col items-center');
-      bbxAppend(cell, 'span', 'text-[9px] font-mono text-slate-500 uppercase', BBX_SUBJECT_SHORT[subject] || subject.slice(0, 3).toUpperCase());
+      const cell = bbxAppend(meters, 'div', null);
+      bbxAppend(cell, 'div', null, BBX_SUBJECT_SHORT[subject] || subject.slice(0, 3).toUpperCase());
       let best = null;
       members.forEach((member) => {
         const ppth = bbxPlayerSubjectPpth(member, subject);
@@ -1110,30 +1328,63 @@ function bbxRenderHud() {
       const track = bbxAppend(cell, 'div', 'w-full bg-panel h-1 rounded-full overflow-hidden mt-0.5');
       const fill = bbxAppend(track, 'div', 'h-full rounded-full');
       fill.style.width = `${pct}%`;
-      fill.style.background = accent;
-      const label = bbxAppend(cell, 'span', 'text-[9px] font-mono mt-0.5', `${pct}%`);
-      label.style.color = pct > 0 ? '#cbd5e1' : '#475569';
+      fill.style.background = pct > 0 ? accent : '#1e293b';
+      bbxAppend(cell, 'div', `mt-0.5 ${pct >= 50 ? 'text-slate-200 font-bold' : 'text-slate-600'}`, `${pct}%`);
     });
 
-    const status = bbxAppend(card, 'div', 'mt-1.5 flex items-center justify-between text-[10px] font-mono pt-1 border-t border-borderDark');
-    bbxAppend(status, 'span', 'text-slate-400 truncate max-w-[190px]',
-      members.length ? members.map((m) => m.name).join(', ') : 'None assigned');
-    if (!members.length) {
-      bbxAppend(status, 'span', 'px-1 rounded bg-panel text-slate-400', `${BBX_SQUAD_SIZE} slots open`);
-    } else if (overall === 100) {
-      bbxAppend(status, 'span', 'px-1 rounded bg-panel text-neonGreen', 'Full coverage');
-    } else {
-      const missing = bbxState.subjects.filter((subject) => !covered.includes(subject));
-      bbxAppend(status, 'span', 'px-1 rounded bg-panel text-neonAmber',
-        `Missing: ${missing.map((s) => BBX_SUBJECT_SHORT[s] || s).join(', ')}`);
+    const slots = bbxAppend(card, 'div', 'space-y-1.5 min-h-[96px]');
+    members.forEach((member) => {
+      const row = bbxAppend(slots, 'div', 'flex items-center justify-between gap-2 bg-black border border-borderDark rounded-lg px-2 py-1.5 text-[10px] font-mono');
+      const who = bbxAppend(row, 'div', 'min-w-0 flex items-center gap-2');
+      const nameDot = bbxAppend(who, 'span', 'w-1.5 h-1.5 rounded-full shrink-0');
+      nameDot.style.background = accent;
+      const name = bbxAppend(who, 'span', 'font-bold text-white truncate', member.name);
+      name.title = member.name;
+      bbxAppend(who, 'span', 'text-slate-500 truncate', bbxPrimarySpecialty(member) || 'untested');
+      const right = bbxAppend(row, 'div', 'flex items-center gap-1.5 shrink-0');
+      const points = bbxPlayerPoints(member);
+      const pointsEl = bbxAppend(right, 'span', 'font-bold', `${points} pts`);
+      pointsEl.style.color = points >= 0 ? '#00ff66' : '#ff0055';
+      const remove = bbxAppend(right, 'button', 'text-slate-500 hover:text-neonPink transition px-0.5', '\u00d7');
+      remove.type = 'button';
+      remove.title = `Remove ${member.name} from Team ${teamId}`;
+      remove.addEventListener('click', () => bbxRemoveFromTeam(member.key, teamId));
+    });
+    for (let slot = members.length; slot < BBX_SQUAD_SIZE; slot += 1) {
+      bbxAppend(slots, 'div', 'border border-dashed border-borderDark/80 rounded-lg py-2 text-center text-[10px] font-mono text-slate-600', `+ Slot ${slot + 1} open`);
     }
+
+    const foot = bbxAppend(card, 'div', 'flex items-center justify-between gap-2 text-[9px] font-mono text-slate-500 pt-1.5 border-t border-borderDark');
+    bbxAppend(foot, 'span', 'truncate', members.length
+      ? `${covered.length}/${bbxState.subjects.length} subjects covered`
+      : 'Drop a candidate here');
+    const clear = bbxAppend(foot, 'button', 'text-slate-500 hover:text-neonPink uppercase tracking-wide transition', 'Clear');
+    clear.type = 'button';
+    clear.addEventListener('click', () => {
+      members.forEach((member) => { member.team = 0; });
+      bbxRenderHud();
+      bbxRenderMatrix();
+    });
   });
 }
 
-function bbxCycleTeam(memberKey, reverse) {
+function bbxAssignToTeam(memberKey, teamId) {
   const player = bbxState.players.get(memberKey);
   if (!player) return;
-  player.team = reverse ? 0 : (player.team + 1) % 4;
+  if (player.team !== teamId && bbxTeamMembers(teamId).length >= BBX_SQUAD_SIZE) {
+    bbxStatus(`Team ${teamId} is full (${BBX_SQUAD_SIZE}/${BBX_SQUAD_SIZE}) \u2014 remove someone first.`, 'bad');
+    return;
+  }
+  player.team = teamId;
+  bbxRenderHud();
+  bbxRenderMatrix();
+  bbxStatus(`${player.name} \u2192 Team ${teamId}.`, 'good');
+}
+
+function bbxRemoveFromTeam(memberKey, teamId) {
+  const player = bbxState.players.get(memberKey);
+  if (!player || player.team !== teamId) return;
+  player.team = 0;
   bbxRenderHud();
   bbxRenderMatrix();
 }
@@ -1196,28 +1447,30 @@ function bbxRenderMatrix() {
   if (!table) return;
   table.replaceChildren();
 
-  const head = bbxAppend(table, 'thead');
+  const head = bbxAppend(table, 'thead', 'sticky top-0 z-10 bg-panel');
   const headRow = bbxAppend(head, 'tr', 'border-b border-borderDark text-[10px] text-slate-500 uppercase select-none');
-  const th = (parent, label, title, onClick, extra) => {
-    const cell = bbxAppend(parent, 'th', `py-2 px-2 ${extra || ''} ${onClick ? 'cursor-pointer hover:text-white' : ''}`, label);
+  const th = (label, title, onClick, extra) => {
+    const cell = bbxAppend(headRow, 'th', `py-2 px-2 ${extra || ''} ${onClick ? 'cursor-pointer hover:text-white' : ''}`, label);
     if (title) cell.title = title;
     if (onClick) cell.addEventListener('click', onClick);
     return cell;
   };
-  th(headRow, 'Team', 'Click to cycle Unassigned \u2192 T1 \u2192 T2 \u2192 T3. Shift-click clears.', null, 'text-center px-3');
-  th(headRow, 'Candidate', 'Sorted by name', () => bbxSortBy('name'), 'text-left px-3');
+  th('Candidate / Buzzes', 'Sorted by name', () => bbxSortBy('name'), 'text-left px-3');
+  th('Overall PPTH', 'Points per tossup heard: +4 correct, -4 neg', () => bbxSortBy('ppth'), 'text-center');
+  th('Specialty', 'Best subject by PPTH', null, 'text-center');
   bbxState.subjects.forEach((subject) => {
-    th(headRow, `${BBX_SUBJECT_SHORT[subject] || subject.slice(0, 3).toUpperCase()} PPTH`,
-      'Points per tossup heard: +4 correct, -4 neg',
-      () => bbxSortBy(subject), 'text-center');
+    th(BBX_SUBJECT_SHORT[subject] || subject.slice(0, 3).toUpperCase(),
+      'Points per tossup heard in this subject: +4 correct, -4 neg',
+      () => bbxSortBy(subject),
+      `text-center ${bbxState.rawColumns ? '' : 'hidden'} bbx-raw-col`);
   });
-  th(headRow, 'Acc %', 'Accuracy: correct \u00f7 buzzes', () => bbxSortBy('acc'), 'text-center');
-  th(headRow, 'Correct', 'Tossups answered correctly', () => bbxSortBy('correct'), 'text-center');
-  th(headRow, 'Incorrect', 'Wrong answers after the question was fully read \u2014 incorrect, not a neg', () => bbxSortBy('incorrect'), 'text-center');
-  th(headRow, 'Negs', 'Interrupts answered wrong, which carry the neg penalty', () => bbxSortBy('negs'), 'text-center');
-  th(headRow, 'Pts', `Overall points: +${BBX_CORRECT_POINTS} per correct tossup, ${BBX_NEG_POINTS} per neg`, () => bbxSortBy('pts'), 'text-center');
-  th(headRow, 'Speed', 'Average buzz depth: how far into the question the buzz landed (higher = later)', () => bbxSortBy('speed'), 'text-center');
-  th(headRow, 'Primary Specialty', 'Best subject by PPTH', null, 'text-right px-3');
+  th('Acc %', 'Accuracy: correct \u00f7 buzzes', () => bbxSortBy('acc'), 'text-center');
+  th('Correct', 'Tossups answered correctly', () => bbxSortBy('correct'), 'text-center');
+  th('Incorrect', 'Wrong answers after the question was fully read \u2014 incorrect, not a neg', () => bbxSortBy('incorrect'), 'text-center');
+  th('Pts', `Overall points: +${BBX_CORRECT_POINTS} per correct tossup, ${BBX_NEG_POINTS} per neg`, () => bbxSortBy('pts'), 'text-center');
+  th('Negs', 'Interrupts answered wrong, which carry the neg penalty', () => bbxSortBy('negs'), 'text-center');
+  th('Speed', 'Average buzz depth: how far into the question the buzz landed (higher = later)', () => bbxSortBy('speed'), 'text-center');
+  th('Quick Assign', 'Add this candidate to a team', null, 'text-center');
 
   const body = bbxAppend(table, 'tbody', 'divide-y divide-borderDark');
   let list = [...bbxState.players.values()];
@@ -1246,77 +1499,95 @@ function bbxRenderMatrix() {
 
   const indicator = bbxEl('bbx-count-indicator');
   if (indicator) indicator.textContent = `${list.length} candidate${list.length === 1 ? '' : 's'}`;
+  const note = bbxEl('bbx-matrix-note');
+  if (note) note.textContent = `${list.length} shown \u00b7 ${bbxState.players.size} total`;
 
   if (!list.length) {
     const row = bbxAppend(body, 'tr');
     bbxAppend(row, 'td', 'py-4 text-center text-slate-600', 'Awaiting data...')
-      .setAttribute('colspan', String(9 + bbxState.subjects.length));
+      .setAttribute('colspan', String(10 + bbxState.subjects.length));
     return;
   }
 
   list.forEach((player) => {
     const accent = BBX_TEAM_ACCENTS[player.team] || null;
-    const row = bbxAppend(body, 'tr', 'transition-colors');
-    if (accent) row.style.background = `${accent}12`;
+    const row = bbxAppend(body, 'tr', 'transition-colors hover:bg-panelHover cursor-grab');
+    if (accent) row.style.background = `${accent}10`;
+    row.draggable = true;
+    row.title = 'Drag into a team card on the right';
+    row.addEventListener('dragstart', (event) => {
+      bbxDraggedPlayer = player.key;
+      event.dataTransfer.setData('text/plain', player.key);
+      event.dataTransfer.effectAllowed = 'move';
+      row.style.opacity = '0.4';
+    });
+    row.addEventListener('dragend', () => {
+      row.style.opacity = '';
+      bbxDraggedPlayer = null;
+    });
 
-    const teamCell = bbxAppend(row, 'td', 'py-1.5 px-3 text-center');
-    const badge = document.createElement('button');
-    badge.type = 'button';
-    badge.textContent = player.team ? `T${player.team}` : '\u2014';
-    badge.className = 'w-8 h-5 rounded text-[10.5px] font-mono inline-flex items-center justify-center cursor-pointer transition';
-    badge.title = 'Click to cycle T1 \u2192 T2 \u2192 T3. Shift-click to unassign.';
-    if (player.team) {
-      badge.style.background = accent;
-      badge.style.color = '#04060a';
-      badge.style.fontWeight = '700';
-    } else {
-      badge.style.border = '1px dashed #475569';
-      badge.style.color = '#64748b';
-    }
-    badge.addEventListener('click', (event) => bbxCycleTeam(player.key, event.shiftKey));
-    badge.addEventListener('contextmenu', (event) => { event.preventDefault(); bbxCycleTeam(player.key, true); });
-    teamCell.appendChild(badge);
+    bbxAppend(row, 'td', 'py-2 px-3').appendChild(bbxNameCell(player));
 
-    bbxAppend(row, 'td', 'py-1.5 px-3').appendChild(bbxNameCell(player));
+    const ppth = bbxPlayerPpth(player);
+    const ppthCell = bbxAppend(row, 'td', 'py-2 px-2 text-center');
+    bbxAppend(ppthCell, 'span',
+      `px-2 py-0.5 rounded font-bold ${ppth !== null && ppth >= 2 ? 'bg-panelHover text-neonCyan border border-neonCyan/40' : 'text-slate-300'}`,
+      ppth === null ? '\u2014' : ppth.toFixed(2));
+
+    const specialty = bbxPrimarySpecialty(player);
+    bbxAppend(row, 'td', 'py-2 px-2 text-center')
+      .appendChild(bbxAppend(null, 'span', 'px-1.5 py-0.5 rounded text-[10px] bg-panelHover text-slate-300 border border-borderDark', specialty || '\u2014'));
+
     bbxState.subjects.forEach((subject) => {
-      const ppth = bbxPlayerSubjectPpth(player, subject);
-      const cell = bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono');
-      if (ppth === null) {
+      const subjectPpth = bbxPlayerSubjectPpth(player, subject);
+      const cell = bbxAppend(row, 'td', `py-2 px-2 text-center font-mono ${bbxState.rawColumns ? '' : 'hidden'} bbx-raw-col`);
+      if (subjectPpth === null) {
         bbxAppend(cell, 'span', 'text-slate-600', '\u2014');
       } else {
-        bbxAppend(cell, 'span', ppth >= 2 ? 'font-bold text-slate-100' : 'text-slate-300', ppth.toFixed(1));
+        bbxAppend(cell, 'span', subjectPpth >= 2 ? 'font-bold text-slate-100' : (subjectPpth < 0 ? 'text-neonPink' : 'text-slate-300'), subjectPpth.toFixed(1));
       }
     });
 
     const acc = bbxPlayerAccuracy(player);
-    const accCell = bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono');
-    bbxAppend(accCell, 'span', acc !== null && acc >= 80 ? 'font-bold text-neonGreen' : 'text-slate-300', bbxPctText(acc));
+    bbxAppend(row, 'td', 'py-2 px-2 text-center font-mono')
+      .appendChild(bbxAppend(null, 'span', acc !== null && acc >= 80 ? 'font-bold text-neonGreen' : 'text-slate-300', bbxPctText(acc)));
 
     bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono text-slate-200', player.correct);
 
     bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono text-slate-400', player.incorrect);
 
-    bbxAppend(row, 'td', `py-1.5 px-2 text-center font-mono ${player.negs >= 4 ? 'text-neonPink font-bold' : 'text-slate-400'}`, player.negs);
-
     const points = bbxPlayerPoints(player);
     const pointsCell = bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono font-bold', `${points > 0 ? '+' : ''}${points}`);
     pointsCell.style.color = points > 0 ? '#00ff66' : (points < 0 ? '#ff0055' : '#94a3b8');
 
-    const speed = bbxPlayerSpeed(player);
-    bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono text-slate-400', speed === null ? '\u2014' : `${Math.round(speed)}%`);
+    bbxAppend(row, 'td', `py-2 px-2 text-center font-mono ${player.negs >= 4 ? 'text-neonPink font-bold' : 'text-slate-400'}`, player.negs);
 
-    const specialty = bbxPrimarySpecialty(player);
-    bbxAppend(row, 'td', 'py-1.5 px-3 text-right')
-      .appendChild(bbxAppend(null, 'span', 'px-1.5 py-0.5 rounded text-[10px] bg-panelHover text-slate-300 border border-borderDark', specialty || '\u2014'));
+    const speed = bbxPlayerSpeed(player);
+    bbxAppend(row, 'td', 'py-2 px-2 text-center font-mono text-slate-400', speed === null ? '\u2014' : `${Math.round(speed)}%`);
+
+    const quick = bbxAppend(row, 'td', 'py-2 px-2 text-center');
+    const buttons = bbxAppend(quick, 'div', 'flex items-center justify-center gap-1');
+    [1, 2, 3].forEach((teamId) => {
+      const btn = bbxAppend(buttons, 'button', 'px-1.5 py-0.5 rounded bg-panel border border-borderDark text-[9px] font-mono font-bold transition', `+T${teamId}`);
+      btn.type = 'button';
+      btn.title = `Add ${player.name} to Team ${teamId}`;
+      btn.style.color = BBX_TEAM_ACCENTS[teamId];
+      if (player.team === teamId) {
+        btn.style.background = BBX_TEAM_ACCENTS[teamId];
+        btn.style.borderColor = BBX_TEAM_ACCENTS[teamId];
+        btn.style.color = '#04060a';
+      }
+      btn.addEventListener('click', () => bbxAssignToTeam(player.key, teamId));
+    });
   });
 }
 
 function bbxNameCell(player) {
   const wrap = document.createElement('div');
-  wrap.className = 'flex items-center gap-1.5';
-  const name = bbxAppend(wrap, 'span', 'font-semibold', player.name);
+  wrap.className = 'flex items-center gap-1.5 min-w-0';
+  const name = bbxAppend(wrap, 'span', 'font-semibold truncate', player.name);
   name.style.color = BBX_MEMBER_COLORS[[...bbxState.players.keys()].indexOf(player.key) % BBX_MEMBER_COLORS.length];
-  bbxAppend(wrap, 'span', 'text-slate-500 font-mono text-[10.5px]', `${player.attempts} heard \u00b7 ${player.buzzes} buzzed`);
+  bbxAppend(wrap, 'span', 'text-slate-500 font-mono text-[10px]', `${player.attempts} heard \u00b7 ${player.buzzes} buzzed`);
   return wrap;
 }
 

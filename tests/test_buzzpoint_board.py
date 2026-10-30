@@ -617,9 +617,9 @@ class NumericalStatlineTests(unittest.TestCase):
 
     def test_the_matrix_shows_correct_incorrect_and_points_columns(self):
         matrix = function_source(ANALYTICS_SOURCE, "bbxRenderMatrix")
-        self.assertIn("th(headRow, 'Correct',", matrix)
-        self.assertIn("th(headRow, 'Incorrect',", matrix)
-        self.assertIn("th(headRow, 'Pts',", matrix)
+        self.assertIn("th('Correct',", matrix)
+        self.assertIn("th('Incorrect',", matrix)
+        self.assertIn("th('Pts',", matrix)
         self.assertIn("bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono text-slate-200', player.correct);", matrix)
         self.assertIn("bbxAppend(row, 'td', 'py-1.5 px-2 text-center font-mono text-slate-400', player.incorrect);", matrix)
         self.assertIn("const points = bbxPlayerPoints(player);", matrix)
@@ -690,6 +690,25 @@ class CaptainReviewQueueTests(unittest.TestCase):
         self.assertIn("if (question.reportCount)", card)
         self.assertIn("reported", card)
 
+    def test_the_review_strip_shows_what_was_answered_against_the_target(self):
+        """A verdict alone cannot be reviewed: a near miss and a blank look the same."""
+        body = function_source(ANALYTICS_SOURCE, "bbxRenderReports")
+        self.assertIn("row.questionText", body)
+        self.assertIn("answerCell('answered'", body)
+        self.assertIn("answerCell('target'", body)
+        self.assertIn("row.bonusTypedAnswer", body)
+        self.assertIn("row.bonusAnswer", body)
+
+    def test_the_export_carries_bonus_answers_for_bonus_reports(self):
+        export = function_source(BUZZPOINT_SOURCE, "bukBoardCsvRows")
+        self.assertIn("'BonusAnswer'", export)
+        self.assertIn("'BonusTypedAnswer'", export)
+        self.assertIn("question.bonus_answer || ''", export)
+        self.assertIn("r.bonusTypedAnswer || ''", export)
+        parser = function_source(ANALYTICS_SOURCE, "bbxIngestCsv")
+        self.assertIn("bonusTypedAnswer: row['BonusTypedAnswer']", parser)
+        self.assertIn("bonusAnswer: row['BonusAnswer']", parser)
+
     def test_the_captain_can_mark_the_reported_phase(self):
         body = function_source(ANALYTICS_SOURCE, "bbxRenderReports")
         self.assertIn("bbxJudgeReport(row, phase, correct)", body)
@@ -707,6 +726,15 @@ class CaptainReviewQueueTests(unittest.TestCase):
         self.assertIn('id="bbx-report-queue"', INDEX_SOURCE)
         self.assertIn('id="bbx-report-list"', INDEX_SOURCE)
         self.assertIn("bbxRenderReports();", ANALYTICS_SOURCE)
+
+    def test_a_report_from_a_dropped_csv_still_reaches_the_queue(self):
+        """The strip shows the report even when no run uid can act on it.
+
+        Appending after the "load by code" branch left a hand-loaded CSV's queue visible but
+        empty, so a captain saw the heading and none of the members' flags.
+        """
+        body = function_source(ANALYTICS_SOURCE, "bbxRenderReports")
+        self.assertLess(body.index("list.appendChild(item);"), body.index("if (!fixable) {"))
 
 
 class ReadAloudUnavailableTests(unittest.TestCase):
@@ -857,6 +885,41 @@ class BuzzboardAnalyticsShellTests(unittest.TestCase):
         self.assertIn('id="bbx-hud"', INDEX_SOURCE)
         self.assertIn('id="bbx-questions-container"', INDEX_SOURCE)
         self.assertIn('id="bbx-matrix"', INDEX_SOURCE)
+
+    def test_the_buzzboard_view_has_the_templates_compact_shell(self):
+        self.assertIn('id="bbx-ingestion-drawer"', INDEX_SOURCE)
+        self.assertIn('id="bbx-toggle-drawer"', INDEX_SOURCE)
+        self.assertIn('id="bbx-active-code"', INDEX_SOURCE)
+        self.assertIn('id="bbx-dataset-label"', INDEX_SOURCE)
+        self.assertIn('id="bbx-question-subject-filters"', INDEX_SOURCE)
+        self.assertIn('id="bbx-raw-columns"', INDEX_SOURCE)
+        self.assertIn('Question buzzpoints', INDEX_SOURCE)
+        self.assertIn('Team builder &amp; numerical data', INDEX_SOURCE)
+
+    def test_question_cards_are_accordions_that_remember_being_opened(self):
+        card = function_source(ANALYTICS_SOURCE, "bbxQuestionCard")
+        self.assertIn("bbxState.openQuestions.has(question.key)", card)
+        self.assertIn("bbxToggleQuestion(question.key, body, arrow)", card)
+        toggle = function_source(ANALYTICS_SOURCE, "bbxToggleQuestion")
+        self.assertIn("bbxState.openQuestions.add(key);", toggle)
+        expand = function_source(ANALYTICS_SOURCE, "bbxExpandAllQuestions")
+        self.assertIn("bbxState.openQuestions = new Set();", expand)
+
+    def test_the_team_builder_is_a_drag_and_drop_draft(self):
+        hud = function_source(ANALYTICS_SOURCE, "bbxRenderHud")
+        self.assertIn("card.addEventListener('drop'", hud)
+        self.assertIn("bbxAssignToTeam(key, teamId)", hud)
+        matrix = function_source(ANALYTICS_SOURCE, "bbxRenderMatrix")
+        self.assertIn("row.draggable = true;", matrix)
+        self.assertIn("`+T${teamId}`", matrix)
+        assign = function_source(ANALYTICS_SOURCE, "bbxAssignToTeam")
+        self.assertIn("BBX_SQUAD_SIZE", assign)
+
+    def test_raw_subject_columns_are_hidden_until_requested(self):
+        matrix = function_source(ANALYTICS_SOURCE, "bbxRenderMatrix")
+        self.assertIn("bbxState.rawColumns ? '' : 'hidden'", matrix)
+        setter = function_source(ANALYTICS_SOURCE, "bbxSetRawColumns")
+        self.assertIn("bbxState.rawColumns = Boolean(checked);", setter)
 
 
 class AttemptLockTests(unittest.TestCase):

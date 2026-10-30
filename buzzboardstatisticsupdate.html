@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Match Analytics & Speed Telemetry</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Phosphor Icons CDN for clean telemetry styling -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            teleDark: '#080c14',
+            teleCard: '#0f172a',
+            telePanel: '#131d31',
+            teleBorder: '#1e293b',
+            cyanGlow: '#00f2fe',
+            neonGreen: '#00e676',
+            neonAmber: '#ffb703',
+            neonRed: '#ff3366',
+            neonPurple: '#a855f7'
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'Menlo', 'Courier New', 'monospace'],
+            sans: ['Inter', 'system-ui', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #080c14; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    
+    .glow-border {
+      box-shadow: 0 0 15px -3px rgba(0, 242, 254, 0.15);
+    }
+    .neon-pill-active {
+      background-color: #00f2fe;
+      color: #080c14;
+      font-weight: 700;
+      box-shadow: 0 0 12px rgba(0, 242, 254, 0.4);
+    }
+    .draggable-card {
+      cursor: grab;
+    }
+    .draggable-card:active {
+      cursor: grabbing;
+    }
+    .drag-over {
+      border-color: #00f2fe !important;
+      background-color: rgba(0, 242, 254, 0.08) !important;
+    }
+  </style>
+</head>
+<body class="bg-[#05070d] text-slate-200 font-sans min-h-screen p-3 md:p-6 antialiased flex flex-col justify-start items-center">
+
+  <!-- Main Container -->
+  <div class="w-full max-w-7xl bg-[#0a0f1d] border border-slate-800 rounded-2xl shadow-2xl p-4 md:p-6 space-y-5">
+    
+    <!-- TOP HEADER -->
+    <header class="flex flex-wrap items-center justify-between gap-4 pb-3 border-b border-slate-800/80">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-cyan-500 via-indigo-500 to-amber-400 p-[2px] shadow-lg">
+          <div class="w-full h-full bg-[#0d1424] rounded-[6px] flex items-center justify-center">
+            <i class="ph-bold ph-chart-polar text-cyan-400 text-lg"></i>
+          </div>
+        </div>
+        <div>
+          <h1 class="text-lg md:text-xl font-bold tracking-tight text-white flex items-center gap-2">
+            Match Analytics & Speed Telemetry
+            <span class="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800/50">v2.4 UX</span>
+          </h1>
+          <p class="text-xs text-slate-400 font-mono">Streamlined buzzer statistics & competitive team roster builder</p>
+        </div>
+      </div>
+
+      <!-- Action items -->
+      <div class="flex items-center gap-2">
+        <button id="helpBtn" class="text-xs text-slate-400 hover:text-white px-2.5 py-1.5 rounded-md hover:bg-slate-800 transition">
+          <i class="ph ph-info mr-1"></i> UX Guide
+        </button>
+        <button class="text-slate-400 hover:text-red-400 p-1.5 rounded-md hover:bg-slate-800/60 transition" title="Dismiss / Reset">
+          <i class="ph-bold ph-x text-base"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- SUGGESTION 1: COLLAPSIBLE INGESTION & HEADER STATUS -->
+    <section class="bg-[#0e1628] rounded-xl border border-slate-800 overflow-hidden transition-all duration-300">
+      
+      <!-- Collapsed Compact Bar (Default Active Mode) -->
+      <div id="collapsedIngestionBar" class="p-3 px-4 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+        <div class="flex flex-wrap items-center gap-2.5">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/70 border border-emerald-500/40 text-emerald-400 font-semibold tracking-wide">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+            LIVE &bull; 3 PLAYING
+          </span>
+          <span class="text-slate-400" id="liveClock">2:55:14 PM</span>
+          <span class="text-slate-600">|</span>
+          <div class="flex items-center gap-2 bg-slate-900/90 px-2.5 py-1 rounded-md border border-slate-700">
+            <span class="text-slate-400">BOARD:</span>
+            <span class="text-cyan-300 font-bold tracking-wider" id="activeBoardCode">r4xshr</span>
+            <span class="text-slate-500">&bull;</span>
+            <span class="text-slate-300">271 Rows Compiled</span>
+          </div>
+          <button id="toggleIngestionBtn" class="text-xs text-cyan-400 hover:text-cyan-300 bg-cyan-950/40 border border-cyan-800/60 px-2.5 py-1 rounded hover:bg-cyan-900/40 transition flex items-center gap-1">
+            <i class="ph ph-gear"></i> Change Board / Ingest CSV
+          </button>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button onclick="simulateToast('Exported CSV with telemetry')" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center gap-1">
+            <i class="ph ph-download-simple"></i> Export
+          </button>
+          <button onclick="clearData()" class="px-2.5 py-1 rounded bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-800/40 transition flex items-center gap-1">
+            <i class="ph ph-trash"></i> Clear Data
+          </button>
+        </div>
+      </div>
+
+      <!-- Expandable Ingestion Drawer (Hidden by default to save 35% height) -->
+      <div id="expandedIngestionDrawer" class="hidden border-t border-slate-800 p-4 bg-[#0a101f] transition-all duration-300">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- Load Board Code -->
+          <div class="space-y-2">
+            <label class="text-[11px] font-mono text-slate-400 tracking-wider">LOAD A BOARD BY CODE</label>
+            <div class="flex gap-2">
+              <input type="text" value="r4xshr" id="inputBoardCode" class="w-full bg-[#080d1a] border border-slate-700 rounded-lg px-3 py-1.5 text-sm font-mono text-cyan-300 focus:outline-none focus:border-cyan-400">
+              <button onclick="updateBoardCode()" class="bg-amber-400 hover:bg-amber-300 text-slate-950 px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold tracking-wide transition shadow">
+                LOAD
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-500">Live board maintains synchronized streaming state.</p>
+          </div>
+
+          <!-- Dropzone -->
+          <div class="md:col-span-2 border-2 border-dashed border-slate-700 hover:border-cyan-500/60 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer bg-slate-900/30 transition group">
+            <i class="ph ph-cloud-arrow-up text-2xl text-slate-400 group-hover:text-cyan-400 transition mb-1"></i>
+            <span class="text-xs font-mono text-slate-300 font-semibold group-hover:text-cyan-300">DROP BUZZBOARD CSVS OR CLICK TO BROWSE</span>
+            <span class="text-[11px] text-slate-500">Supports Buzzpoint telemetry CSV and Slopbowl exports</span>
+          </div>
+        </div>
+        <div class="flex justify-end mt-2">
+          <button id="closeDrawerBtn" class="text-xs text-slate-400 hover:text-slate-200 underline font-mono">
+            Collapse Drawer &uarr;
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- NAVIGATION TABS -->
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+      <div class="flex items-center gap-2 bg-[#0c1322] p-1 rounded-xl border border-slate-800 font-mono text-xs">
+        <button id="tabBuzzpoints" onclick="switchTab('buzzpoints')" class="px-4 py-2 rounded-lg transition font-bold text-slate-400 hover:text-white flex items-center gap-2">
+          <i class="ph ph-lightning"></i> QUESTION BUZZPOINTS
+        </button>
+        <button id="tabTeamBuilder" onclick="switchTab('teambuilder')" class="px-4 py-2 rounded-lg transition font-bold bg-cyan-400 text-slate-950 shadow-md flex items-center gap-2">
+          <i class="ph ph-users-three"></i> TEAM BUILDER & NUMERICAL DATA
+        </button>
+      </div>
+
+      <div class="text-xs font-mono text-slate-400 flex items-center gap-2">
+        <span class="inline-block w-2 h-2 rounded-full bg-cyan-400"></span>
+        <span id="activeDatasetLabel">Dataset: 11 Candidates Active</span>
+      </div>
+    </div>
+
+    <!-- VIEW 1: TEAM BUILDER & NUMERICAL DATA -->
+    <div id="viewTeamBuilder" class="space-y-4">
+      
+      <!-- Split Layout: Candidates Table (Left 68%) + Persistent Team Roster Sidebar (Right 32%) -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        
+        <!-- LEFT: Candidates Numerical Table with Sparklines and overall PPTH -->
+        <div class="lg:col-span-8 bg-[#0d1527] rounded-xl border border-slate-800 p-4 space-y-3">
+          
+          <!-- Controls & Subject Filter Toolbar -->
+          <div class="flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="text-slate-400 font-mono text-[11px] uppercase mr-1">Filter Subject:</span>
+              <button onclick="filterCandidates('All')" class="subject-filter px-2.5 py-1 rounded bg-cyan-400 text-slate-950 font-bold font-mono transition">All</button>
+              <button onclick="filterCandidates('Physics')" class="subject-filter px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono transition">Physics</button>
+              <button onclick="filterCandidates('Biology')" class="subject-filter px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono transition">Biology</button>
+              <button onclick="filterCandidates('Math')" class="subject-filter px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono transition">Math</button>
+              <button onclick="filterCandidates('Energy')" class="subject-filter px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono transition">Energy</button>
+              <button onclick="filterCandidates('Earth')" class="subject-filter px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono transition">Earth/Space</button>
+            </div>
+
+            <!-- View Mode Switch: Sparkline vs Full Raw Subject Grid -->
+            <div class="flex items-center gap-2">
+              <label class="text-[11px] font-mono text-slate-400 flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" id="toggleRawColumns" onchange="toggleRawColumnsMode()" class="rounded bg-slate-900 border-slate-700 text-cyan-400 focus:ring-0">
+                <span>Expand 6 Raw PPTH Cols</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Candidates List Header & Rows with Sticky Header & Max Height Scroll -->
+          <div class="overflow-x-auto overflow-y-auto max-h-[560px] rounded-lg border border-slate-800/80">
+            <table class="w-full text-left text-xs font-mono border-collapse" id="candidatesTable">
+              <thead class="sticky top-0 z-20 bg-[#090e1a] shadow-[0_2px_8px_rgba(0,0,0,0.6)]">
+                <tr class="bg-[#090e1a] text-slate-400 uppercase text-[11px] border-b border-slate-800 tracking-wider">
+                  <th class="py-2.5 px-3 sticky top-0 bg-[#090e1a]">Candidate / Buzzes</th>
+                  <th class="py-2.5 px-2 text-center sticky top-0 bg-[#090e1a]" title="Overall Points Per Tossup Heard">Overall PPTH</th>
+                  <!-- Specialty Role Badge Column -->
+                  <th class="py-2.5 px-2 text-center sticky top-0 bg-[#090e1a]" id="colHeaderSpecialty">Specialty</th>
+                  <!-- Hidden by default raw columns (Sticky pinned headers) -->
+                  <th class="py-2.5 px-2 text-center hidden raw-col sticky top-0 bg-[#090e1a]">BIO</th>
+                  <th class="py-2.5 px-2 text-center hidden raw-col sticky top-0 bg-[#090e1a]">CHM</th>
+                  <th class="py-2.5 px-2 text-center hidden raw-col sticky top-0 bg-[#090e1a]">PHY</th>
+                  <th class="py-2.5 px-2 text-center hidden raw-col sticky top-0 bg-[#090e1a]">MTH</th>
+                  <th class="py-2.5 px-2 text-center hidden raw-col sticky top-0 bg-[#090e1a]">ESS</th>
+                  <th class="py-2.5 px-2 text-center hidden raw-col sticky top-0 bg-[#090e1a]">EGY</th>
+                  <th class="py-2.5 px-2 text-center sticky top-0 bg-[#090e1a]">Acc %</th>
+                  <th class="py-2.5 px-2 text-center sticky top-0 bg-[#090e1a]">Pts</th>
+                  <th class="py-2.5 px-2 text-center sticky top-0 bg-[#090e1a]">Negs</th>
+                  <th class="py-2.5 px-2 text-center sticky top-0 bg-[#090e1a]">Speed</th>
+                  <th class="py-2.5 px-2 text-center sticky top-0 bg-[#090e1a]">Quick Assign</th>
+                </tr>
+              </thead>
+              <tbody id="candidatesTbody" class="divide-y divide-slate-800/60 bg-[#0c1322]">
+                <!-- Dynamic candidates will render here -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Drag instructions -->
+          <div class="flex items-center justify-between text-[11px] font-mono text-slate-500 pt-1">
+            <span class="flex items-center gap-1"><i class="ph ph-hand-grabbing text-cyan-400"></i> Drag candidate rows directly into Team 1, 2, or 3 on the right</span>
+            <span id="filteredCount">Showing 11 candidates</span>
+          </div>
+
+        </div>
+
+        <!-- RIGHT: Persistent Team Roster Sidebar (Teams 1, 2, 3 with Coverage stats & Droppable Slots) -->
+        <div class="lg:col-span-4 space-y-3 sticky top-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xs font-mono font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+              <i class="ph ph-shield-check text-cyan-400 text-sm"></i>
+              Active Team Rosters
+            </h2>
+            <button onclick="resetAllTeams()" class="text-[11px] font-mono text-red-400 hover:text-red-300 transition">
+              Reset All
+            </button>
+          </div>
+
+          <!-- Team 1 Card -->
+          <div class="team-drop-target bg-[#0e172a] rounded-xl border-2 border-cyan-500/30 p-3.5 space-y-2.5 transition duration-150" id="teamTarget1" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 1)">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+                <span class="text-xs font-mono font-bold text-white">TEAM 1</span>
+                <span class="text-[11px] font-mono text-slate-400" id="teamCount1">(0/4)</span>
+              </div>
+              <span class="text-xs font-mono font-bold text-cyan-400" id="teamCov1">0% COV</span>
+            </div>
+
+            <!-- Subject coverage bar -->
+            <div class="grid grid-cols-6 gap-1 text-[9px] font-mono text-center text-slate-400 py-1 bg-slate-900/60 rounded px-1.5" id="teamSubjects1">
+              <div>BIO <span class="text-slate-500">0%</span></div>
+              <div>CHM <span class="text-slate-500">0%</span></div>
+              <div>PHY <span class="text-slate-500">0%</span></div>
+              <div>MTH <span class="text-slate-500">0%</span></div>
+              <div>ESS <span class="text-slate-500">0%</span></div>
+              <div>EGY <span class="text-slate-500">0%</span></div>
+            </div>
+
+            <!-- Member Slots -->
+            <div class="space-y-1.5 min-h-[110px]" id="teamSlots1">
+              <div class="empty-placeholder text-center text-slate-600 text-xs font-mono py-8 border border-dashed border-slate-800 rounded-lg">
+                Drop candidates here or click [+T1]
+              </div>
+            </div>
+          </div>
+
+          <!-- Team 2 Card -->
+          <div class="team-drop-target bg-[#0e172a] rounded-xl border-2 border-rose-500/30 p-3.5 space-y-2.5 transition duration-150" id="teamTarget2" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 2)">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-rose-400"></span>
+                <span class="text-xs font-mono font-bold text-white">TEAM 2</span>
+                <span class="text-[11px] font-mono text-slate-400" id="teamCount2">(0/4)</span>
+              </div>
+              <span class="text-xs font-mono font-bold text-rose-400" id="teamCov2">0% COV</span>
+            </div>
+
+            <!-- Subject coverage bar -->
+            <div class="grid grid-cols-6 gap-1 text-[9px] font-mono text-center text-slate-400 py-1 bg-slate-900/60 rounded px-1.5" id="teamSubjects2">
+              <div>BIO <span class="text-slate-500">0%</span></div>
+              <div>CHM <span class="text-slate-500">0%</span></div>
+              <div>PHY <span class="text-slate-500">0%</span></div>
+              <div>MTH <span class="text-slate-500">0%</span></div>
+              <div>ESS <span class="text-slate-500">0%</span></div>
+              <div>EGY <span class="text-slate-500">0%</span></div>
+            </div>
+
+            <div class="space-y-1.5 min-h-[110px]" id="teamSlots2">
+              <div class="empty-placeholder text-center text-slate-600 text-xs font-mono py-8 border border-dashed border-slate-800 rounded-lg">
+                Drop candidates here or click [+T2]
+              </div>
+            </div>
+          </div>
+
+          <!-- Team 3 Card -->
+          <div class="team-drop-target bg-[#0e172a] rounded-xl border-2 border-emerald-500/30 p-3.5 space-y-2.5 transition duration-150" id="teamTarget3" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 3)">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                <span class="text-xs font-mono font-bold text-white">TEAM 3</span>
+                <span class="text-[11px] font-mono text-slate-400" id="teamCount3">(0/4)</span>
+              </div>
+              <span class="text-xs font-mono font-bold text-emerald-400" id="teamCov3">0% COV</span>
+            </div>
+
+            <!-- Subject coverage bar -->
+            <div class="grid grid-cols-6 gap-1 text-[9px] font-mono text-center text-slate-400 py-1 bg-slate-900/60 rounded px-1.5" id="teamSubjects3">
+              <div>BIO <span class="text-slate-500">0%</span></div>
+              <div>CHM <span class="text-slate-500">0%</span></div>
+              <div>PHY <span class="text-slate-500">0%</span></div>
+              <div>MTH <span class="text-slate-500">0%</span></div>
+              <div>ESS <span class="text-slate-500">0%</span></div>
+              <div>EGY <span class="text-slate-500">0%</span></div>
+            </div>
+
+            <div class="space-y-1.5 min-h-[110px]" id="teamSlots3">
+              <div class="empty-placeholder text-center text-slate-600 text-xs font-mono py-8 border border-dashed border-slate-800 rounded-lg">
+                Drop candidates here or click [+T3]
+              </div>
+            </div>
+          </div>
+
+          <!-- Export Button -->
+          <button onclick="simulateToast('Rosters exported successfully!') class='w-full py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-mono font-bold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+            <i class="ph-bold ph-export"></i> EXPORT COMPILED ROSTERS
+          </button>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- VIEW 2: QUESTION BUZZPOINTS (SUGGESTION 4) -->
+    <div id="viewBuzzpoints" class="space-y-4 hidden">
+      
+      <!-- Filtering Header for Buzzpoints: Subject Pills + The signature Buzzers bar -->
+      <div class="bg-[#0d1527] rounded-xl border border-slate-800 p-4 space-y-3.5">
+        
+        <!-- Filter by Subject Bar -->
+        <div class="flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-slate-400 font-mono text-[11px] uppercase mr-1">Subject Filter:</span>
+            <button onclick="filterQuestionsBySubject('All')" class="q-subj-btn px-2.5 py-1 rounded bg-cyan-400 text-slate-950 font-bold font-mono transition">All Subjects</button>
+            <button onclick="filterQuestionsBySubject('Chemistry')" class="q-subj-btn px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono transition">Chemistry</button>
+            <button onclick="filterQuestionsBySubject('Biology')" class="q-subj-btn px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono transition">Biology</button>
+            <button onclick="filterQuestionsBySubject('Physics')" class="q-subj-btn px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono transition">Physics</button>
+            <button onclick="filterQuestionsBySubject('Math')" class="q-subj-btn px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono transition">Math</button>
+          </div>
+
+          <!-- Quick Toggle: Expand All / Collapse All Questions -->
+          <div class="flex items-center gap-2 font-mono text-xs">
+            <button onclick="toggleAllAccordions(true)" class="text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition">
+              Expand All
+            </button>
+            <span class="text-slate-600">|</span>
+            <button onclick="toggleAllAccordions(false)" class="text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition">
+              Collapse All
+            </button>
+          </div>
+        </div>
+
+        <!-- SIGNATURE BUZZER BAR (Preserved exactly with authentic neon cyber styling) -->
+        <div class="pt-2 border-t border-slate-800/80">
+          <div class="flex items-center justify-between text-xs font-mono text-slate-400 mb-2">
+            <span class="tracking-wider">ISOLATE BUZZER:</span>
+            <span class="text-[11px] text-cyan-400/80">Click candidate to isolate buzz telemetry</span>
+          </div>
+
+          <!-- Exact look & feel of user's signature buzzer bar pills -->
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-1.5 font-mono text-xs" id="buzzerPillsContainer">
+            <button onclick="selectBuzzer('All Buzzers')" class="buzzer-pill px-3 py-1 rounded border border-cyan-400 neon-pill-active whitespace-nowrap transition">
+              All Buzzers
+            </button>
+            <button onclick="selectBuzzer('Aaditya N')" class="buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition">
+              Aaditya N
+            </button>
+            <button onclick="selectBuzzer('Akhil')" class="buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition">
+              Akhil
+            </button>
+            <button onclick="selectBuzzer('aw')" class="buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition">
+              aw
+            </button>
+            <button onclick="selectBuzzer('CHARAN')" class="buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition">
+              CHARAN
+            </button>
+            <button onclick="selectBuzzer('david')" class="buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition">
+              david
+            </button>
+            <button onclick="selectBuzzer('dinguspingus')" class="buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition">
+              dinguspingus
+            </button>
+            <button onclick="selectBuzzer('Hi Ding its Joel')" class="buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition">
+              Hi Ding its Joel
+            </button>
+            <button onclick="selectBuzzer('johann tsundere')" class="buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition">
+              johann tsundere
+            </button>
+            <button onclick="selectBuzzer('Leela')" class="buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition">
+              Leela
+            </button>
+            <button onclick="selectBuzzer('Leyla')" class="buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition">
+              Leyla
+            </button>
+            <button onclick="selectBuzzer('Ryan.H')" class="buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition">
+              Ryan.H
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Accordion Questions Stream -->
+      <div class="space-y-3" id="questionsContainer">
+        
+        <!-- QUESTION CARD 1: Chemistry Q1 -->
+        <div class="question-card bg-[#0d1527] rounded-xl border border-slate-800 overflow-hidden transition" data-subject="Chemistry">
+          <!-- Accordion Header (Compact One-Line Telemetry Summary) -->
+          <div onclick="toggleAccordion(this)" class="p-3.5 flex flex-wrap items-center justify-between gap-3 cursor-pointer hover:bg-slate-800/40 select-none">
+            
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/60 font-mono text-xs font-semibold">Chemistry</span>
+              <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-xs">Tossup &bull; MC</span>
+              <span class="text-amber-400 font-mono font-bold text-xs">Q1</span>
+              <span class="text-slate-500 font-mono text-[11px] ml-1">11 attempts</span>
+            </div>
+
+            <!-- Compact Telemetry Stats Row -->
+            <div class="flex items-center gap-4 text-xs font-mono">
+              <div class="hidden sm:block"><span class="text-slate-500">PLAYS:</span> <span class="font-bold text-slate-200">11</span></div>
+              <div><span class="text-slate-500">BUZZ:</span> <span class="font-bold text-slate-200">10</span></div>
+              <div><span class="text-slate-500">CONV:</span> <span class="font-bold text-cyan-400">90%</span></div>
+              <div><span class="text-slate-500">ACC:</span> <span class="font-bold text-emerald-400">82%</span></div>
+              <div><span class="text-slate-500">AVG:</span> <span class="text-slate-300">@67%</span></div>
+              <div><span class="text-slate-500">CELERITY:</span> <span class="text-slate-300">@67%</span></div>
+              <i class="ph ph-caret-down text-slate-400 transition-transform duration-200 accordion-arrow"></i>
+            </div>
+          </div>
+
+          <!-- Question Body (Revealed on click) -->
+          <div class="accordion-content border-t border-slate-800/80 p-4 bg-[#0a0f1d] space-y-3">
+            <!-- Full telemetry grid if granular breakdown is needed -->
+            <div class="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-9 gap-2 text-center text-xs font-mono py-2 bg-[#060912] rounded-lg border border-slate-800/60">
+              <div><p class="text-[10px] text-slate-500">PLAYS</p><p class="font-bold text-slate-200">11</p></div>
+              <div><p class="text-[10px] text-slate-500">BUZZES</p><p class="font-bold text-slate-200">10</p></div>
+              <div><p class="text-[10px] text-slate-500">CORRECT</p><p class="font-bold text-emerald-400">9</p></div>
+              <div><p class="text-[10px] text-slate-500">INTERRUPTS</p><p class="font-bold text-amber-400">4</p></div>
+              <div><p class="text-[10px] text-slate-500">CONVERSION</p><p class="font-bold text-cyan-400">90%</p></div>
+              <div><p class="text-[10px] text-slate-500">ACCURACY</p><p class="font-bold text-emerald-400">82%</p></div>
+              <div><p class="text-[10px] text-slate-500">POWER</p><p class="text-slate-400">-</p></div>
+              <div><p class="text-[10px] text-slate-500">NEG</p><p class="font-bold text-slate-400">0%</p></div>
+              <div><p class="text-[10px] text-slate-500">AVG BUZZ</p><p class="text-cyan-300">@67%</p></div>
+            </div>
+
+            <!-- Question Text with Buzzpoint Highlights -->
+            <div class="p-3 bg-[#0d1527] rounded-lg border border-slate-800 text-sm font-sans leading-relaxed text-slate-200">
+              Chemistry Multiple Choice For which of the following processes is the change in entropy negative 
+              <span class="text-slate-400 font-mono">W</span> Water 
+              <span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500 font-mono text-xs font-bold shadow-sm">freezing</span> 
+              <span class="text-slate-400 font-mono ml-2">X</span> Dry 
+              <span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500 font-mono text-xs font-bold shadow-sm">ice sublimation</span> 
+              <span class="text-slate-400 font-mono ml-2">Y</span> Salt dissolving in water 
+              <span class="text-slate-400 font-mono ml-2">Z</span> Gasoline burning
+            </div>
+
+            <!-- Meta bar & Answer target -->
+            <div class="flex flex-wrap items-center justify-between text-xs font-mono pt-1 text-slate-400">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 bg-rose-950/80 border border-rose-800 text-rose-300 rounded">END &bull; 6</span>
+                <span class="px-2 py-0.5 bg-slate-900 border border-slate-800 text-slate-400 rounded">NO BUZZ &bull; 1</span>
+              </div>
+              <div class="text-right">
+                <span class="text-slate-500">TARGET:</span> 
+                <span class="text-emerald-400 font-bold ml-1">W. WATER FREEZING</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- QUESTION CARD 2: Biology Q2 -->
+        <div class="question-card bg-[#0d1527] rounded-xl border border-slate-800 overflow-hidden transition" data-subject="Biology">
+          <!-- Accordion Header -->
+          <div onclick="toggleAccordion(this)" class="p-3.5 flex flex-wrap items-center justify-between gap-3 cursor-pointer hover:bg-slate-800/40 select-none">
+            
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/60 font-mono text-xs font-semibold">Biology</span>
+              <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-xs">Tossup &bull; SA</span>
+              <span class="text-amber-400 font-mono font-bold text-xs">Q2</span>
+              <span class="text-slate-500 font-mono text-[11px] ml-1">11 attempts</span>
+            </div>
+
+            <!-- Compact Telemetry Stats Row -->
+            <div class="flex items-center gap-4 text-xs font-mono">
+              <div class="hidden sm:block"><span class="text-slate-500">PLAYS:</span> <span class="font-bold text-slate-200">11</span></div>
+              <div><span class="text-slate-500">BUZZ:</span> <span class="font-bold text-slate-200">10</span></div>
+              <div><span class="text-slate-500">CONV:</span> <span class="font-bold text-cyan-400">70%</span></div>
+              <div><span class="text-slate-500">ACC:</span> <span class="font-bold text-emerald-400">64%</span></div>
+              <div><span class="text-slate-500">AVG:</span> <span class="text-slate-300">@84%</span></div>
+              <div><span class="text-slate-500">CELERITY:</span> <span class="text-slate-300">@84%</span></div>
+              <i class="ph ph-caret-down text-slate-400 transition-transform duration-200 accordion-arrow"></i>
+            </div>
+          </div>
+
+          <!-- Question Body (Hidden collapsed by default) -->
+          <div class="accordion-content hidden border-t border-slate-800/80 p-4 bg-[#0a0f1d] space-y-3">
+            <div class="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-9 gap-2 text-center text-xs font-mono py-2 bg-[#060912] rounded-lg border border-slate-800/60">
+              <div><p class="text-[10px] text-slate-500">PLAYS</p><p class="font-bold text-slate-200">11</p></div>
+              <div><p class="text-[10px] text-slate-500">BUZZES</p><p class="font-bold text-slate-200">10</p></div>
+              <div><p class="text-[10px] text-slate-500">CORRECT</p><p class="font-bold text-emerald-400">7</p></div>
+              <div><p class="text-[10px] text-slate-500">INTERRUPTS</p><p class="font-bold text-amber-400">3</p></div>
+              <div><p class="text-[10px] text-slate-500">CONVERSION</p><p class="font-bold text-cyan-400">70%</p></div>
+              <div><p class="text-[10px] text-slate-500">ACCURACY</p><p class="font-bold text-emerald-400">64%</p></div>
+              <div><p class="text-[10px] text-slate-500">POWER</p><p class="text-slate-400">-</p></div>
+              <div><p class="text-[10px] text-slate-500">NEG</p><p class="font-bold text-slate-400">0%</p></div>
+              <div><p class="text-[10px] text-slate-500">AVG BUZZ</p><p class="text-cyan-300">@84%</p></div>
+            </div>
+
+            <div class="p-3 bg-[#0d1527] rounded-lg border border-slate-800 text-sm font-sans leading-relaxed text-slate-200">
+              Short Answer What organelle is primarily responsible for generating adenosine triphosphate 
+              <span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500 font-mono text-xs font-bold">ATP</span> through cellular respiration?
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between text-xs font-mono pt-1 text-slate-400">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 bg-rose-950/80 border border-rose-800 text-rose-300 rounded">END &bull; 4</span>
+                <span class="px-2 py-0.5 bg-slate-900 border border-slate-800 text-slate-400 rounded">NO BUZZ &bull; 1</span>
+              </div>
+              <div class="text-right">
+                <span class="text-slate-500">TARGET:</span> 
+                <span class="text-emerald-400 font-bold ml-1">MITOCHONDRIA</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- QUESTION CARD 3: Physics Q3 -->
+        <div class="question-card bg-[#0d1527] rounded-xl border border-slate-800 overflow-hidden transition" data-subject="Physics">
+          <div onclick="toggleAccordion(this)" class="p-3.5 flex flex-wrap items-center justify-between gap-3 cursor-pointer hover:bg-slate-800/40 select-none">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800/60 font-mono text-xs font-semibold">Physics</span>
+              <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-xs">Tossup &bull; MC</span>
+              <span class="text-amber-400 font-mono font-bold text-xs">Q3</span>
+              <span class="text-slate-500 font-mono text-[11px] ml-1">11 attempts</span>
+            </div>
+
+            <div class="flex items-center gap-4 text-xs font-mono">
+              <div class="hidden sm:block"><span class="text-slate-500">PLAYS:</span> <span class="font-bold text-slate-200">11</span></div>
+              <div><span class="text-slate-500">BUZZ:</span> <span class="font-bold text-slate-200">9</span></div>
+              <div><span class="text-slate-500">CONV:</span> <span class="font-bold text-cyan-400">82%</span></div>
+              <div><span class="text-slate-500">ACC:</span> <span class="font-bold text-emerald-400">78%</span></div>
+              <div><span class="text-slate-500">AVG:</span> <span class="text-slate-300">@55%</span></div>
+              <div><span class="text-slate-500">CELERITY:</span> <span class="text-slate-300">@59%</span></div>
+              <i class="ph ph-caret-down text-slate-400 transition-transform duration-200 accordion-arrow"></i>
+            </div>
+          </div>
+
+          <div class="accordion-content hidden border-t border-slate-800/80 p-4 bg-[#0a0f1d] space-y-3">
+            <div class="p-3 bg-[#0d1527] rounded-lg border border-slate-800 text-sm font-sans leading-relaxed text-slate-200">
+              Multiple Choice If two point charges are doubled in magnitude and the distance between them is halved, by what factor is the electrostatic force multiplied?
+              <span class="text-slate-400 font-mono ml-2">W</span> 4 
+              <span class="text-slate-400 font-mono ml-2">X</span> 8 
+              <span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500 font-mono text-xs font-bold shadow-sm ml-2">Y 16</span> 
+              <span class="text-slate-400 font-mono ml-2">Z</span> 32
+            </div>
+            <div class="flex items-center justify-between text-xs font-mono pt-1 text-slate-400">
+              <span class="px-2 py-0.5 bg-rose-950/80 border border-rose-800 text-rose-300 rounded">END &bull; 8</span>
+              <span class="text-right">TARGET: <strong class="text-emerald-400">Y. 16</strong></span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Interactive Toast Notification -->
+  <div id="toast" class="fixed bottom-6 right-6 bg-[#0f172a] border border-cyan-400/50 text-cyan-200 px-4 py-2.5 rounded-lg shadow-xl font-mono text-xs flex items-center gap-2 transform translate-y-20 opacity-0 transition-all duration-300">
+    <i class="ph-bold ph-check-circle text-emerald-400 text-base"></i>
+    <span id="toastMsg">Action completed</span>
+  </div>
+
+  <!-- JavaScript Telemetry & Interactive UX Logic -->
+  <script>
+    // Raw dataset matching the user's screenshots
+    const candidatesData = [
+      { id: 1, name: 'Leela', heard: 25, buzzed: 21, bio: 2.4, chm: 1.6, phy: 4.0, mth: 2.0, ess: 2.0, egy: 1.3, acc: 67, cor: 14, inc: 7, negs: 0, pts: 56, speed: 100, spec: 'Physics' },
+      { id: 2, name: 'Akhil', heard: 25, buzzed: 23, bio: 1.6, chm: 1.6, phy: 3.0, mth: 1.0, ess: 1.0, egy: 2.7, acc: 48, cor: 11, inc: 12, negs: 0, pts: 44, speed: 91, spec: 'Physics' },
+      { id: 3, name: 'Ryan.H', heard: 25, buzzed: 18, bio: 4.0, chm: 2.4, phy: 0.0, mth: 1.0, ess: 0.0, egy: 2.7, acc: 61, cor: 11, inc: 7, negs: 0, pts: 44, speed: 88, spec: 'Biology' },
+      { id: 4, name: 'aw', heard: 25, buzzed: 25, bio: 2.4, chm: 2.4, phy: 1.0, mth: 1.0, ess: 2.0, egy: 0.0, acc: 60, cor: 15, inc: 5, negs: 5, pts: 40, speed: 76, spec: 'Biology' },
+      { id: 5, name: 'CHARAN', heard: 25, buzzed: 23, bio: 1.6, chm: 0.8, phy: 0.0, mth: 2.0, ess: 4.0, egy: 1.3, acc: 52, cor: 12, inc: 9, negs: 2, pts: 40, speed: 94, spec: 'Earth' },
+      { id: 6, name: 'johann tsundere', heard: 25, buzzed: 25, bio: 2.4, chm: 0.0, phy: 2.0, mth: 3.0, ess: 1.0, egy: 1.3, acc: 56, cor: 14, inc: 7, negs: 4, pts: 40, speed: 68, spec: 'Math' },
+      { id: 7, name: 'Aaditya N', heard: 25, buzzed: 24, bio: 0.8, chm: 2.4, phy: 1.0, mth: 0.0, ess: 2.0, egy: 2.7, acc: 38, cor: 9, inc: 15, negs: 0, pts: 36, speed: 100, spec: 'Energy' },
+      { id: 8, name: 'Hi Ding its Joel', heard: 25, buzzed: 17, bio: 0.8, chm: 2.4, phy: 1.0, mth: 0.0, ess: 1.0, egy: 4.0, acc: 53, cor: 9, inc: 8, negs: 0, pts: 36, speed: 75, spec: 'Energy' },
+      { id: 9, name: 'dinguspingus', heard: 25, buzzed: 25, bio: 0.8, chm: 1.6, phy: -1.0, mth: 2.0, ess: 2.0, egy: 0.0, acc: 48, cor: 12, inc: 7, negs: 6, pts: 24, speed: 80, spec: 'Math' },
+      { id: 10, name: 'david', heard: 21, buzzed: 21, bio: 1.0, chm: 2.0, phy: 2.7, mth: 2.7, ess: -1.0, egy: -2.7, acc: 48, cor: 10, inc: 5, negs: 6, pts: 16, speed: 75, spec: 'Physics' },
+      { id: 11, name: 'Leyla', heard: 25, buzzed: 10, bio: 1.6, chm: 0.8, phy: 1.0, mth: 0.0, ess: -1.0, egy: 1.3, acc: 60, cor: 6, inc: 2, negs: 2, pts: 16, speed: 83, spec: 'Biology' }
+    ];
+
+    // Teams State (0/4 slots max)
+    const teams = {
+      1: [],
+      2: [],
+      3: []
+    };
+
+    let activeFilter = 'All';
+    let draggedCandidateId = null;
+
+    // Calculate Overall PPTH (Points Per Tossup Heard)
+    function calculateOverallPPTH(candidate) {
+      return (candidate.pts / candidate.heard).toFixed(2);
+    }
+
+    // Helper to get styled badge for player's primary specialty
+    function getSpecialtyBadge(spec) {
+      const colorMap = {
+        'Physics': 'bg-cyan-950 text-cyan-300 border-cyan-800/60',
+        'Biology': 'bg-emerald-950 text-emerald-300 border-emerald-800/60',
+        'Math': 'bg-blue-950 text-blue-300 border-blue-800/60',
+        'Earth': 'bg-amber-950 text-amber-300 border-amber-800/60',
+        'Energy': 'bg-purple-950 text-purple-300 border-purple-800/60'
+      };
+      const classes = colorMap[spec] || 'bg-slate-900 text-slate-300 border-slate-700';
+      return `<span class="px-2 py-0.5 rounded text-[10px] font-bold border ${classes}">${spec}</span>`;
+    }
+
+    // Render Candidates Table
+    function renderCandidatesTable() {
+      const tbody = document.getElementById('candidatesTbody');
+      tbody.innerHTML = '';
+
+      const filtered = candidatesData.filter(c => {
+        if (activeFilter === 'All') return true;
+        if (activeFilter === 'Earth') return c.spec === 'Earth';
+        return c.spec.toLowerCase() === activeFilter.toLowerCase();
+      });
+
+      document.getElementById('filteredCount').innerText = `Showing ${filtered.length} candidate${filtered.length === 1 ? '' : 's'}`;
+
+      filtered.forEach(c => {
+        const overallPPTH = calculateOverallPPTH(c);
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-800/40 transition group draggable-card";
+        tr.draggable = true;
+        tr.id = `candidate-row-${c.id}`;
+        
+        // Drag events
+        tr.ondragstart = (e) => {
+          draggedCandidateId = c.id;
+          e.dataTransfer.setData('text/plain', c.id);
+          tr.classList.add('opacity-40');
+        };
+        tr.ondragend = () => {
+          tr.classList.remove('opacity-40');
+        };
+
+        tr.innerHTML = `
+          <!-- Name & Buzzer details -->
+          <td class="py-2.5 px-3">
+            <div class="flex items-center gap-2">
+              <i class="ph ph-dots-six-vertical text-slate-600 group-hover:text-cyan-400 cursor-grab"></i>
+              <div>
+                <span class="font-bold text-white group-hover:text-cyan-300 transition">${c.name}</span>
+                <div class="text-[10px] text-slate-500">${c.heard} heard &bull; ${c.buzzed} buzzed</div>
+              </div>
+            </div>
+          </td>
+
+          <!-- Overall PPTH -->
+          <td class="py-2.5 px-2 text-center">
+            <span class="px-2 py-0.5 rounded font-bold ${overallPPTH >= 2.0 ? 'bg-cyan-950 text-cyan-300 border border-cyan-800/50' : 'text-slate-300'}">
+              ${overallPPTH}
+            </span>
+          </td>
+
+          <!-- Specialty Role Column -->
+          <td class="py-2.5 px-2 text-center col-specialty">
+            ${getSpecialtyBadge(c.spec)}
+          </td>
+
+          <!-- Raw Subject Columns (toggled via checkbox) -->
+          <td class="py-2.5 px-2 text-center hidden raw-col font-mono ${c.bio >= 2.4 ? 'text-emerald-400 font-bold' : 'text-slate-400'}">${c.bio.toFixed(1)}</td>
+          <td class="py-2.5 px-2 text-center hidden raw-col font-mono ${c.chm >= 2.0 ? 'text-emerald-400 font-bold' : 'text-slate-400'}">${c.chm.toFixed(1)}</td>
+          <td class="py-2.5 px-2 text-center hidden raw-col font-mono ${c.phy >= 2.5 ? 'text-emerald-400 font-bold' : (c.phy < 0 ? 'text-rose-400' : 'text-slate-400')}">${c.phy.toFixed(1)}</td>
+          <td class="py-2.5 px-2 text-center hidden raw-col font-mono ${c.mth >= 2.5 ? 'text-emerald-400 font-bold' : 'text-slate-400'}">${c.mth.toFixed(1)}</td>
+          <td class="py-2.5 px-2 text-center hidden raw-col font-mono ${c.ess >= 2.5 ? 'text-emerald-400 font-bold' : (c.ess < 0 ? 'text-rose-400' : 'text-slate-400')}">${c.ess.toFixed(1)}</td>
+          <td class="py-2.5 px-2 text-center hidden raw-col font-mono ${c.egy >= 2.5 ? 'text-emerald-400 font-bold' : (c.egy < 0 ? 'text-rose-400' : 'text-slate-400')}">${c.egy.toFixed(1)}</td>
+
+          <!-- Accuracy -->
+          <td class="py-2.5 px-2 text-center text-slate-300">${c.acc}%</td>
+
+          <!-- Points -->
+          <td class="py-2.5 px-2 text-center font-bold text-emerald-400">+${c.pts}</td>
+
+          <!-- Negs -->
+          <td class="py-2.5 px-2 text-center font-bold ${c.negs > 0 ? 'text-rose-400' : 'text-slate-500'}">${c.negs}</td>
+
+          <!-- Speed -->
+          <td class="py-2.5 px-2 text-center text-slate-300">${c.speed}%</td>
+
+          <!-- Quick Assign Click Buttons (Alternative to Drag) -->
+          <td class="py-2.5 px-2 text-center">
+            <div class="flex items-center justify-center gap-1">
+              <button onclick="assignCandidate(${c.id}, 1)" title="Assign to Team 1" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-cyan-400 text-[10px] font-bold transition">+T1</button>
+              <button onclick="assignCandidate(${c.id}, 2)" title="Assign to Team 2" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-rose-500 hover:text-white text-rose-400 text-[10px] font-bold transition">+T2</button>
+              <button onclick="assignCandidate(${c.id}, 3)" title="Assign to Team 3" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-emerald-400 text-[10px] font-bold transition">+T3</button>
+            </div>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+      syncRawColsState();
+    }
+
+    // Toggle Raw PPTH columns
+    function toggleRawColumnsMode() {
+      const isChecked = document.getElementById('toggleRawColumns').checked;
+      const rawCols = document.querySelectorAll('.raw-col');
+
+      if (isChecked) {
+        rawCols.forEach(col => col.classList.remove('hidden'));
+      } else {
+        rawCols.forEach(col => col.classList.add('hidden'));
+      }
+    }
+
+    function syncRawColsState() {
+      const isChecked = document.getElementById('toggleRawColumns').checked;
+      const rawCols = document.querySelectorAll('.raw-col');
+      if (isChecked) {
+        rawCols.forEach(col => col.classList.remove('hidden'));
+      } else {
+        rawCols.forEach(col => col.classList.add('hidden'));
+      }
+    }
+
+    // DRAG AND DROP HANDLERS
+    function handleDragOver(e) {
+      e.preventDefault();
+      e.currentTarget.classList.add('drag-over');
+    }
+
+    function handleDragLeave(e) {
+      e.currentTarget.classList.remove('drag-over');
+    }
+
+    function handleDrop(e, teamId) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over');
+      const candId = parseInt(e.dataTransfer.getData('text/plain') || draggedCandidateId);
+      if (candId) {
+        assignCandidate(candId, teamId);
+      }
+    }
+
+    // Assign candidate to team
+    function assignCandidate(candidateId, teamId) {
+      const candidate = candidatesData.find(c => c.id === candidateId);
+      if (!candidate) return;
+
+      // Remove from existing teams first
+      [1, 2, 3].forEach(t => {
+        teams[t] = teams[t].filter(c => c.id !== candidateId);
+      });
+
+      // Check max roster limit (4 slots)
+      if (teams[teamId].length >= 4) {
+        simulateToast(`Team ${teamId} is already full (4/4)!`);
+        renderTeams();
+        return;
+      }
+
+      teams[teamId].push(candidate);
+      renderTeams();
+      simulateToast(`Assigned ${candidate.name} to Team ${teamId}`);
+    }
+
+    // Remove candidate from team
+    function removeFromTeam(candidateId, teamId) {
+      teams[teamId] = teams[teamId].filter(c => c.id !== candidateId);
+      renderTeams();
+      simulateToast(`Removed candidate from Team ${teamId}`);
+    }
+
+    function resetAllTeams() {
+      teams[1] = [];
+      teams[2] = [];
+      teams[3] = [];
+      renderTeams();
+      simulateToast("Reset all team rosters");
+    }
+
+    // Render Team Roster UI Cards & Coverage
+    function renderTeams() {
+      [1, 2, 3].forEach(teamId => {
+        const teamList = teams[teamId];
+        const container = document.getElementById(`teamSlots${teamId}`);
+        const countBadge = document.getElementById(`teamCount${teamId}`);
+        const covBadge = document.getElementById(`teamCov${teamId}`);
+        const subjsContainer = document.getElementById(`teamSubjects${teamId}`);
+
+        countBadge.innerText = `(${teamList.length}/4)`;
+
+        // Calculate coverage
+        const subjectsPresent = new Set();
+        teamList.forEach(c => {
+          if (c.bio > 1.5) subjectsPresent.add('bio');
+          if (c.chm > 1.5) subjectsPresent.add('chm');
+          if (c.phy > 1.5) subjectsPresent.add('phy');
+          if (c.mth > 1.5) subjectsPresent.add('mth');
+          if (c.ess > 1.5) subjectsPresent.add('ess');
+          if (c.egy > 1.5) subjectsPresent.add('egy');
+        });
+
+        const covPercent = Math.round((subjectsPresent.size / 6) * 100);
+        covBadge.innerText = `${covPercent}% COV`;
+
+        // Update mini coverage pills
+        subjsContainer.innerHTML = `
+          <div>BIO <span class="${subjectsPresent.has('bio') ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${subjectsPresent.has('bio') ? '✓' : '0%'}</span></div>
+          <div>CHM <span class="${subjectsPresent.has('chm') ? 'text-teal-400 font-bold' : 'text-slate-500'}">${subjectsPresent.has('chm') ? '✓' : '0%'}</span></div>
+          <div>PHY <span class="${subjectsPresent.has('phy') ? 'text-cyan-400 font-bold' : 'text-slate-500'}">${subjectsPresent.has('phy') ? '✓' : '0%'}</span></div>
+          <div>MTH <span class="${subjectsPresent.has('mth') ? 'text-blue-400 font-bold' : 'text-slate-500'}">${subjectsPresent.has('mth') ? '✓' : '0%'}</span></div>
+          <div>ESS <span class="${subjectsPresent.has('ess') ? 'text-amber-400 font-bold' : 'text-slate-500'}">${subjectsPresent.has('ess') ? '✓' : '0%'}</span></div>
+          <div>EGY <span class="${subjectsPresent.has('egy') ? 'text-purple-400 font-bold' : 'text-slate-500'}">${subjectsPresent.has('egy') ? '✓' : '0%'}</span></div>
+        `;
+
+        if (teamList.length === 0) {
+          container.innerHTML = `
+            <div class="empty-placeholder text-center text-slate-600 text-xs font-mono py-8 border border-dashed border-slate-800 rounded-lg">
+              Drop candidates here or click [+T${teamId}]
+            </div>
+          `;
+        } else {
+          container.innerHTML = '';
+          teamList.forEach(c => {
+            const row = document.createElement('div');
+            row.className = "flex items-center justify-between p-2 rounded-lg bg-[#090d18] border border-slate-800 text-xs font-mono hover:border-slate-700 transition";
+            row.innerHTML = `
+              <div class="flex items-center gap-2">
+                <span class="w-1.5 h-1.5 rounded-full ${teamId === 1 ? 'bg-cyan-400' : (teamId === 2 ? 'bg-rose-400' : 'bg-emerald-400')}"></span>
+                <span class="font-bold text-white">${c.name}</span>
+                <span class="text-[10px] text-slate-400">(${c.spec})</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-emerald-400 font-bold">+${c.pts}</span>
+                <button onclick="removeFromTeam(${c.id}, ${teamId})" class="text-slate-500 hover:text-red-400 transition" title="Remove">
+                  <i class="ph ph-trash"></i>
+                </button>
+              </div>
+            `;
+            container.appendChild(row);
+          });
+
+          // If there are unfilled slots, show ghost slots
+          for (let i = teamList.length; i < 4; i++) {
+            const ghost = document.createElement('div');
+            ghost.className = "p-2 rounded-lg border border-dashed border-slate-800/80 text-[11px] text-slate-600 font-mono text-center";
+            ghost.innerText = `+ Slot ${i + 1} Open`;
+            container.appendChild(ghost);
+          }
+        }
+      });
+    }
+
+    // Filter Candidates by Subject
+    function filterCandidates(subject) {
+      activeFilter = subject;
+      document.querySelectorAll('.subject-filter').forEach(btn => {
+        if (btn.innerText.includes(subject) || (subject === 'Earth' && btn.innerText.includes('Earth'))) {
+          btn.className = 'subject-filter px-2.5 py-1 rounded bg-cyan-400 text-slate-950 font-bold font-mono transition';
+        } else {
+          btn.className = 'subject-filter px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono transition';
+        }
+      });
+      renderCandidatesTable();
+    }
+
+    // QUESTION BUZZPOINTS FILTERING (SUGGESTION 4)
+    function filterQuestionsBySubject(subject) {
+      const cards = document.querySelectorAll('.question-card');
+      document.querySelectorAll('.q-subj-btn').forEach(btn => {
+        if (btn.innerText.toLowerCase().includes(subject.toLowerCase())) {
+          btn.className = 'q-subj-btn px-2.5 py-1 rounded bg-cyan-400 text-slate-950 font-bold font-mono transition';
+        } else {
+          btn.className = 'q-subj-btn px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono transition';
+        }
+      });
+
+      cards.forEach(card => {
+        if (subject === 'All' || card.dataset.subject.toLowerCase() === subject.toLowerCase()) {
+          card.classList.remove('hidden');
+        } else {
+          card.classList.add('hidden');
+        }
+      });
+    }
+
+    // Buzzer Pill selection
+    function selectBuzzer(name) {
+      document.querySelectorAll('.buzzer-pill').forEach(pill => {
+        if (pill.innerText.trim() === name) {
+          pill.className = 'buzzer-pill px-3 py-1 rounded border border-cyan-400 neon-pill-active whitespace-nowrap transition';
+        } else {
+          pill.className = 'buzzer-pill px-3 py-1 rounded border border-slate-800 bg-[#090d18] text-slate-300 hover:border-slate-600 whitespace-nowrap transition';
+        }
+      });
+      simulateToast(`Telemetry filtered to buzzer: ${name}`);
+    }
+
+    // Accordion Toggle for Question Cards
+    function toggleAccordion(headerEl) {
+      const content = headerEl.parentElement.querySelector('.accordion-content');
+      const arrow = headerEl.querySelector('.accordion-arrow');
+      if (content.classList.contains('hidden')) {
+        content.classList.remove('hidden');
+        arrow.style.transform = 'rotate(180deg)';
+      } else {
+        content.classList.add('hidden');
+        arrow.style.transform = 'rotate(0deg)';
+      }
+    }
+
+    function toggleAllAccordions(expand) {
+      document.querySelectorAll('.question-card').forEach(card => {
+        const content = card.querySelector('.accordion-content');
+        const arrow = card.querySelector('.accordion-arrow');
+        if (expand) {
+          content.classList.remove('hidden');
+          if (arrow) arrow.style.transform = 'rotate(180deg)';
+        } else {
+          content.classList.add('hidden');
+          if (arrow) arrow.style.transform = 'rotate(0deg)';
+        }
+      });
+    }
+
+    // Tab Switcher
+    function switchTab(tabId) {
+      const viewBuzz = document.getElementById('viewBuzzpoints');
+      const viewTeam = document.getElementById('viewTeamBuilder');
+      const btnBuzz = document.getElementById('tabBuzzpoints');
+      const btnTeam = document.getElementById('tabTeamBuilder');
+
+      if (tabId === 'buzzpoints') {
+        viewBuzz.classList.remove('hidden');
+        viewTeam.classList.add('hidden');
+        btnBuzz.className = 'px-4 py-2 rounded-lg transition font-bold bg-cyan-400 text-slate-950 shadow-md flex items-center gap-2';
+        btnTeam.className = 'px-4 py-2 rounded-lg transition font-bold text-slate-400 hover:text-white flex items-center gap-2';
+        document.getElementById('activeDatasetLabel').innerText = 'Telemetry: 271 Attempts Active';
+      } else {
+        viewBuzz.classList.add('hidden');
+        viewTeam.classList.remove('hidden');
+        btnTeam.className = 'px-4 py-2 rounded-lg transition font-bold bg-cyan-400 text-slate-950 shadow-md flex items-center gap-2';
+        btnBuzz.className = 'px-4 py-2 rounded-lg transition font-bold text-slate-400 hover:text-white flex items-center gap-2';
+        document.getElementById('activeDatasetLabel').innerText = 'Dataset: 11 Candidates Active';
+      }
+    }
+
+    // Ingestion Drawer toggling
+    const toggleIngestionBtn = document.getElementById('toggleIngestionBtn');
+    const closeDrawerBtn = document.getElementById('closeDrawerBtn');
+    const expandedDrawer = document.getElementById('expandedIngestionDrawer');
+
+    toggleIngestionBtn.addEventListener('click', () => {
+      expandedDrawer.classList.toggle('hidden');
+    });
+
+    closeDrawerBtn.addEventListener('click', () => {
+      expandedDrawer.classList.add('hidden');
+    });
+
+    function updateBoardCode() {
+      const newCode = document.getElementById('inputBoardCode').value;
+      if (newCode) {
+        document.getElementById('activeBoardCode').innerText = newCode;
+        expandedDrawer.classList.add('hidden');
+        simulateToast(`Loaded fresh board: ${newCode}`);
+      }
+    }
+
+    function clearData() {
+      simulateToast("Dataset cleared. Board returned to standby.");
+    }
+
+    // Toast helper
+    let toastTimeout = null;
+    function simulateToast(msg) {
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toastMsg');
+      toastMsg.innerText = msg;
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      toast.classList.add('translate-y-0', 'opacity-100');
+
+      if (toastTimeout) clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.remove('translate-y-0', 'opacity-100');
+        toast.classList.add('translate-y-20', 'opacity-0');
+      }, 2500);
+    }
+
+    // Live clock update
+    setInterval(() => {
+      const now = new Date();
+      document.getElementById('liveClock').innerText = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }, 1000);
+
+    // Initial boot
+    window.addEventListener('DOMContentLoaded', () => {
+      renderCandidatesTable();
+      renderTeams();
+    });
+  </script>
+</body>
+</html>

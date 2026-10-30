@@ -1591,81 +1591,144 @@
       </div>
       </div>
 
-      <!-- ============ BUZZBOARD CSV — two pages: question buzzpoints + numerical data ============ -->
+      <!-- ============ BUZZBOARD / CHALLENGE STATS — two pages: question buzzpoints + team builder ============ -->
       <div id="analytics-panel-buzzboard" class="hidden">
-        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <span id="bbx-status-text" class="text-xs text-slate-400 font-mono uppercase">SYSTEM READY // WAITING FOR A BUZZBOARD CSV OR CHALLENGE CODE</span>
-          <div class="flex items-center gap-2">
-            <!-- The whole live control: whether the loaded board is following the members,
-                 and one click to stop or resume it. Hidden until a board is loaded. -->
-            <button type="button" id="bbx-live-toggle" class="hidden bg-black border border-neonGreen text-neonGreen px-2 py-1 rounded text-[10px] font-mono font-black uppercase tracking-wider transition hover:bg-neonGreen/10 active:scale-95">
-              Live
-            </button>
-            <span id="bbx-count-badge" class="hidden bg-black text-slate-300 border border-borderDark px-2 py-1 rounded text-xs font-mono font-bold">0 ROWS LOADED</span>
-            <button type="button" onclick="resetBuzzboardAnalytics()" class="bg-black border border-borderDark text-slate-300 px-3 py-1.5 rounded-xl text-xs uppercase font-bold transition hover:border-neonPink hover:text-neonPink">Clear Data</button>
-          </div>
-        </div>
 
-        <!-- The board is already on the server under its code, so a captain never has to
-             download the CSV and hand it back just to read it here. -->
-        <div class="flex flex-wrap items-center gap-2 mb-3">
-          <label class="text-[11px] font-mono text-slate-500 uppercase" for="bbx-challenge-code">Load a board by code</label>
-          <input id="bbx-challenge-code" type="text" autocomplete="off" placeholder="challenge code" class="px-2.5 py-1 rounded border border-borderDark bg-black text-xs text-neonCyan font-mono placeholder-slate-600 focus:outline-none focus:border-neonCyan w-40">
-          <button type="button" id="bbx-load-board" class="bg-black border border-neonAmber text-neonAmber hover:bg-neonAmber/10 text-[11px] font-mono font-black uppercase px-2.5 py-1 rounded transition active:scale-95">Load board</button>
-          <span class="text-[10px] font-mono text-slate-600">Your own challenge &mdash; the server sends the same rows the CSV holds, and the board keeps itself current while you watch it.</span>
-        </div>
+        <!-- COMPACT INGESTION BAR: board identity, rows, live state and one button to the drawer -->
+        <section class="bg-panel border border-borderDark rounded-xl overflow-hidden">
+          <div class="p-3 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+            <div class="flex flex-wrap items-center gap-2.5">
+              <span id="bbx-connection-pill" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black border border-neonGreen/40 text-neonGreen font-semibold tracking-wide">
+                <span id="bbx-connection-dot" class="w-2 h-2 rounded-full bg-slate-600"></span>
+                <span id="bbx-connection-label">STANDBY</span>
+              </span>
+              <!-- The live control: whether the loaded board is following the members, and one
+                   click to stop or resume it. Hidden until a board is loaded. -->
+              <button type="button" id="bbx-live-toggle" class="hidden bg-black border border-neonGreen text-neonGreen px-2 py-1 rounded text-[10px] font-mono font-black uppercase tracking-wider transition hover:bg-neonGreen/10 active:scale-95">Live</button>
+              <span class="text-slate-700">|</span>
+              <div class="flex items-center gap-2 bg-black px-2.5 py-1 rounded-md border border-borderDark">
+                <span class="text-slate-500">BOARD:</span>
+                <span id="bbx-active-code" class="text-neonCyan font-bold tracking-wider">&mdash;</span>
+                <span class="text-slate-700">&middot;</span>
+                <span id="bbx-count-badge" class="hidden text-slate-300">0 ROWS</span>
+              </div>
+              <button type="button" id="bbx-toggle-drawer" onclick="bbxToggleDrawer()" class="text-neonCyan hover:text-white bg-black border border-neonCyan/40 hover:border-neonCyan px-2.5 py-1 rounded-md transition active:scale-95">Change board / Ingest CSV</button>
+            </div>
+            <button type="button" onclick="resetBuzzboardAnalytics()" class="bg-black border border-borderDark text-slate-300 px-2.5 py-1 rounded-md uppercase font-bold transition hover:border-neonPink hover:text-neonPink">Clear data</button>
+          </div>
+          <p id="bbx-status-text" class="px-3 pb-2 text-[10px] font-mono text-slate-500 uppercase tracking-wide">SYSTEM READY // WAITING FOR A BUZZBOARD CSV OR CHALLENGE CODE</p>
+
+          <!-- Expandable ingestion drawer: load by code or drop the exported CSV. -->
+          <div id="bbx-ingestion-drawer" class="hidden border-t border-borderDark p-4 bg-black/50">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div class="space-y-2">
+                <label class="text-[10px] font-mono text-slate-400 tracking-wider uppercase" for="bbx-challenge-code">Load a board by code</label>
+                <div class="flex gap-2">
+                  <input id="bbx-challenge-code" type="text" autocomplete="off" placeholder="challenge code" class="w-full min-w-0 bg-black border border-borderDark rounded-lg px-3 py-1.5 text-sm font-mono text-neonCyan placeholder-slate-600 focus:outline-none focus:border-neonCyan">
+                  <button type="button" id="bbx-load-board" class="bg-neonAmber hover:bg-amber-300 text-black px-3.5 py-1.5 rounded-lg text-[10px] font-mono font-black uppercase tracking-wide transition active:scale-95">Load</button>
+                </div>
+                <p class="text-[10px] text-slate-500 font-mono">Your own challenge &mdash; rows come from the server and stay live while you watch.</p>
+              </div>
+              <div id="bbx-drop-zone" onclick="document.getElementById('bbx-file-input').click()" class="md:col-span-2 border-2 border-dashed border-borderDark hover:border-neonAmber rounded-xl p-4 flex flex-col items-center justify-center text-center cursor-pointer bg-black/40 hover:bg-panelHover transition-all min-h-[110px]">
+                <b class="text-[11px] font-mono text-slate-200 uppercase">Drop Buzzboard CSVs or click to browse</b>
+                <span class="text-[10px] text-slate-500 mt-1 font-mono">Download one from the Buzzpoint Board &mdash; select several to combine</span>
+              </div>
+              <input type="file" id="bbx-file-input" accept=".csv" multiple class="hidden">
+            </div>
+            <div class="flex justify-end mt-2">
+              <button type="button" onclick="bbxToggleDrawer(false)" class="text-[10px] font-mono text-slate-400 hover:text-white underline">Collapse drawer &uarr;</button>
+            </div>
+          </div>
+        </section>
 
         <!-- Reports are the members' flags. Only a board loaded by code can carry the run
              ids that a correction needs; the queue says when a CSV is only a snapshot. -->
-        <div id="bbx-report-queue" class="hidden mb-4 bg-black border border-neonPink/50 rounded-xl p-3">
+        <div id="bbx-report-queue" class="hidden mt-4 bg-black border border-neonPink/50 rounded-xl p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <p class="text-[11px] font-mono font-black uppercase tracking-widest text-neonPink">&#9873; Reported questions &mdash; captain review</p>
-            <span class="text-[10px] font-mono text-slate-500">Correcting a verdict updates that member's run and the board.</span>
+            <span class="text-[10px] font-mono text-slate-500">Compare the member's answer with the target before overriding the grader.</span>
           </div>
           <div id="bbx-report-list" class="mt-2"></div>
         </div>
 
-        <div id="bbx-drop-zone" onclick="document.getElementById('bbx-file-input').click()" class="border-2 border-dashed border-borderDark rounded-xl flex flex-col items-center justify-center p-6 text-center cursor-pointer hover:border-neonAmber hover:bg-panelHover transition-all relative overflow-hidden min-h-[140px]">
-          <b class="text-slate-200 font-mono text-xs uppercase">Drop Buzzboard CSVs</b>
-          <span class="text-[10px] text-slate-500 mt-2 font-mono">Download one from the Buzzpoint Board, or load a board by code above</span>
-        </div>
-        <input type="file" id="bbx-file-input" accept=".csv" multiple class="hidden">
-
-        <div class="flex flex-wrap items-center gap-2 mt-4">
-          <button type="button" id="bbx-page-questions" onclick="bbxShowPage('questions')" class="px-3 py-1.5 rounded-lg text-[11px] font-mono font-black uppercase border transition bg-neonCyan text-black border-neonCyan">Question Buzzpoints</button>
-          <button type="button" id="bbx-page-numbers" onclick="bbxShowPage('numbers')" class="px-3 py-1.5 rounded-lg text-[11px] font-mono font-black uppercase border transition bg-black text-slate-300 border-borderDark hover:text-white">Numerical Data</button>
+        <!-- VIEW TABS: the template's two destinations, in the app's own neon tokens. -->
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-borderDark pb-3 mt-4">
+          <div class="flex items-center gap-2 bg-black p-1 rounded-xl border border-borderDark font-mono text-[11px]">
+            <button type="button" id="bbx-page-questions" onclick="bbxShowPage('questions')" class="px-3.5 py-2 rounded-lg transition font-bold uppercase tracking-wide bg-neonCyan text-black flex items-center gap-2">&#9889; Question buzzpoints</button>
+            <button type="button" id="bbx-page-numbers" onclick="bbxShowPage('numbers')" class="px-3.5 py-2 rounded-lg transition font-bold uppercase tracking-wide text-slate-400 hover:text-white flex items-center gap-2">&#128101; Team builder &amp; numerical data</button>
+          </div>
+          <span id="bbx-dataset-label" class="text-[10px] font-mono uppercase tracking-wider text-slate-500">Awaiting board data</span>
         </div>
 
-        <!-- PAGE 1: question cards with word-level buzz highlighting -->
+        <!-- PAGE 1: filterable question accordions with word-level buzz highlighting -->
         <div id="bbx-panel-questions" class="mt-4 space-y-3">
-          <div class="bg-black border border-borderDark rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-slate-500 font-mono text-[11px] uppercase">Isolate buzzer:</span>
-              <div id="bbx-participant-pills" class="flex flex-wrap items-center gap-1"></div>
+          <div class="bg-panel border border-borderDark rounded-xl p-3 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-slate-500 font-mono text-[10px] uppercase mr-1">Subject filter</span>
+                <div id="bbx-question-subject-filters" class="flex flex-wrap gap-1"></div>
+              </div>
+              <div class="flex items-center gap-2 text-[10px] font-mono uppercase">
+                <button type="button" onclick="bbxExpandAllQuestions(true)" class="text-slate-400 hover:text-white px-1.5 py-1 rounded hover:bg-panelHover transition">Expand all</button>
+                <span class="text-slate-700">|</span>
+                <button type="button" onclick="bbxExpandAllQuestions(false)" class="text-slate-400 hover:text-white px-1.5 py-1 rounded hover:bg-panelHover transition">Collapse all</button>
+              </div>
             </div>
-            <div class="flex items-center gap-3 text-slate-400 text-[11px] font-mono">
-              <button type="button" id="bbx-toggle-buzz" onclick="bbxToggleBuzzpoints()" class="hover:text-white">Hide Buzzpoints</button>
-              <span class="text-slate-600">&middot;</span>
-              <button type="button" id="bbx-toggle-ans" onclick="bbxToggleAnswers()" class="hover:text-white">Show Answers</button>
+            <div class="border-t border-borderDark pt-3">
+              <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <span class="text-slate-500 font-mono text-[10px] uppercase tracking-wider">Isolate buzzer</span>
+                <div class="flex items-center gap-3 text-slate-400 text-[10px] font-mono uppercase">
+                  <button type="button" id="bbx-toggle-buzz" onclick="bbxToggleBuzzpoints()" class="hover:text-white transition">Hide buzzpoints</button>
+                  <span class="text-slate-700">&middot;</span>
+                  <button type="button" id="bbx-toggle-ans" onclick="bbxToggleAnswers()" class="hover:text-white transition">Show answers</button>
+                </div>
+              </div>
+              <div id="bbx-participant-pills" class="flex flex-wrap items-center gap-1.5"></div>
             </div>
           </div>
           <div id="bbx-questions-container" class="space-y-3"></div>
         </div>
 
-        <!-- PAGE 2: candidate matrix, coverage meters and the draft -->
-        <div id="bbx-panel-numbers" class="mt-4 hidden space-y-3">
-          <div id="bbx-hud" class="grid grid-cols-1 md:grid-cols-3 gap-2.5"></div>
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div id="bbx-subject-filters" class="inline-flex flex-wrap gap-1"></div>
-            <div class="flex items-center gap-2">
-              <input id="bbx-search" type="text" oninput="bbxSetSearch(this.value)" placeholder="Filter candidates..." class="px-2.5 py-1 rounded border border-borderDark bg-black text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-neonCyan w-40">
-              <span id="bbx-count-indicator" class="text-slate-500 font-mono text-[11px]">0 candidates</span>
-              <button type="button" onclick="bbxResetTeams()" class="text-slate-500 hover:text-white text-[11px] font-mono px-1.5 py-1">Reset All</button>
-              <button type="button" onclick="bbxExportRosters(this)" class="bg-neonCyan hover:bg-cyan-300 text-black text-[11px] font-mono font-black uppercase px-2.5 py-1 rounded transition">Export Rosters</button>
+        <!-- PAGE 2: candidate matrix on the left, persistent team draft on the right -->
+        <div id="bbx-panel-numbers" class="mt-4 hidden">
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            <div class="lg:col-span-8 bg-panel border border-borderDark rounded-xl p-3 space-y-3">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="text-slate-500 font-mono text-[10px] uppercase mr-1">Filter subject</span>
+                  <div id="bbx-subject-filters" class="flex flex-wrap gap-1"></div>
+                </div>
+                <label class="text-[10px] font-mono text-slate-400 flex items-center gap-1.5 cursor-pointer select-none">
+                  <input type="checkbox" id="bbx-raw-columns" onchange="bbxSetRawColumns(this.checked)" class="rounded bg-black border-borderDark text-neonCyan focus:ring-0">
+                  <span>Expand raw PPTH cols</span>
+                </label>
+              </div>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <input id="bbx-search" type="text" oninput="bbxSetSearch(this.value)" placeholder="Filter candidates..." class="px-2.5 py-1 rounded border border-borderDark bg-black text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-neonCyan w-44">
+                  <span id="bbx-count-indicator" class="text-slate-500 font-mono text-[10px] uppercase">0 candidates</span>
+                </div>
+                <span class="text-[10px] font-mono text-slate-500">Click a header to sort</span>
+              </div>
+              <div class="overflow-x-auto overflow-y-auto max-h-[560px] rounded-lg border border-borderDark bg-black">
+                <table id="bbx-matrix" class="w-full text-left text-xs font-mono whitespace-nowrap"></table>
+              </div>
+              <div class="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-slate-500">
+                <span>Drag a candidate into a team card, or use +T1 / +T2 / +T3</span>
+                <span id="bbx-matrix-note"></span>
+              </div>
             </div>
-          </div>
-          <div class="bg-black border border-borderDark rounded-xl overflow-x-auto">
-            <table id="bbx-matrix" class="w-full text-left text-xs font-mono whitespace-nowrap"></table>
+
+            <aside class="lg:col-span-4 space-y-3 lg:sticky lg:top-4">
+              <div class="flex items-center justify-between">
+                <h4 class="text-[11px] font-mono font-black uppercase tracking-wider text-slate-300">Active team rosters</h4>
+                <button type="button" onclick="bbxResetTeams()" class="text-[10px] font-mono text-neonPink hover:text-white transition">Reset all</button>
+              </div>
+              <div id="bbx-hud" class="space-y-3"></div>
+              <button type="button" onclick="bbxExportRosters(this)" class="w-full py-2 bg-neonCyan hover:bg-cyan-300 text-black font-mono font-black text-[10px] uppercase rounded-xl transition flex items-center justify-center gap-2">
+                Export compiled rosters
+              </button>
+            </aside>
           </div>
         </div>
       </div>
