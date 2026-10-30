@@ -921,6 +921,36 @@ class BuzzboardAnalyticsShellTests(unittest.TestCase):
         setter = function_source(ANALYTICS_SOURCE, "bbxSetRawColumns")
         self.assertIn("bbxState.rawColumns = Boolean(checked);", setter)
 
+    def test_the_stats_use_the_whole_window(self):
+        self.assertIn('id="analytics-shell"', INDEX_SOURCE)
+        self.assertIn("main:has(#screen-analytics.bbx-wide)", INDEX_SOURCE)
+        self.assertIn("#screen-analytics.bbx-wide", INDEX_SOURCE)
+        self.assertIn("#screen-analytics.bbx-wide #analytics-shell", INDEX_SOURCE)
+        self.assertIn("screen.classList.toggle('bbx-wide', !match);", ANALYTICS_SOURCE)
+
+    def test_each_question_subject_has_its_own_colour(self):
+        self.assertIn("const BBX_SUBJECT_COLORS = {", ANALYTICS_SOURCE)
+        self.assertIn("Physics: '#00f3ff'", ANALYTICS_SOURCE)
+        colour = function_source(ANALYTICS_SOURCE, "bbxSubjectColor")
+        self.assertIn("BBX_SUBJECT_FALLBACK_COLORS[hash % BBX_SUBJECT_FALLBACK_COLORS.length]", colour)
+        filters = function_source(ANALYTICS_SOURCE, "bbxRenderQuestionSubjectFilters")
+        self.assertIn("const accent = bbxSubjectColor(subject);", filters)
+        self.assertIn("btn.style.background = active ? accent : '#000000';", filters)
+        card = function_source(ANALYTICS_SOURCE, "bbxQuestionCard")
+        self.assertIn("const accent = bbxSubjectColor(subject);", card)
+        self.assertIn("card.style.borderLeft = `3px solid ${accent}`;", card)
+        self.assertIn("subjectChip.style.color = accent;", card)
+
+    def test_the_team_panel_can_be_minimized(self):
+        self.assertIn('id="bbx-matrix-panel"', INDEX_SOURCE)
+        self.assertIn('id="bbx-team-panel"', INDEX_SOURCE)
+        self.assertIn('id="bbx-team-toggle"', INDEX_SOURCE)
+        toggle = function_source(ANALYTICS_SOURCE, "bbxToggleTeamPanel")
+        self.assertIn("bbxState.teamsCollapsed = typeof force === 'boolean'", toggle)
+        self.assertIn("panel.classList.toggle('hidden', collapsed)", toggle)
+        self.assertIn("matrixPanel.style.gridColumn = collapsed ? '1 / -1' : '';", toggle)
+        self.assertIn("toggle.setAttribute('aria-expanded', String(!collapsed))", toggle)
+
 
 class AttemptLockTests(unittest.TestCase):
     def test_the_run_document_is_created_once_so_an_attempt_cannot_be_doubled(self):

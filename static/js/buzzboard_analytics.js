@@ -26,6 +26,19 @@ const BBX_SUBJECT_SHORT = {
   Biology: 'BIO', Chemistry: 'CHM', Physics: 'PHY', Math: 'MTH',
   'Earth and Space': 'ESS', Energy: 'EGY', 'General Science': 'GEN',
 };
+// Each subject gets its own colour, so a long packet can be scanned by subject before a
+// word of it is read. The design subjects use the app's neon tokens; a packet's own
+// subject names fall back to a stable colour from the same family.
+const BBX_SUBJECT_COLORS = {
+  Biology: '#00ff66',
+  Chemistry: '#b026ff',
+  Physics: '#00f3ff',
+  Math: '#facc15',
+  'Earth and Space': '#fb923c',
+  Energy: '#ff0055',
+  'General Science': '#94a3b8',
+};
+const BBX_SUBJECT_FALLBACK_COLORS = ['#2dd4bf', '#f472b6', '#a3e635', '#60a5fa', '#c084fc', '#fbbf24'];
 // Packet categories fold onto the drill's design subjects exactly as the board's own
 // subject grid does (mirrors SOLO_SUBJECT_ALIASES in static/js/solo.js).
 const BBX_SUBJECT_ALIASES = {
@@ -69,6 +82,7 @@ const bbxState = {
   rawColumns: false,
   openQuestions: new Set(),
   boardCode: '',
+  teamsCollapsed: false,
 };
 
 // A row dragged from the matrix. The drop handlers read the key rather than the data
@@ -120,6 +134,17 @@ function bbxVerdict(row) {
 function bbxSubjectFor(category) {
   const raw = String(category || '').trim();
   return BBX_SUBJECT_ALIASES[raw.toLowerCase()] || raw;
+}
+
+function bbxSubjectColor(subject) {
+  const raw = String(subject || '').trim();
+  const canonical = BBX_SUBJECT_ALIASES[raw.toLowerCase()] || raw;
+  if (BBX_SUBJECT_COLORS[canonical]) return BBX_SUBJECT_COLORS[canonical];
+  let hash = 0;
+  for (let index = 0; index < canonical.length; index += 1) {
+    hash = ((hash * 31) + canonical.charCodeAt(index)) >>> 0;
+  }
+  return BBX_SUBJECT_FALLBACK_COLORS[hash % BBX_SUBJECT_FALLBACK_COLORS.length];
 }
 
 // ------------------------------------------------------------ upload
@@ -806,14 +831,23 @@ function bbxRenderQuestionSubjectFilters() {
   });
   const options = ['ALL', ...subjects];
   options.forEach((subject) => {
+    const active = bbxState.questionSubject === subject;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = subject === 'ALL' ? 'All subjects' : subject;
     btn.className = `px-2.5 py-1 rounded text-[10px] font-mono uppercase border transition ${
-      bbxState.questionSubject === subject
+      active
         ? 'bg-neonCyan text-black border-neonCyan font-bold'
         : 'bg-black text-slate-400 border-borderDark hover:text-white'
     }`;
+    // The pill carries the same colour as the subject's cards, so the filter and the
+    // questions it selects read as one group.
+    if (subject !== 'ALL') {
+      const accent = bbxSubjectColor(subject);
+      btn.style.background = active ? accent : '#000000';
+      btn.style.borderColor = active ? accent : `${accent}66`;
+      btn.style.color = active ? '#04060a' : accent;
+    }
     btn.addEventListener('click', () => {
       bbxState.questionSubject = subject;
       bbxRenderQuestionSubjectFilters();
@@ -829,10 +863,14 @@ function showAnalyticsView(view) {
   const buzzPanel = bbxEl('analytics-panel-buzzboard');
   const matchTab = bbxEl('analytics-tab-match');
   const buzzTab = bbxEl('analytics-tab-buzzboard');
+  const screen = bbxEl('screen-analytics');
   if (matchPanel) matchPanel.classList.toggle('hidden', !match);
   if (buzzPanel) buzzPanel.classList.toggle('hidden', match);
   if (matchTab) matchTab.className = match ? BBX_TAB_ON : BBX_TAB_OFF;
   if (buzzTab) buzzTab.className = match ? BBX_TAB_OFF : BBX_TAB_ON;
+  // The board stats are a working surface: they take the whole window with a thin frame,
+  // while the match tables keep the centred card they were designed around.
+  if (screen) screen.classList.toggle('bbx-wide', !match);
 }
 
 function resetBuzzboardAnalytics() {
@@ -1054,8 +1092,14 @@ function bbxRenderQuestions() {
 }
 
 function bbxQuestionCard(question) {
+  const subject = question.subject || question.category || 'General';
+  const accent = bbxSubjectColor(subject);
   const card = document.createElement('article');
   card.className = 'bg-panel border border-borderDark rounded-xl overflow-hidden';
+  // A tinted frame and a solid left edge give the subject away at a glance, even when the
+  // card is closed and only its telemetry strip is visible.
+  card.style.borderColor = `${accent}55`;
+  card.style.borderLeft = `3px solid ${accent}`;
   const open = bbxState.openQuestions.has(question.key);
 
   // Header: a one-line telemetry summary, as in the template. The whole strip is the
@@ -1066,7 +1110,11 @@ function bbxQuestionCard(question) {
   card.appendChild(head);
 
   const chips = bbxAppend(head, 'div', 'flex flex-wrap items-center gap-2');
-  bbxAppend(chips, 'span', 'px-2 py-0.5 rounded bg-black border border-borderDark text-neonGreen font-mono text-[10px] font-bold uppercase', question.category || question.subject || 'General');
+  const subjectChip = bbxAppend(chips, 'span', 'px-2 py-0.5 rounded bg-black border font-mono text-[10px] font-bold uppercase', question.category || question.subject || 'General');
+  subjectChip.style.color = accent;
+  subjectChip.style.borderColor = `${accent}88`;
+  subjectChip.style.background = `${accent}14`;
+  subjectChip.title = `Subject: ${subject}`;
   bbxAppend(chips, 'span', 'px-2 py-0.5 rounded bg-black border border-borderDark text-slate-300 font-mono text-[10px] uppercase', question.type ? `Tossup \u00b7 ${question.type}` : 'Tossup');
   bbxAppend(chips, 'span', 'text-neonAmber font-mono font-bold text-xs', `Q${question.qNum}`);
   bbxAppend(chips, 'span', 'text-slate-500 font-mono text-[10px]', `${question.attempts} attempt${question.attempts === 1 ? '' : 's'}`);
@@ -1273,6 +1321,28 @@ function bbxRenderSubjectFilters() {
 // The template's right-hand column: three persistent team cards, each with subject coverage
 // and four slots. A challenge's runs are individual, so teams are a manual draft the captain
 // builds here; the stats underneath never change when a member moves.
+
+// The roster column is useful while drafting and in the way while reading the matrix. On a
+// wide screen it folds away and the matrix takes its width; the toolbar keeps the restore
+// control visible so a collapsed panel never becomes a dead end.
+function bbxToggleTeamPanel(force) {
+  bbxState.teamsCollapsed = typeof force === 'boolean' ? force : !bbxState.teamsCollapsed;
+  const collapsed = bbxState.teamsCollapsed;
+  const panel = bbxEl('bbx-team-panel');
+  const matrixPanel = bbxEl('bbx-matrix-panel');
+  const toggle = bbxEl('bbx-team-toggle');
+  if (panel) panel.classList.toggle('hidden', collapsed);
+  if (matrixPanel) {
+    // Span every track explicitly: a dynamic `lg:col-span-12` would depend on the CDN's
+    // JIT noticing a class it never saw at scan time.
+    matrixPanel.style.gridColumn = collapsed ? '1 / -1' : '';
+  }
+  if (toggle) {
+    toggle.textContent = collapsed ? '\u00ab Show teams' : 'Minimize teams \u00bb';
+    toggle.title = collapsed ? 'Expand the team selection panel' : 'Minimize the team selection panel';
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+  }
+}
 
 function bbxRenderHud() {
   const holder = bbxEl('bbx-hud');
@@ -1595,3 +1665,4 @@ function bbxNameCell(player) {
 
 bbxShowPage('questions');
 showAnalyticsView('match');
+bbxToggleTeamPanel(false);
