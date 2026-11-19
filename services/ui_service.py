@@ -464,6 +464,19 @@ async def challenge_meta_endpoint(code: str, request: Request):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@app.get("/api/challenges")
+async def list_challenges_endpoint(request: Request):
+    """The signed-in captain's own created challenges, for the profile screen."""
+    user = await _authenticated_user(request)
+    try:
+        return await asyncio.to_thread(challenge_service.list_challenges, user.uid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to list challenges: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @app.post("/api/challenges")
 async def create_challenge_endpoint(request: Request):
     user = await _authenticated_user(request)

@@ -257,7 +257,11 @@
 
       <!-- Authenticated user section -->
       <div id="auth-user-section" class="hidden items-center space-x-2 bg-panel border border-borderDark rounded-lg px-2.5 py-1">
-        <span id="auth-user-email" class="text-[10px] text-slate-300 font-mono"></span>
+        <a href="#/profile" id="auth-profile-link" data-route="profile" class="app-nav-link flex items-center gap-1.5 min-w-0 px-1.5 py-0.5 rounded-md border border-transparent hover:bg-panelHover transition" title="Open your profile">
+          <svg class="w-3.5 h-3.5 text-neonCyan shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A9 9 0 1118.88 6.196 9 9 0 015.12 17.804zM15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+          <span class="text-[9px] font-mono font-black uppercase tracking-wider text-neonCyan">Profile</span>
+          <span id="auth-user-email" class="hidden sm:inline text-[10px] text-slate-300 font-mono truncate max-w-[150px]"></span>
+        </a>
         <button id="btn-sign-out" class="bg-black border border-borderDark hover:border-neonPink text-slate-300 hover:text-neonPink px-2.5 py-1 rounded-md text-[10px] font-mono uppercase tracking-wider transition">Sign Out</button>
       </div>
     </div>
@@ -1764,6 +1768,37 @@
         <a href="#/" class="px-4 py-2 bg-black border border-borderDark text-xs font-mono text-slate-400 hover:text-white rounded-xl">
           Close
         </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROFILE (its own route: #/profile) — the challenges this account created. Each row
+       opens that board in the analytics station with the code already loaded. -->
+  <section id="screen-profile" class="slide-view hidden w-full max-w-5xl mx-auto p-4 md:p-6 lg:p-8">
+    <div class="bg-panel border border-neonCyan/40 rounded-2xl p-5 md:p-6 shadow-neon-cyan">
+      <div class="flex flex-wrap items-start justify-between gap-3 border-b border-borderDark pb-4">
+        <div class="min-w-0">
+          <p class="text-[10px] font-mono font-black text-neonCyan uppercase tracking-widest">Account</p>
+          <h2 class="text-2xl font-black text-white font-display tracking-tight">Your profile</h2>
+          <p id="profile-email" class="mt-1 text-xs font-mono text-slate-400 truncate">Not signed in</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" id="profile-sign-in" onclick="openModal('auth-modal'); playSound('click');" class="hidden px-3 py-1.5 bg-neonCyan text-black text-[10px] font-mono font-black uppercase rounded-lg active:scale-95 transition">Sign in</button>
+          <a href="#/" class="px-3 py-1.5 bg-black border border-borderDark text-[10px] font-mono font-black text-slate-400 hover:text-white uppercase rounded-lg transition">Close</a>
+        </div>
+      </div>
+
+      <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 class="text-xs font-mono font-black uppercase tracking-widest text-slate-300">Created challenges</h3>
+          <p id="profile-challenge-count" class="mt-1 text-[10px] font-mono uppercase tracking-wider text-slate-500">Sign in to see your challenges</p>
+        </div>
+        <button type="button" id="profile-refresh" class="px-3 py-1.5 bg-black border border-borderDark text-[10px] font-mono font-black uppercase text-slate-300 hover:border-neonCyan hover:text-neonCyan rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">Refresh</button>
+      </div>
+      <p id="profile-challenge-status" class="mt-2 text-[11px] font-mono text-slate-500"></p>
+      <div id="profile-challenge-list" class="mt-3 border-t border-borderDark divide-y divide-borderDark"></div>
+      <div class="mt-5 border-t border-borderDark pt-3 text-[10px] font-mono text-slate-500">
+        Each row opens that challenge&rsquo;s board in Analytics &mdash; questions, buzzpoints and team builder.
       </div>
     </div>
   </section>

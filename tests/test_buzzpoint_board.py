@@ -12,11 +12,12 @@ fires, log the word being spoken at that instant as the buzz-point.
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from core import challenge, grading, words
-from services import ui_service
+from services import challenge_service, ui_service
 
 ROOT = Path(__file__).resolve().parents[1]
 BUZZPOINT_SOURCE = (ROOT / "static/js/buzzpoint.js").read_text(encoding="utf-8")
@@ -952,6 +953,89 @@ class BuzzboardAnalyticsShellTests(unittest.TestCase):
         self.assertIn("toggle.setAttribute('aria-expanded', String(!collapsed))", toggle)
 
 
+class ProfileChallengeTests(unittest.TestCase):
+    """A signed-in captain's created challenges are one click from the analyzer."""
+
+    def test_the_profile_is_a_route_with_a_screen_and_header_link(self):
+        self.assertIn("profile: 'screen-profile'", ROUTER_SOURCE)
+        self.assertIn('id="screen-profile" class="slide-view hidden', INDEX_SOURCE)
+        self.assertIn('id="auth-profile-link"', INDEX_SOURCE)
+        self.assertIn('href="#/profile"', INDEX_SOURCE)
+        self.assertIn('id="profile-challenge-list"', INDEX_SOURCE)
+
+    def test_the_profile_lists_only_the_signed_in_users_challenges(self):
+        self.assertIn("fetch('/api/challenges'", AUTH_SOURCE)
+        self.assertIn("Authorization: `Bearer ${token}`", AUTH_SOURCE)
+        self.assertIn("def list_challenges(owner_uid):", CHALLENGE_SERVICE_SOURCE)
+        self.assertIn('where("ownerUid", "==", owner_uid).stream()', CHALLENGE_SERVICE_SOURCE)
+        self.assertIn('@app.get("/api/challenges")', UI_SERVICE_SOURCE)
+        self.assertIn("challenge_service.list_challenges, user.uid", UI_SERVICE_SOURCE)
+        self.assertIn("const user = currentProfileUser();", AUTH_SOURCE)
+        self.assertIn("window.getFirebaseIdToken", AUTH_SOURCE)
+        self.assertIn("renderProfileChallenges([], null);", AUTH_SOURCE)
+        self.assertIn("if (detail.name === 'profile') populateProfileChallenges();", AUTH_SOURCE)
+
+    def test_each_saved_challenge_opens_its_board_in_the_analyzer(self):
+        row = function_source(AUTH_SOURCE, "profileChallengeRow")
+        self.assertIn("link.href = `#/analytics/${encodeURIComponent(code)}`;", row)
+        self.assertIn("title.textContent = data.title || 'Untitled challenge';", row)
+        self.assertIn("'Open in analyzer \\u2192'", row)
+        self.assertIn("profileChallengeMillis(right) - profileChallengeMillis(left)", AUTH_SOURCE)
+
+    def test_the_challenge_document_already_belongs_to_its_creator(self):
+        self.assertIn('"ownerUid": owner_uid,', CHALLENGE_SERVICE_SOURCE)
+        self.assertIn('"createdAt": time.time(),', CHALLENGE_SERVICE_SOURCE)
+        self.assertIn('"questionCount": len(bank),', CHALLENGE_SERVICE_SOURCE)
+
+    def test_the_list_is_filtered_to_the_owner_and_newest_first(self):
+        class Snapshot:
+            def __init__(self, code, data):
+                self.id = code
+                self._data = data
+
+            def to_dict(self):
+                return self._data
+
+        class Query:
+            def __init__(self, snapshots):
+                self.snapshots = snapshots
+                self.filter = None
+
+            def where(self, field, operator, value):
+                self.filter = (field, operator, value)
+                return self
+
+            def stream(self):
+                return self.snapshots
+
+        class Client:
+            def __init__(self, snapshots):
+                self.snapshots = snapshots
+                self.collection_name = None
+                self.query = None
+
+            def collection(self, name):
+                self.collection_name = name
+                self.query = Query(self.snapshots)
+                return self.query
+
+        client = Client([
+            Snapshot("older", {"ownerUid": "captain-1", "title": "Old packet",
+                               "createdAt": 100, "questionCount": 8}),
+            Snapshot("newest", {"ownerUid": "captain-1", "title": "New packet",
+                                "createdAt": 200, "questionCount": 12}),
+        ])
+        with patch.object(challenge_service, "_client", return_value=client):
+            result = challenge_service.list_challenges("captain-1")
+
+        self.assertEqual(client.collection_name, challenge_service.CHALLENGES)
+        self.assertEqual(client.query.filter, ("ownerUid", "==", "captain-1"))
+        self.assertEqual([item["code"] for item in result["challenges"]], ["newest", "older"])
+        self.assertEqual(result["challenges"][0]["questionCount"], 12)
+        # The profile is a metadata list: the answer bank must never be part of it.
+        self.assertNotIn("bank", result["challenges"][0])
+
+
 class AttemptLockTests(unittest.TestCase):
     def test_the_run_document_is_created_once_so_an_attempt_cannot_be_doubled(self):
         self.assertIn("_run_ref(code, uid).create(run)", CHALLENGE_SERVICE_SOURCE)
@@ -975,7 +1059,7 @@ class AttemptLockTests(unittest.TestCase):
 class ChallengeRouteContractTests(unittest.TestCase):
     def test_challenge_endpoints_require_a_signed_in_user(self):
         client = TestClient(ui_service.app)
-        for path in ("/api/challenges/abc123", "/api/challenges/abc123/next", "/api/challenges/abc123/board"):
+        for path in ("/api/challenges", "/api/challenges/abc123", "/api/challenges/abc123/next", "/api/challenges/abc123/board"):
             response = client.get(path)
             self.assertIn(response.status_code, (401, 503),
                           f"{path} must require a signed-in user")

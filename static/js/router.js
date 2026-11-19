@@ -45,6 +45,7 @@
     converter: 'screen-converter',
     analytics: 'screen-analytics',
     challenge: 'screen-challenge',
+    profile: 'screen-profile',
   };
 
   const NAMES = Object.keys(SLIDES).concat(Object.keys(STATIONS)).concat(['login']);

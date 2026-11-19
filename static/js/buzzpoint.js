@@ -237,7 +237,7 @@ async function bukCreateChallenge() {
     // The share link is the same address the member's screen uses, so the code is enough.
     const linkBtn = bukEl('buk-captain-link');
     if (linkBtn) linkBtn.classList.remove('hidden');
-    bukStatus('buk-captain-status', `Challenge ready — share code ${result.code}.`, '#00ff66');
+    bukStatus('buk-captain-status', `Challenge ready — share code ${result.code}. Saved to your profile.`, '#00ff66');
   } catch (err) {
     bukStatus('buk-captain-status', err.message || 'Could not create the challenge.', '#ff4d4d');
   }

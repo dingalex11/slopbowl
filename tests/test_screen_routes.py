@@ -49,6 +49,7 @@ class RouteTableTests(unittest.TestCase):
         self.assertIn("converter: 'screen-converter'", ROUTER_SOURCE)
         self.assertIn("analytics: 'screen-analytics'", ROUTER_SOURCE)
         self.assertIn("challenge: 'screen-challenge'", ROUTER_SOURCE)
+        self.assertIn("profile: 'screen-profile'", ROUTER_SOURCE)
 
     def test_the_router_listens_to_every_way_a_url_changes(self):
         self.assertIn("window.addEventListener('hashchange'", ROUTER_SOURCE)

@@ -67,6 +67,13 @@ const btnForgetKey = document.getElementById('btn-clear-api-key');
 const settingsAccountEmail = document.getElementById('settings-account-email');
 const btnSettingsAccount = document.getElementById('btn-settings-account');
 
+const profileEmailDisplay = document.getElementById('profile-email');
+const profileChallengeList = document.getElementById('profile-challenge-list');
+const profileChallengeCount = document.getElementById('profile-challenge-count');
+const profileChallengeStatus = document.getElementById('profile-challenge-status');
+const profileRefresh = document.getElementById('profile-refresh');
+const profileSignIn = document.getElementById('profile-sign-in');
+
 const JUDGE_KEY_FIELD = 'judgeApiKey';
 const LEGACY_JUDGE_KEY_FIELD = 'groqApiKey';
 const CONFIG_HELP = 'Sign-in is not configured on this server. Set FIREBASE_API_KEY and FIREBASE_PROJECT_ID in the server environment and reload.';
@@ -165,6 +172,191 @@ window.getUserApiKey = async () => {
     return key || null;
 };
 
+// --- PROFILE: THE CHALLENGES THIS ACCOUNT CREATED ---------------------------
+// A challenge document already carries ownerUid, so the profile is a filtered read of the
+// authoritative collection rather than a second copy: every challenge this account creates
+// appears here, including ones made before this page existed. The server does the filtering
+// with admin credentials, and the response carries no answers — the bank stays server-only.
+
+function currentProfileUser() {
+    // The public accessors also exist on the development harness's auth shim, so the profile
+    // is testable with the same code that runs against a real Firebase session.
+    if (typeof window.getFirebaseUser === 'function') {
+        const user = window.getFirebaseUser();
+        if (user) return user;
+    }
+    return auth ? auth.currentUser : null;
+}
+
+async function fetchMyChallenges(user) {
+    const token = typeof window.getFirebaseIdToken === 'function'
+        ? await window.getFirebaseIdToken()
+        : await user.getIdToken();
+    const response = await fetch('/api/challenges', {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || 'Could not read your challenges.');
+    return Array.isArray(payload.challenges) ? payload.challenges : [];
+}
+
+function profileChallengeMillis(data) {
+    const value = data && data.createdAt;
+    if (typeof value === 'number') return value * 1000;
+    if (value && typeof value.toMillis === 'function') return value.toMillis();
+    if (value && typeof value.seconds === 'number') return value.seconds * 1000;
+    if (typeof value === 'string') {
+        const parsed = Date.parse(value);
+        return Number.isNaN(parsed) ? 0 : parsed;
+    }
+    return 0;
+}
+
+function profileChallengeDate(data) {
+    const millis = profileChallengeMillis(data);
+    if (!millis) return 'Date unavailable';
+    return new Date(millis).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function profileMetaSeparator(parent) {
+    const dot = document.createElement('span');
+    dot.className = 'text-slate-700';
+    dot.textContent = '\u00b7';
+    parent.appendChild(dot);
+}
+
+function profileChallengeRow(item) {
+    const data = item || {};
+    const code = data.code;
+    const link = document.createElement('a');
+    link.href = `#/analytics/${encodeURIComponent(code)}`;
+    link.className = 'group flex flex-wrap items-center justify-between gap-3 py-3.5 transition hover:bg-panelHover';
+    link.title = `Open ${data.title || code} in Analytics`;
+    link.setAttribute('aria-label', `Open ${data.title || code} in Analytics`);
+
+    const info = document.createElement('div');
+    info.className = 'min-w-0';
+    const title = document.createElement('p');
+    title.className = 'text-sm font-bold text-white truncate transition group-hover:text-neonCyan';
+    title.textContent = data.title || 'Untitled challenge';
+    info.appendChild(title);
+
+    const meta = document.createElement('div');
+    meta.className = 'mt-1 flex flex-wrap items-center gap-2 text-[10px] font-mono uppercase tracking-wider text-slate-500';
+    const codeText = document.createElement('span');
+    codeText.className = 'font-black text-neonAmber';
+    codeText.textContent = code;
+    meta.appendChild(codeText);
+    profileMetaSeparator(meta);
+    const questions = document.createElement('span');
+    const count = Number(data.questionCount);
+    const questionCount = Number.isFinite(count) ? count : 0;
+    questions.textContent = `${questionCount} question${questionCount === 1 ? '' : 's'}`;
+    meta.appendChild(questions);
+    profileMetaSeparator(meta);
+    const created = document.createElement('span');
+    created.textContent = profileChallengeDate(data);
+    meta.appendChild(created);
+    info.appendChild(meta);
+
+    const action = document.createElement('span');
+    action.className = 'shrink-0 text-[10px] font-mono font-black uppercase tracking-wider text-neonCyan';
+    action.textContent = 'Open in analyzer \u2192';
+
+    link.appendChild(info);
+    link.appendChild(action);
+    return link;
+}
+
+function renderProfileChallenges(challenges, user) {
+    if (!profileChallengeList || !profileChallengeCount) return;
+    profileChallengeList.replaceChildren();
+    if (profileSignIn) profileSignIn.classList.toggle('hidden', Boolean(user));
+    if (profileRefresh) profileRefresh.disabled = !user;
+
+    if (!user) {
+        profileChallengeCount.textContent = 'Sign in to see your challenges';
+        const note = document.createElement('p');
+        note.className = 'py-5 text-xs font-mono text-slate-500';
+        note.textContent = 'Sign in to see the challenges you created and open any of them in Analytics.';
+        profileChallengeList.appendChild(note);
+        return;
+    }
+
+    const list = (challenges || [])
+        .filter((item) => item && item.code && /^[a-z0-9]{4,8}$/.test(item.code))
+        .sort((left, right) => profileChallengeMillis(right) - profileChallengeMillis(left));
+    profileChallengeCount.textContent = `${list.length} challenge${list.length === 1 ? '' : 's'}`;
+
+    if (!list.length) {
+        const empty = document.createElement('div');
+        empty.className = 'py-5';
+        const line = document.createElement('p');
+        line.className = 'text-xs font-mono text-slate-500';
+        line.textContent = 'No challenges yet. Create one from the Buzzpoint Board and it will appear here.';
+        empty.appendChild(line);
+        const link = document.createElement('a');
+        link.href = '#/board';
+        link.className = 'mt-2 inline-flex text-[10px] font-mono font-black uppercase tracking-wider text-neonCyan hover:text-white';
+        link.textContent = 'Create a challenge \u2192';
+        empty.appendChild(link);
+        profileChallengeList.appendChild(empty);
+        return;
+    }
+
+    list.forEach((item) => profileChallengeList.appendChild(profileChallengeRow(item)));
+}
+
+async function populateProfileChallenges() {
+    const user = currentProfileUser();
+    if (profileEmailDisplay) profileEmailDisplay.textContent = user ? (user.email || 'Signed-in competitor') : 'Not signed in';
+    if (profileChallengeStatus) {
+        profileChallengeStatus.className = 'mt-2 text-[11px] font-mono text-slate-500';
+        profileChallengeStatus.textContent = '';
+    }
+
+    if (!user) {
+        renderProfileChallenges([], null);
+        return;
+    }
+
+    if (!db) {
+        renderProfileChallenges([], user);
+        if (profileChallengeStatus) {
+            profileChallengeStatus.className = 'mt-2 text-[11px] font-mono text-neonPink';
+            profileChallengeStatus.textContent = 'Cloud storage is unavailable, so your challenges cannot be listed.';
+        }
+        return;
+    }
+
+    if (profileSignIn) profileSignIn.classList.add('hidden');
+    if (profileRefresh) profileRefresh.disabled = true;
+    if (profileChallengeStatus) {
+        profileChallengeStatus.className = 'mt-2 text-[11px] font-mono text-neonAmber';
+        profileChallengeStatus.textContent = 'Reading your saved challenges\u2026';
+    }
+
+    try {
+        const challenges = await fetchMyChallenges(user);
+        renderProfileChallenges(challenges, user);
+        if (profileChallengeStatus) {
+            profileChallengeStatus.className = 'mt-2 text-[11px] font-mono text-slate-500';
+            profileChallengeStatus.textContent = '';
+        }
+    } catch (error) {
+        console.error('Unable to load profile challenges:', error);
+        if (profileChallengeList) profileChallengeList.replaceChildren();
+        if (profileChallengeCount) profileChallengeCount.textContent = 'Challenges unavailable';
+        if (profileChallengeStatus) {
+            profileChallengeStatus.className = 'mt-2 text-[11px] font-mono text-neonPink';
+            profileChallengeStatus.textContent = 'Could not read your challenges. Check your connection and press Refresh.';
+        }
+    } finally {
+        if (profileRefresh) profileRefresh.disabled = false;
+    }
+}
+
 // --- ACCOUNT ROW ON THE SETTINGS CARD ---------------------------------------
 
 function renderSettingsAccount(user) {
@@ -211,6 +403,9 @@ async function handleSignedIn(user) {
     userSection.classList.add('flex');
     btnShowLogin.classList.add('hidden');
     userEmailDisplay.innerText = user.email || '';
+    if (profileEmailDisplay) profileEmailDisplay.textContent = user.email || 'Signed-in competitor';
+    // The profile list does not need the judge key that is loaded below: fill it at once.
+    if (document.body.getAttribute('data-view') === 'profile') populateProfileChallenges();
     closeLoginOverlay();
     if (passwordInput) passwordInput.value = '';
 
@@ -258,6 +453,7 @@ async function handleSignedOut() {
     userSection.classList.add('hidden');
     btnShowLogin.classList.remove('hidden');
     userEmailDisplay.innerText = '';
+    if (profileEmailDisplay) profileEmailDisplay.textContent = 'Not signed in';
     if (settingsApiKeyInput) settingsApiKeyInput.value = '';
     window.sessionGroqApiKey = null;
     if (settingsStatus) settingsStatus.classList.add('hidden');
@@ -273,6 +469,7 @@ async function handleSignedOut() {
     }
     if (btnSaveCloud) btnSaveCloud.classList.add('hidden');
     if (btnCloudAnalytics) btnCloudAnalytics.classList.add('hidden');
+    if (document.body.getAttribute('data-view') === 'profile') populateProfileChallenges();
 }
 
 if (auth) {
@@ -405,6 +602,16 @@ btnForgetKey?.addEventListener('click', async () => {
     } catch (error) {
         showSettingsStatus(`Could not remove the saved key: ${error.message}`, 'error');
     }
+});
+
+// --- PROFILE EVENTS ----------------------------------------------------------
+profileRefresh?.addEventListener('click', () => populateProfileChallenges());
+
+// The screen is filled when its route opens, so a shared #/profile link works on a cold load
+// as soon as Firebase has restored the session.
+document.addEventListener('app:view', (event) => {
+    const detail = event.detail || {};
+    if (detail.name === 'profile') populateProfileChallenges();
 });
 
 // --- GLOBAL EXPORTS FOR OTHER SCRIPTS ---

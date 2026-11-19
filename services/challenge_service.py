@@ -146,6 +146,38 @@ def create_challenge(owner_uid, title, bank, *, read_bonuses=True, display_mode=
     raise RuntimeError("Could not allocate a free challenge code — try again") from last_error
 
 
+def list_challenges(owner_uid):
+    """Every challenge this account created, newest first. Metadata only — never answers.
+
+    The ownerUid is already on each challenge document, so the profile is a filtered read of
+    the one authoritative collection rather than a second copy that can drift. Sorting here
+    avoids a Firestore composite index for the equality-filtered query.
+    """
+    if not isinstance(owner_uid, str) or not owner_uid:
+        raise ValueError("Challenge owner must be a signed-in user")
+    try:
+        snapshots = _client().collection(CHALLENGES).where("ownerUid", "==", owner_uid).stream()
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("Challenge service is unavailable") from exc
+    challenges = []
+    for snapshot in snapshots:
+        data = snapshot.to_dict() or {}
+        created = data.get("createdAt", 0)
+        if not isinstance(created, (int, float)):
+            created = 0
+        challenges.append({
+            "code": snapshot.id,
+            "title": data.get("title", ""),
+            "createdAt": created,
+            "questionCount": data.get("questionCount", 0),
+            "packetSummary": data.get("packetSummary", {}),
+            "readBonuses": bool(data.get("readBonuses", True)),
+            "displayMode": data.get("displayMode", "hybrid"),
+        })
+    challenges.sort(key=lambda item: item["createdAt"], reverse=True)
+    return {"challenges": challenges}
+
+
 def get_challenge_meta(code):
     """Readable challenge metadata (no bank, no answers)."""
     try:
