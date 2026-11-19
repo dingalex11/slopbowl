@@ -23,6 +23,7 @@ import sys
 
 os.environ.setdefault("APP_ENV", "development")
 
+from fastapi import HTTPException, Request  # noqa: E402  (after the env guard)
 from fastapi.responses import HTMLResponse  # noqa: E402  (after the env guard)
 
 import main as moderator_module  # noqa: E402
@@ -30,7 +31,7 @@ import services.auth_service as auth_service  # noqa: E402
 import services.ui_service as ui_service  # noqa: E402
 from core.config import APP_ENV, PROJECT_ROOT  # noqa: E402
 from core.events import Event  # noqa: E402
-from core.validation import validate_question_bank  # noqa: E402
+from core.validation import validate_question_bank, validate_room_id  # noqa: E402
 from services.auth_service import AuthenticatedUser, generate_room_code  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
@@ -170,7 +171,10 @@ DEV_SHIM = """
     window.getFirebaseIdToken = async () => DEV.token;
     window.getFirebaseUser = () => ({ uid: DEV.uid, email: DEV.uid + "@dev.local", displayName: DEV.name });
     window.getUserApiKey = () => null;
-    window.ensureRoomOwnership = async () => true;
+    window.ensureRoomOwnership = async (roomId) => {
+      await devApi("/dev/rooms/in-person", { room_id: roomId });
+      return true;
+    };
     async function devApi(url, body) {
       const response = await fetch(url, {
         method: "POST",
@@ -232,6 +236,30 @@ async def dev_state():
             "question_index": moderator.current_q_idx,
         }
     return {"rooms": rooms, "bank": [q["tossup_text"][:70] for q in DEV_BANK]}
+
+
+@ui_service.app.post("/dev/rooms/in-person")
+async def dev_create_in_person_room(request: Request):
+    """Stand-in for the Firestore ownership claim used by the manual setup flow."""
+    header = request.headers.get("authorization", "")
+    token = header[7:] if header.lower().startswith("bearer ") else ""
+    try:
+        user = verify_dev_token(token)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    body = await request.json()
+    room_id = str(body.get("room_id", "")).strip().lower()
+    if not validate_room_id(room_id):
+        raise HTTPException(status_code=400, detail="Invalid room code")
+
+    existing = ROOMS.get(room_id)
+    if existing and existing.get("ownerUid") != user.uid:
+        raise HTTPException(status_code=403, detail="Room belongs to another moderator")
+    ROOMS[room_id] = {"ownerUid": user.uid, "mode": "in_person"}
+    PARTICIPANTS.setdefault(room_id, {})
+    logger.info("development in-person room %s owned by %s", room_id, user.uid)
+    return {"room_id": room_id, "mode": "in_person"}
 
 
 @ui_service.app.post("/dev/load-bank")

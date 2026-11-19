@@ -13,7 +13,7 @@ EVENT_TYPES = {
     "CALIBRATE_BASELINE", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY",
     "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT",
     "MATCH_BEGIN", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP",
-    "PAUSE_MATCH", "LOG_BUZZPOINT", "AUTH_INIT", "SET_READING_MODE",
+    "PAUSE_MATCH", "LOG_BUZZPOINT", "MANUAL_READ_DONE", "AUTH_INIT", "SET_READING_MODE",
 }
 SEATS = {"A-1", "A-C", "A-3", "A-4", "A-5", "B-1", "B-C", "B-3", "B-4", "B-5"}
 
@@ -143,6 +143,8 @@ def validate_client_event(event_type: Any, payload: Any) -> dict[str, Any]:
         raise ValueError("Judgment must be true or false")
     elif event_type == "LOG_BUZZPOINT":
         _bounded_string(payload.get("buzzpoint", ""), "buzzpoint", 80, allow_empty=True)
+        if "after_read" in payload and not isinstance(payload["after_read"], bool):
+            raise ValueError("after_read must be true or false")
     elif event_type == "SET_READING_MODE":
         # stations: every browser speaks the tossup itself. moderator: the moderator's
         # station is the only reader, so the room shares one voice and one read clock.

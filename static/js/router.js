@@ -22,14 +22,9 @@
   const SLIDES = {
     home: 1,
     settings: 2,
-    online: 3,
     'in-person': 4,
     hud: 5,
     bank: 6,
-    prematch: 7,
-    buzzer: 8,
-    lobby: 9,
-    'mod-setup': 10,
     solo: 11,
     'solo-dojo': 12,
     board: 13,
@@ -38,7 +33,7 @@
   // Screens where two teams are actually playing. The header's team scores mean nothing
   // anywhere else, so a 0–0 pill over the home page, the stats board or solo practice is
   // just noise: it is shown only on these, and only once the match has begun.
-  const LIVE_SCORE_SCREENS = ['hud', 'buzzer'];
+  const LIVE_SCORE_SCREENS = ['hud'];
 
   // Full-page stations that are not part of the numbered slide deck.
   const STATIONS = {
@@ -66,9 +61,6 @@
     const params = {};
     if (name === 'challenge') {
       params.code = String(parts[1] || '').toLowerCase();
-    } else if (name === 'join') {
-      name = 'online';
-      params.room = String(parts[1] || '').toLowerCase();
     } else if (name === 'solo' && parts[1] === 'dojo') {
       name = 'solo-dojo';
     } else if (name === 'analytics') {
@@ -85,7 +77,6 @@
     const p = params || {};
     if (name === 'challenge') return p.code ? `#/challenge/${encodeURIComponent(p.code)}` : '#/challenge';
     if (name === 'analytics' && p.code) return `#/analytics/${encodeURIComponent(p.code)}`;
-    if (name === 'online' && p.room) return `#/join/${encodeURIComponent(p.room)}`;
     if (name === 'home') return '#/';
     return `#/${name}`;
   }
@@ -244,7 +235,6 @@
     const hash = window.location.hash;
     const search = new URLSearchParams(window.location.search);
     const challenge = (search.get('challenge') || '').trim().toLowerCase();
-    const room = (search.get('room') || '').toLowerCase();
     const atHome = !hash || hash === '#' || hash === '#/';
     // ?challenge= is the challenge's version of ?room=: a pasted link lands on the
     // challenge screen with its code ready, instead of the home page. A page that has
@@ -253,12 +243,7 @@
       replace(`#/challenge/${encodeURIComponent(challenge)}`, { force: true, instant: true });
       return;
     }
-    // ?room= keeps working: it lands on the online hub with the code already filled in. A
-    // page that has already navigated itself (the room join does) is left alone.
-    if (room && atHome) {
-      replace(`#/join/${encodeURIComponent(room)}`, { force: true, instant: true });
-      return;
-    }
+    // Online room links are retired with the online screens. A bare home page is home.
     if (hash && hash !== '#') {
       apply(hash, { force: true, instant: true });
       return;

@@ -24,8 +24,8 @@ UI_SOURCE = (ROOT / "static/js/ui.js").read_text(encoding="utf-8")
 
 # Every screen a visitor can open, and the address that opens it.
 SCREEN_URLS = (
-    "#/", "#/board", "#/online", "#/analytics", "#/converter", "#/solo", "#/settings",
-    "#/in-person", "#/hud", "#/bank", "#/lobby", "#/buzzer",
+    "#/", "#/board", "#/analytics", "#/converter", "#/solo", "#/settings",
+    "#/in-person", "#/hud", "#/bank",
 )
 
 
@@ -39,10 +39,12 @@ def function_source(source, name):
 class RouteTableTests(unittest.TestCase):
     def test_every_slide_screen_has_a_route(self):
         self.assertIn("const SLIDES = {", ROUTER_SOURCE)
-        for name, number in (("home", 1), ("online", 3), ("hud", 5), ("bank", 6),
-                             ("buzzer", 8), ("board", 13)):
+        for name, number in (("home", 1), ("'in-person'", 4), ("hud", 5), ("bank", 6),
+                             ("solo", 11), ("board", 13)):
             self.assertIn(f"{name}: {number}", ROUTER_SOURCE,
                           f"slide screen {name} must keep its address")
+        for retired in ("online:", "lobby:", "buzzer:", "prematch:", "mod-setup:"):
+            self.assertNotIn(retired, ROUTER_SOURCE, f"retired online screen {retired} still routes")
 
     def test_the_stations_that_were_popups_have_their_own_screens(self):
         self.assertIn("const STATIONS = {", ROUTER_SOURCE)
@@ -63,11 +65,11 @@ class RouteTableTests(unittest.TestCase):
         self.assertIn("window.routerCloseLogin = closeLogin;", ROUTER_SOURCE)
         self.assertIn("new CustomEvent('app:view'", ROUTER_SOURCE)
 
-    def test_a_challenge_url_carries_its_code_and_so_does_a_room_link(self):
+    def test_a_challenge_url_carries_its_code(self):
         self.assertIn("params.code = String(parts[1] || '').toLowerCase();", ROUTER_SOURCE)
         self.assertIn("if (name === 'challenge') return p.code ? `#/challenge/${encodeURIComponent(p.code)}`", ROUTER_SOURCE)
-        self.assertIn("if (name === 'join')", ROUTER_SOURCE)
-        self.assertIn("return `#/join/${encodeURIComponent(p.room)}`;", ROUTER_SOURCE)
+        self.assertNotIn("if (name === 'join')", ROUTER_SOURCE)
+        self.assertNotIn("#/join/", ROUTER_SOURCE)
 
     def test_an_unknown_address_lands_home_instead_of_a_blank_page(self):
         self.assertIn("if (NAMES.indexOf(name) === -1)", ROUTER_SOURCE)
@@ -87,9 +89,11 @@ class ScreenLinkTests(unittest.TestCase):
         self.assertNotIn("nav-btn-", INDEX_SOURCE)
 
     def test_the_home_page_carries_the_ways_in(self):
-        """The four main cards, then the header: no separate index row below them."""
-        for call in ("navigateTo(4)", "navigateTo(3)", "openSoloSetup()"):
+        """The manual and solo cards, then the header: no separate index row below them."""
+        for call in ("navigateTo(4)", "openSoloSetup()"):
             self.assertIn(call, INDEX_SOURCE, f"no door for {call}")
+        self.assertNotIn("navigateTo(3)", INDEX_SOURCE)
+        self.assertNotIn("Play / Host online", INDEX_SOURCE)
         self.assertIn('href="#/board"', INDEX_SOURCE)
         # The header carries the packet upload and the stats station.
         self.assertIn('href="#/bank"', INDEX_SOURCE)
@@ -302,7 +306,7 @@ class HeaderScoreTests(unittest.TestCase):
         # Hidden by default: navigating anywhere starts from "no scores on screen".
         self.assertIn("#header-match-score {\n      display: none;", INDEX_SOURCE)
         self.assertIn("#header-match-score.is-live {", INDEX_SOURCE)
-        self.assertIn("const LIVE_SCORE_SCREENS = ['hud', 'buzzer'];\n", ROUTER_SOURCE)
+        self.assertIn("const LIVE_SCORE_SCREENS = ['hud'];\n", ROUTER_SOURCE)
 
     def test_the_hud_keeps_its_scores_hidden_until_the_match_begins(self):
         # router.js is written inside an IIFE, so its functions close on an indented brace.
@@ -320,18 +324,36 @@ class HeaderScoreTests(unittest.TestCase):
         self.assertIn("if (typeof window.updateHeaderScore === 'function') window.updateHeaderScore();", body)
 
 
-class RoomLinkTests(unittest.TestCase):
-    def test_the_invite_link_is_a_screen_address(self):
-        self.assertIn("#/join/${code}", UI_SOURCE)
+class ManualEntryPointTests(unittest.TestCase):
+    def test_the_online_entry_points_are_retired(self):
+        self.assertNotIn("if (name === 'join')", ROUTER_SOURCE)
+        self.assertNotIn("#/join/", ROUTER_SOURCE)
+        self.assertNotIn("online: 3", ROUTER_SOURCE)
 
-    def test_a_room_link_fills_the_room_code_in(self):
-        self.assertIn("document.addEventListener('app:view'", UI_SOURCE)
-        self.assertIn("if (input && !input.value) input.value = room;", UI_SOURCE)
-        self.assertIn("const room = detail.params && detail.params.room;", UI_SOURCE)
+    def test_setup_stages_the_packet_until_the_match_starts(self):
+        body = function_source(UI_SOURCE, "startInPersonMatch")
+        self.assertIn("window.pendingBank = bankJson;", UI_SOURCE)
+        self.assertIn("window.ensureRoomOwnership(roomId, user.uid)", body)
+        self.assertIn("window._manualSetupPending = true;", body)
+        load = function_source(UI_SOURCE, "openManualHudAfterSetup")
+        self.assertIn("sendEvent('LOAD_BANK', { bank: window.pendingBank });", load)
+        self.assertIn("sendEvent('SAVE_ROSTER', rosterData);", load)
 
-    def test_the_old_room_query_still_works(self):
-        self.assertIn("const roomParam = params.get('room');", UI_SOURCE)
-        self.assertIn("if (room && atHome)", ROUTER_SOURCE)
+    def test_setup_has_no_camera_or_room_code(self):
+        setup = INDEX_SOURCE[INDEX_SOURCE.index('id="slide-4"')
+                             :INDEX_SOURCE.index('id="slide-5"')]
+        self.assertNotIn("camera-select", setup)
+        self.assertNotIn("room-id-input", setup)
+        self.assertNotIn("Create room", setup)
+        self.assertIn("startInPersonMatch()", setup)
+
+    def test_the_manual_hud_has_its_reader_and_buzzpoint_controls(self):
+        for element in ('id="manual-reader-panel"', 'id="reader-question-text"',
+                        'id="reader-answer-key"', 'id="manual-team-a-buzzers"',
+                        'id="manual-team-b-buzzers"', 'id="btn-full-read"',
+                        'id="btn-manual-correct"', 'id="btn-manual-incorrect"',
+                        'id="btn-manual-question-read"', 'id="btn-manual-bonus-read"'):
+            self.assertIn(element, INDEX_SOURCE)
 
 
 if __name__ == "__main__":

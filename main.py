@@ -77,21 +77,24 @@ READING_MODES = ("stations", "moderator")
 
 
 class ScienceBowlModerator:
-    def __init__(self, use_audio=True, use_camera=False, initial_bank=None, inbound_queue_size=INBOUND_QUEUE_SIZE, outbound_queue_size=OUTBOUND_QUEUE_SIZE):
+    def __init__(self, use_audio=True, use_camera=False, initial_bank=None, inbound_queue_size=INBOUND_QUEUE_SIZE, outbound_queue_size=OUTBOUND_QUEUE_SIZE, manual_reader=False):
         self.inbound_queue = asyncio.Queue(maxsize=inbound_queue_size)
         self.outbound_queue = asyncio.Queue(maxsize=outbound_queue_size)
         
         self.use_audio = use_audio
         self.use_camera = use_camera
+        self.manual_reader = bool(manual_reader)
         
-        if not self.use_audio:
+        if self.manual_reader:
+            print("[MANUAL READER]: Human reader mode; no TTS, camera, microphone or AI judge.")
+        elif not self.use_audio:
             print("[AUDIO DISABLED]: Falling back to silent mock audio mode.")
             
         self.judge = None
 
         self.state = StateEngine() 
         
-        if self.use_camera:
+        if self.use_camera and not self.manual_reader:
             self.vision = VisionService(self.inbound_queue, self.outbound_queue)
         else:
             self.vision = None
@@ -123,6 +126,14 @@ class ScienceBowlModerator:
         self.moderator_reading = {"active": False, "kind": None}
         self.answer_audio_open = False
         self.ui_state = {"show": "NONE", "overrides": False}
+        # The manual-reader HUD is driven by phase events and explicit buzzpoint marks.
+        # Keeping the last phase lets a reconnecting owner station rebuild its clocks.
+        self.manual_phase = {"phase": "IDLE", "seconds": None, "started_at": None}
+        self.manual_read_complete = False
+        self.manual_read_started = 0.0
+        self.manual_buzzpoint = ""
+        self.manual_after_read = False
+        self.manual_question = {}
 
     async def _set_moderator_reading(self, active: bool, kind: str | None = None):
         """Tell player stations that the moderator's voice is the one being heard.
@@ -197,7 +208,7 @@ class ScienceBowlModerator:
         if getattr(event, "user_id", None) and getattr(event, "role", None) != "owner":
             return
         evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
-        if evt_type == "AUTH_INIT":
+        if evt_type == "AUTH_INIT" and not self.manual_reader:
             api_key = event.payload.get("api_key")
             if api_key:
                 try:
@@ -248,7 +259,13 @@ class ScienceBowlModerator:
             await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": 0, "score_b": 0}})
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"✅ Loaded {len(self.question_bank)} new questions."}})
             await self.outbound_queue.put({"type": "PREMATCH_READY", "payload": {"count": len(self.question_bank), "first_category": self.question_bank[0].get("category", "GENERAL")}})
-            await self._set_ui_state("NONE")
+            # A manual room can be waiting on "Start Tossup" when a packet lands (the
+            # dev harness preloads one, and a moderator can replace a packet before the
+            # first question). Keep that start control armed instead of hiding it.
+            if self.manual_reader and self.question_bank and self.state.current_state == GameState.IDLE:
+                await self._set_ui_state("TOSSUP")
+            else:
+                await self._set_ui_state("NONE")
             
             await self.inbound_queue.put(Event(type=EventType.STATE_CHANGED, payload={}))
             
@@ -533,6 +550,245 @@ class ScienceBowlModerator:
         }
         self.reading_completions = set()
         return self.current_reading_id
+
+    def _manual_phase_snapshot(self) -> dict:
+        return dict(self.manual_phase)
+
+    async def _set_manual_phase(self, phase: str, seconds: float | None = None, *, started_at: float | None = None, **extra):
+        """Tell the manual-reader HUD which clock is running, and remember it.
+
+        ``started_at`` is epoch milliseconds so a reconnecting owner station can rebuild
+        the same countdown instead of restarting it from zero.
+        """
+        payload = {
+            "phase": phase,
+            "seconds": seconds,
+            "started_at": started_at if started_at is not None else time.time() * 1000,
+        }
+        payload.update(extra)
+        self.manual_phase = payload
+        await self.outbound_queue.put({"type": "MANUAL_PHASE", "payload": dict(payload)})
+
+    def _drop_stale_manual_events(self) -> None:
+        """Discard a buzz or verdict left over from the previous question.
+
+        A click in the last instant of a question can still be in the room queue when
+        the next question starts. Without this, it would answer the wrong question.
+        """
+        kept = []
+        while not self.inbound_queue.empty():
+            try:
+                event = self.inbound_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            evt_type = event.type.name if hasattr(event.type, "name") else str(event.type)
+            if evt_type not in ("BUZZ", "LOG_BUZZPOINT", "FORCE_JUDGMENT", "MANUAL_READ_DONE"):
+                kept.append(event)
+        for event in kept:
+            self.inbound_queue.put_nowait(event)
+
+    @staticmethod
+    def _manual_read_text(q_data: dict, *, bonus: bool = False) -> tuple[str, str, list, bool]:
+        text_field = "bonus_text" if bonus else "tossup_text"
+        answer_field = "bonus_answer" if bonus else "tossup_answer"
+        options_field = "bonus_options" if bonus else "tossup_options"
+        visual_field = "bonus_visual" if bonus else "tossup_visual"
+        text = str(q_data.get(text_field, "") or "").strip()
+        answer = str(q_data.get(answer_field, "") or "").strip()
+        options = q_data.get(options_field, []) or []
+        return text, answer, options, bool(q_data.get(visual_field, False))
+
+    async def _handle_manual_tossup_attempt(self, q_data, allowed_team=None, skip_read=False):
+        """One tossup with a human reader, a click-to-buzz player, and a marked buzzpoint."""
+        self._drop_stale_manual_events()
+        tossup_text, tossup_answer, options, visual = self._manual_read_text(q_data)
+        category = str(q_data.get("category", "GENERAL") or "GENERAL").strip()
+        self.manual_question = {
+            "phase": "TOSSUP",
+            "raw_text": tossup_text,
+            "answer": tossup_answer,
+            "category": category,
+            "options": options,
+            "visual": visual,
+            "allowed_team": allowed_team,
+        }
+        self.state.transition_to(GameState.READING_TOSSUP)
+        self.manual_read_started = asyncio.get_running_loop().time()
+        self.manual_read_complete = bool(skip_read)
+        self.manual_buzzpoint = "Full Read" if skip_read else ""
+        self.manual_after_read = bool(skip_read)
+
+        await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": {
+            "text": tossup_text if tossup_text else "[WARNING: PYTHON MEMORY HAS NO TEXT FOR THIS QUESTION]",
+            "raw_text": tossup_text,
+            "answer": tossup_answer,
+            "category": category,
+            "options": options,
+            "visual": visual,
+            "manual": True,
+            "phase": "TOSSUP",
+            "allowed_team": allowed_team,
+        }})
+
+        if skip_read:
+            await self._set_manual_phase("BUZZ_WINDOW", 5.0)
+            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ 5 Seconds to Buzz..."}})
+        else:
+            await self._set_manual_phase("READING", None)
+            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "🔊 Read the tossup aloud, then click 'Question read'."}})
+
+        deadline = asyncio.get_running_loop().time() + 5.0 if skip_read else None
+        buzz_event = None
+        while True:
+            if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+                await self._set_manual_phase("IDLE")
+                return None, False, False, False, 0.0, ""
+            try:
+                event = await asyncio.wait_for(self.inbound_queue.get(), timeout=0.25 if deadline is not None else 0.5)
+            except asyncio.TimeoutError:
+                continue
+            evt_type = event.type.name if hasattr(event.type, "name") else str(event.type)
+            if evt_type in ADMIN_EVENTS:
+                if evt_type not in ("PING", "PAUSE_MATCH"):
+                    await self.process_admin_event(event)
+                continue
+            if evt_type in ("FORCE_RESET_STATE", "CHALLENGE"):
+                await self._set_manual_phase("IDLE")
+                return None, False, False, evt_type, 0.0, ""
+            if evt_type == "MANUAL_READ_DONE":
+                if not self.manual_read_complete:
+                    self.manual_read_complete = True
+                    deadline = asyncio.get_running_loop().time() + 5.0
+                    await self._set_manual_phase("BUZZ_WINDOW", 5.0)
+                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ 5 Seconds to Buzz..."}})
+                continue
+            if evt_type == "BUZZ":
+                team = event.payload.get("team", "Unknown")
+                if allowed_team and team != allowed_team:
+                    continue
+                if event.role not in (None, "owner"):
+                    continue
+                if self.state.handle_buzz(team, 0, not self.manual_read_complete):
+                    buzz_event = event
+                    break
+
+        raw_team = buzz_event.payload.get("team", "Unknown Team")
+        raw_player = buzz_event.payload.get("player", "Captain")
+        team = raw_team if self.online_mode else self.custom_teams.get(raw_team, raw_team)
+        player = raw_player if self.online_mode else self.custom_roster.get(raw_player, raw_player)
+        self.answering_user_id = None
+        buzz_time = max(0.0, asyncio.get_running_loop().time() - self.manual_read_started)
+        self.manual_after_read = bool(self.manual_read_complete)
+        self.manual_buzzpoint = "Full Read" if self.manual_after_read else ""
+
+        self.state.transition_to(GameState.LISTENING_TOSSUP_ANSWER)
+        await self.outbound_queue.put({"type": "BUZZ", "payload": {"team": team, "player": player, "raw_team": raw_team, "raw_player": raw_player, "after_read": self.manual_after_read}})
+        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🎯 BUZZ: {player} ({team}) — mark the buzzpoint, then judge the answer."}})
+        await self._set_manual_phase("ANSWERING", ANSWER_WINDOW_SECONDS, buzzpoint=self.manual_buzzpoint, after_read=self.manual_after_read)
+
+        correct = None
+        while correct is None:
+            try:
+                event = await asyncio.wait_for(self.inbound_queue.get(), timeout=0.25)
+            except asyncio.TimeoutError:
+                continue
+            evt_type = event.type.name if hasattr(event.type, "name") else str(event.type)
+            if evt_type in ADMIN_EVENTS:
+                if evt_type not in ("PING", "PAUSE_MATCH"):
+                    await self.process_admin_event(event)
+                continue
+            if evt_type in ("FORCE_RESET_STATE", "CHALLENGE"):
+                await self._set_manual_phase("IDLE")
+                return None, False, False, evt_type, 0.0, ""
+            if evt_type == "LOG_BUZZPOINT":
+                after_read = bool(event.payload.get("after_read", False)) or self.manual_read_complete
+                word = str(event.payload.get("buzzpoint", "") or "").strip()
+                if after_read:
+                    self.manual_after_read = True
+                    self.manual_buzzpoint = "Full Read"
+                elif word:
+                    self.manual_after_read = False
+                    self.manual_buzzpoint = word
+                else:
+                    continue
+                self.state.is_interrupted = not self.manual_after_read
+                await self.outbound_queue.put({"type": "BUZZPOINT_SET", "payload": {
+                    "buzzpoint": self.manual_buzzpoint,
+                    "after_read": self.manual_after_read,
+                    "points_if_wrong": 0 if self.manual_after_read else -4,
+                }})
+                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": (
+                    "📍 Buzzpoint: Full read — a wrong answer is INCORRECT (0)."
+                    if self.manual_after_read else
+                    f"📍 Buzzpoint: '{self.manual_buzzpoint}' — a wrong answer is a NEG (-4)."
+                )}})
+                continue
+            if evt_type == "FORCE_JUDGMENT":
+                if not self.manual_buzzpoint:
+                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ Mark the buzzpoint (or Full read) before judging."}})
+                    continue
+                correct = bool(event.payload.get("correct"))
+
+        self.state.is_interrupted = not self.manual_after_read
+        self.state.transition_to(GameState.EVALUATING_TOSSUP)
+        await self._set_manual_phase("IDLE")
+        return buzz_event.payload, correct, not self.manual_after_read, False, buzz_time, self.manual_buzzpoint
+
+    async def _handle_manual_bonus(self, q_data, team):
+        """A bonus read by the human reader, with a manual +10/0 verdict."""
+        self._drop_stale_manual_events()
+        bonus_text, bonus_answer, options, visual = self._manual_read_text(q_data, bonus=True)
+        category = str(q_data.get("category", "GENERAL") or "GENERAL").strip()
+        self.manual_question = {
+            "phase": "BONUS",
+            "raw_text": bonus_text,
+            "answer": bonus_answer,
+            "category": category,
+            "options": options,
+            "visual": visual,
+            "team": team,
+        }
+        await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": {
+            "text": bonus_text if bonus_text else "[WARNING: PYTHON MEMORY HAS NO BONUS TEXT]",
+            "raw_text": bonus_text,
+            "answer": bonus_answer,
+            "category": category,
+            "options": options,
+            "visual": visual,
+            "manual": True,
+            "phase": "BONUS",
+            "team": team,
+        }})
+        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🌟 BONUS for {team}. Read the bonus aloud, then start the 20s confer clock."}})
+
+        confer_started = not bool(bonus_text)
+        if confer_started:
+            await self._set_manual_phase("BONUS_CONFER", 20.0, team=team)
+            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ Conferring (20s). Mark the bonus correct or incorrect when ready."}})
+        else:
+            await self._set_manual_phase("BONUS_READ", None, team=team)
+
+        while True:
+            try:
+                event = await asyncio.wait_for(self.inbound_queue.get(), timeout=0.25)
+            except asyncio.TimeoutError:
+                continue
+            evt_type = event.type.name if hasattr(event.type, "name") else str(event.type)
+            if evt_type in ADMIN_EVENTS:
+                if evt_type not in ("PING", "PAUSE_MATCH"):
+                    await self.process_admin_event(event)
+                continue
+            if evt_type in ("FORCE_RESET_STATE", "CHALLENGE"):
+                await self._set_manual_phase("IDLE")
+                return None, evt_type
+            if evt_type == "MANUAL_READ_DONE" and not confer_started:
+                confer_started = True
+                await self._set_manual_phase("BONUS_CONFER", 20.0, team=team)
+                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ Conferring (20s). Mark the bonus correct or incorrect when ready."}})
+                continue
+            if evt_type == "FORCE_JUDGMENT":
+                await self._set_manual_phase("IDLE", team=team)
+                return bool(event.payload.get("correct")), False
 
     async def _handle_tossup_attempt(self, q_data, allowed_team=None, skip_read=False):
         tossup_text = str(q_data.get('tossup_text', '')).strip()
@@ -864,7 +1120,10 @@ class ScienceBowlModerator:
                 # HIDE BUTTONS WHILE READING/EVALUATING
                 await self._set_ui_state("NONE")
 
-                payload, correct, is_interrupt, interrupt_action, buzz_time, buzz_text = await self._handle_tossup_attempt(q_data)
+                if self.manual_reader:
+                    payload, correct, is_interrupt, interrupt_action, buzz_time, buzz_text = await self._handle_manual_tossup_attempt(q_data)
+                else:
+                    payload, correct, is_interrupt, interrupt_action, buzz_time, buzz_text = await self._handle_tossup_attempt(q_data)
                 
                 if interrupt_action == "FORCE_RESET_STATE": 
                     continue
@@ -927,7 +1186,10 @@ class ScienceBowlModerator:
                         
                         if not skip_rebound:
                             await self._set_ui_state("NONE")
-                            payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_tossup_attempt(q_data, allowed_team=other_team)
+                            if self.manual_reader:
+                                payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_manual_tossup_attempt(q_data, allowed_team=other_team)
+                            else:
+                                payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_tossup_attempt(q_data, allowed_team=other_team)
                         
                     else:
                         # Full Read (No Penalty): 0 points, opposing team immediately gets 5 seconds
@@ -936,7 +1198,10 @@ class ScienceBowlModerator:
                         
                         await self._speak_and_wait("That is incorrect.")
                         
-                        payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_tossup_attempt(q_data, allowed_team=other_team, skip_read=True)
+                        if self.manual_reader:
+                            payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_manual_tossup_attempt(q_data, allowed_team=other_team, skip_read=True)
+                        else:
+                            payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_tossup_attempt(q_data, allowed_team=other_team, skip_read=True)
 
                     # --- EVALUATE THE REBOUND ATTEMPT ---
                     if not skip_rebound:
@@ -978,7 +1243,52 @@ class ScienceBowlModerator:
 
                 await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
 
-                if bonus_earned_by:
+                if bonus_earned_by and self.manual_reader:
+                    self.state.transition_to(GameState.READING_BONUS)
+                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🌟 BONUS for {bonus_earned_by}. Click 'Start Bonus'"}})
+
+                    safe_bonus_preload = str(q_data.get('bonus_text', '')).strip()
+                    await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": {
+                        "text": safe_bonus_preload if safe_bonus_preload else "[WARNING: PYTHON MEMORY HAS NO BONUS TEXT]",
+                        "category": str(q_data.get('category', 'GENERAL')),
+                        "options": q_data.get('bonus_options', []),
+                        "visual": q_data.get('bonus_visual', False)
+                    }})
+                    await self._set_ui_state("BONUS")
+                    action = await self.wait_for_moderator_action(["MANUAL_START_BONUS"])
+                    action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
+                    if action_type == "FORCE_RESET_STATE":
+                        continue
+                    if action_type == "CHALLENGE":
+                        await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)
+                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
+                        self.state.next_question()
+                        self.current_q_idx += 1
+                        continue
+
+                    await self._set_ui_state("NONE")
+                    bonus_correct, bonus_action = await self._handle_manual_bonus(q_data, bonus_earned_by)
+                    if bonus_action == "FORCE_RESET_STATE":
+                        continue
+                    if bonus_action == "CHALLENGE":
+                        await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)
+                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
+                        self.state.next_question()
+                        self.current_q_idx += 1
+                        continue
+
+                    self.state.transition_to(GameState.EVALUATING_BONUS)
+                    self.state.apply_bonus_points(bool(bonus_correct))
+                    bonus_ans_text = str(q_data.get('bonus_answer', ''))
+                    if bonus_correct:
+                        await self.log_event("BONUS", bonus_earned_by, "Captain", True, 10, "Full Read", 0.0)
+                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✅ Bonus Correct! +10 points."}})
+                    else:
+                        await self.log_event("BONUS", bonus_earned_by, "Captain", False, 0, "Full Read", 0.0)
+                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"❌ Bonus Incorrect. The correct answer is {bonus_ans_text}."}})
+                    await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
+
+                elif bonus_earned_by:
                     self.state.transition_to(GameState.READING_BONUS) 
                     await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🌟 BONUS for {bonus_earned_by}. Click 'Start Bonus'"}})
                     

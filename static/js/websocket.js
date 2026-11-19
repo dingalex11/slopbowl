@@ -154,8 +154,10 @@ function connectWebSocket(roomId, apiKey = null) {
             isOnlineCaptain = Boolean(payload.captain);
             const onlineBuzzControls = document.getElementById('online-buzz-controls');
             const manualBuzzControls = document.getElementById('manual-buzz-controls');
+            const manualMode = Boolean(payload.manual_reader);
             onlineBuzzControls?.classList.toggle('hidden', currentRoomMode !== 'online');
-            manualBuzzControls?.classList.toggle('hidden', currentRoomMode !== 'in_person' || currentUserRole !== 'owner');
+            manualBuzzControls?.classList.toggle('hidden', !(currentRoomMode === 'in_person' && currentUserRole === 'owner' && manualMode));
+            manualBuzzControls?.classList.toggle('flex', currentRoomMode === 'in_person' && currentUserRole === 'owner' && manualMode);
             document.querySelectorAll('.moderator-only-control').forEach((control) => {
                 control.classList.toggle('hidden', currentUserRole !== 'owner');
             });
@@ -167,6 +169,10 @@ function connectWebSocket(roomId, apiKey = null) {
             if (typeof applyRoleVisibility === 'function') applyRoleVisibility(currentUserRole);
             if (typeof updateSeatLabels === 'function') updateSeatLabels(payload);
             updateOnlineBuzzButton();
+            if (window.ManualReader) window.ManualReader.onConnected(payload);
+            if (window._manualSetupPending && typeof window.openManualHudAfterSetup === 'function') {
+                window.openManualHudAfterSetup();
+            }
         }
         else if (data.type === 'ROOM_ROSTER') {
             renderOnlineRoster(payload.players || []);
@@ -234,10 +240,21 @@ function connectWebSocket(roomId, apiKey = null) {
             if (payload.show === 'REREAD') btnReread?.classList.remove('hidden');
             if (payload.overrides) overrideGrp?.classList.remove('hidden');
         }
+        else if (data.type === 'MANUAL_PHASE') {
+            if (window.ManualReader) window.ManualReader.setPhase(payload);
+        }
+        else if (data.type === 'BUZZPOINT_SET') {
+            if (window.ManualReader) window.ManualReader.setBuzzpoint(payload.buzzpoint, payload.after_read);
+        }
         else if (data.type === 'UPDATE_QUESTION') {
             currentStageType = "TOSSUP";
-            // AUDIO-ONLY READOUT: question text is never rendered on screen.
-            setStage('READ_TOSSUP'); 
+            if (payload.manual && window.ManualReader) {
+                currentStageType = payload.phase === 'BONUS' ? 'BONUS' : 'TOSSUP';
+                window.ManualReader.setQuestion(payload);
+            } else {
+                // Online readout remains dormant; the manual reader owns the HUD.
+                setStage('READ_TOSSUP');
+            }
             
             const catMap = {
                 "BIOLOGY": "BIO", 
@@ -406,12 +423,29 @@ function connectWebSocket(roomId, apiKey = null) {
         else if (data.type === 'MODERATOR_READING') {
             renderModeratorReading(payload.active, payload.kind);
         }
+        else if (data.type === 'DOWNLOAD_CSV') {
+            const csv = typeof payload.csv_data === 'string' ? payload.csv_data : '';
+            if (!csv) {
+                showEventFeedback('The match log is empty.');
+                return;
+            }
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'slopbowl_match_log.csv';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        }
         else if (data.type === 'READING_MODE') {
             // The moderator's choice, echoed to every station in the room.
             currentReadingMode = payload.mode || 'stations';
             if (typeof renderReadingMode === 'function') renderReadingMode(currentReadingMode);
         }
         else if (data.type === 'START_READING') {
+            if (window.ManualReader && window.ManualReader.isManual()) return;
             if (payload.moderator_only && currentUserRole !== 'owner') return;
             if (currentRoomMode === 'online') {
                 currentReadingId = payload.reading_id || null;
@@ -435,6 +469,7 @@ function connectWebSocket(roomId, apiKey = null) {
             updateOnlineBuzzButton();
         }
         else if (data.type === 'START_LISTENING') {
+            if (window.ManualReader && window.ManualReader.isManual()) return;
             // In-person requests only reach the moderator; online requests only reach the answerer.
             const timeout = payload.timeout || 5.0;
             // The answer window replaces the read, so the "moderator is reading" banner is done.
@@ -493,6 +528,15 @@ function connectWebSocket(roomId, apiKey = null) {
         else if (data.type === 'BUZZ') {
             stopActionTimer(); 
             renderModeratorReading(false);
+            if (currentRoomMode === 'in_person' && window.ManualReader && window.ManualReader.isManual()) {
+                setStage('BUZZ');
+                const manualTeam = payload.team || 'Unknown';
+                const manualPlayer = payload.player || 'Player';
+                const manualPlayerEl = document.getElementById('buzz-player-name');
+                if (manualPlayerEl) manualPlayerEl.innerText = `FLOOR: ${manualTeam} (${manualPlayer})`;
+                window.ManualReader.beginBuzz(payload);
+                return;
+            }
             if (isReading) {
                 const spokenWord = currentSpokenWord;
                 // Stopping the read must not report a completion: the server takes the
@@ -622,7 +666,7 @@ function sendEvent(eventType, payload = {}) {
         console.warn(`Cannot send event ${eventType}: WebSocket is not open.`);
         showEventFeedback(window.activeRoomId || currentRoomId
             ? 'Not connected to the match room — reconnecting. If this persists, sign in again.'
-            : 'Not connected to a match. Create or join a room from Online play first.');
+            : 'Not connected to a match. Start an in-person match first.');
     }
 }
 

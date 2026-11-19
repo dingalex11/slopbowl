@@ -32,3 +32,37 @@ body {
     border-color: #2dd4bf !important; 
     background-color: #25252a !important; 
 }
+
+/* Manual-reader question words. Every word is a real button, but it must read
+   like prose until the moderator has a buzz to mark. */
+.reader-token {
+    display: inline;
+    margin: 0 1px;
+    padding: 1px 2px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #e2e8f0;
+    font: inherit;
+    line-height: 1.75;
+    cursor: default;
+    transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+.reader-token:disabled {
+    opacity: 1;
+    color: inherit;
+    -webkit-text-fill-color: currentColor;
+}
+.reader-token.is-clickable {
+    cursor: pointer;
+}
+.reader-token.is-clickable:hover {
+    background-color: rgba(0, 243, 255, 0.16);
+    color: #00f3ff;
+}
+.reader-token.is-selected {
+    background-color: #00f3ff;
+    color: #000000;
+    box-shadow: 0 0 12px rgba(0, 243, 255, 0.6);
+    -webkit-text-fill-color: #000000;
+}

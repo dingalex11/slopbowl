@@ -4,6 +4,13 @@ let setupComplete = false;
 let isMatchPaused = false;
 let currentRoomId = null;
 
+// The packet is staged locally on the setup page, then sent once the room socket
+// is authenticated. A packet upload no longer requires an already-open room.
+window.pendingBank = null;
+window.pendingBankName = '';
+window._manualSetupPending = false;
+let manualStartBusy = false;
+
 // --- ROSTER ---
 function updateRosterNames(rosterData) {
     if (!rosterData) return;
@@ -28,6 +35,7 @@ function updateRosterNames(rosterData) {
             pill.innerText = `${prefix}: ${val}`;
         }
     }
+    if (window.ManualReader) window.ManualReader.setRoster(rosterData);
 }
 
 // --- CHALLENGE ---
@@ -149,14 +157,12 @@ if (bankFileInput) {
             if (!Array.isArray(bankJson) || bankJson.length === 0 || bankJson.length > 500 || !bankJson[0].tossup_text) {
                 throw new Error("Invalid format. Choose 1-500 questions with tossup text.");
             }
-            if (typeof isRoomConnected !== 'function' || !isRoomConnected()) {
-                throw new Error("Not connected to the match room — the packet was not sent.");
-            }
-            sendEvent('LOAD_BANK', { bank: bankJson });
+            window.pendingBank = bankJson;
+            window.pendingBankName = file.name;
             if (typeof soloRegisterPacketFromApp === 'function') soloRegisterPacketFromApp(file.name.replace(/\.(json|txt)$/i, ''), bankJson);
             if (bankFileName) {
-                bankFileName.innerText = `Sending ${file.name} (${bankJson.length} questions) — waiting for confirmation...`;
-                bankFileName.className = "text-xs text-neonAmber font-mono font-bold animate-pulse";
+                bankFileName.innerText = `${file.name} — ${bankJson.length} question${bankJson.length === 1 ? '' : 's'} ready. Start the match to send it.`;
+                bankFileName.className = "text-xs text-neonGreen font-mono font-bold";
             }
         } catch (err) {
             if (bankFileName) {
@@ -413,7 +419,7 @@ async function joinRoom() {
 }
 
 // --- SETUP / ROSTER CONFIRM ---
-function confirmSetup() {
+function collectRoster() {
     const getVal = (id, defaultVal) => {
         const el = document.getElementById(id);
         const value = (el && el.value.trim() !== '') ? el.value.trim() : defaultVal;
@@ -423,36 +429,150 @@ function confirmSetup() {
         return value;
     };
 
+    return {
+        teams: {
+            "Team A": getVal('input-team-a-name', "Team A"),
+            "Team B": getVal('input-team-b-name', "Team B")
+        },
+        players: {
+            "A-1": getVal('roster-A-1', "Player 1"),
+            "A-C": getVal('roster-A-C', "Captain"),
+            "A-3": getVal('roster-A-3', "Player 3"),
+            "A-4": getVal('roster-A-4', "Player 4"),
+            "A-5": getVal('roster-A-5', "Player 5"),
+            "B-1": getVal('roster-B-1', "Player 1"),
+            "B-C": getVal('roster-B-C', "Captain"),
+            "B-3": getVal('roster-B-3', "Player 3"),
+            "B-4": getVal('roster-B-4', "Player 4"),
+            "B-5": getVal('roster-B-5', "Player 5")
+        }
+    };
+}
+
+function generateInPersonRoomCode() {
+    const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+    const bytes = new Uint8Array(10);
+    if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+        window.crypto.getRandomValues(bytes);
+    } else {
+        for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
+}
+
+function openManualHudAfterSetup() {
+    if (!window._manualSetupPending) return;
+    window._manualSetupPending = false;
+    if (!window.pendingBank) {
+        showToast('Choose a question packet before starting the match.');
+        return;
+    }
+    if (!isRoomConnected()) {
+        showToast('The match room is not connected yet. Try again in a moment.');
+        return;
+    }
+
+    const rosterData = window._manualRoster || collectRoster();
+    window._manualRoster = rosterData;
+    updateRosterNames(rosterData);
+    sendEvent('SAVE_ROSTER', rosterData);
+    sendEvent('LOAD_BANK', { bank: window.pendingBank });
+    setupComplete = true;
+    navigateTo(5);
+}
+window.openManualHudAfterSetup = openManualHudAfterSetup;
+
+// One click starts the whole local match: validate the staged packet and roster,
+// claim a local room only this signed-in moderator can open, then send both once
+// the authenticated socket is ready. No room code is shown or entered.
+async function startInPersonMatch() {
+    if (manualStartBusy) return;
+
     let rosterData;
     try {
-        rosterData = {
-            teams: {
-                "Team A": getVal('input-team-a-name', "Team A"),
-                "Team B": getVal('input-team-b-name', "Team B")
-            },
-            players: {
-                "A-1": getVal('roster-A-1', "Player 1"),
-                "A-C": getVal('roster-A-C', "Captain"),
-                "A-3": getVal('roster-A-3', "Player 3"),
-                "A-4": getVal('roster-A-4', "Player 4"),
-                "A-5": getVal('roster-A-5', "Player 5"),
-                "B-1": getVal('roster-B-1', "Player 1"),
-                "B-C": getVal('roster-B-C', "Captain"),
-                "B-3": getVal('roster-B-3', "Player 3"),
-                "B-4": getVal('roster-B-4', "Player 4"),
-                "B-5": getVal('roster-B-5', "Player 5")
-            }
-        };
+        rosterData = collectRoster();
     } catch (error) {
         showToast(error.message);
         return;
     }
+    if (!window.pendingBank) {
+        showToast('Choose a JSON question packet before starting the match.');
+        const status = document.getElementById('bank-file-name');
+        if (status) {
+            status.innerText = 'No packet staged. Browse a JSON file first.';
+            status.className = 'text-xs text-neonPink font-mono font-bold';
+        }
+        return;
+    }
 
-    sendEvent('SAVE_ROSTER', rosterData);
-    updateRosterNames(rosterData);
+    if (window.firebaseAuthReady) {
+        try { await window.firebaseAuthReady; } catch (error) { /* sign-in check below reports it */ }
+    }
+    const user = window.getFirebaseUser ? window.getFirebaseUser() : null;
+    if (!user) {
+        showToast('Sign in before starting an in-person match.');
+        openModal('auth-modal');
+        return;
+    }
+    if (typeof window.ensureRoomOwnership !== 'function') {
+        showToast('Sign-in is still initializing. Try again in a moment.');
+        return;
+    }
 
-    setupComplete = true;
-    navigateTo(5);
+    manualStartBusy = true;
+    const startButton = document.querySelector('button[onclick*="startInPersonMatch"]');
+    if (startButton) {
+        startButton.disabled = true;
+        startButton.innerText = 'Starting...';
+    }
+
+    try {
+        window._manualRoster = rosterData;
+        updateRosterNames(rosterData);
+
+        if (isRoomConnected() && window.activeRoomId) {
+            window._manualSetupPending = true;
+            openManualHudAfterSetup();
+            return;
+        }
+
+        let roomId = '';
+        let ownsRoom = false;
+        for (let attempt = 0; attempt < 3 && !ownsRoom; attempt += 1) {
+            roomId = generateInPersonRoomCode();
+            ownsRoom = await window.ensureRoomOwnership(roomId, user.uid);
+        }
+        if (!ownsRoom) throw new Error('Could not allocate a local match room. Try again.');
+
+        window.activeRoomId = roomId;
+        currentRoomId = roomId;
+        window._manualSetupPending = true;
+        setupComplete = true;
+        updateRoomCodeDisplay();
+        connectWebSocket(roomId, window.getUserApiKey ? await window.getUserApiKey() : null);
+        showToast('Opening the moderator HUD...');
+
+        setTimeout(() => {
+            if (!window._manualSetupPending) return;
+            window._manualSetupPending = false;
+            showToast('The match room did not connect. Check your connection and try again.');
+        }, 12000);
+    } catch (error) {
+        window._manualSetupPending = false;
+        showToast(`Unable to start the match: ${error.message || error}`);
+    } finally {
+        manualStartBusy = false;
+        if (startButton) {
+            startButton.disabled = false;
+            startButton.innerText = 'Start match';
+        }
+    }
+}
+
+// Keep old inline handlers (and the legacy online pages) from breaking if they call
+// the former setup entry point.
+function confirmSetup() {
+    return startInPersonMatch();
 }
 
 // --- MATCH START ---

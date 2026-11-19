@@ -38,7 +38,7 @@ async def _revalidate_client_code(request: Request, call_next):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
-OWNER_ONLY_EVENTS = {"SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY", "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP",    "PAUSE_MATCH", "MATCH_BEGIN", "READING_DONE", "READING_FAILED", "ANSWER_AUDIO", "LOG_BUZZPOINT", "AUTH_INIT", "SET_READING_MODE"}
+OWNER_ONLY_EVENTS = {"SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY", "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP",    "PAUSE_MATCH", "MATCH_BEGIN", "READING_DONE", "READING_FAILED", "ANSWER_AUDIO", "LOG_BUZZPOINT", "MANUAL_READ_DONE", "AUTH_INIT", "SET_READING_MODE"}
 OWNER_ONLY_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "DOWNLOAD_CSV", "DEBUG_FRAME"}
 ONLINE_PUBLIC_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "UPDATE_STATUS", "UPDATE_SCORE", "BUZZ", "ROOM_ROSTER", "CONNECTED", "ERROR", "OPEN_BUZZ", "CLOSE_BUZZ", "MODERATOR_READING"}
 ONLINE_PLAYER_EVENTS = {"BUZZ", "ANSWER_AUDIO", "READING_DONE", "READING_FAILED", "PING"}
@@ -119,7 +119,8 @@ class RoomManager:
                 if len(self.rooms) >= MAX_ROOMS:
                     raise RuntimeError("Room capacity reached")
                 from main import ScienceBowlModerator
-                moderator = ScienceBowlModerator(use_camera=(mode == "in_person"), use_audio=True, initial_bank=[], inbound_queue_size=INBOUND_QUEUE_SIZE, outbound_queue_size=OUTBOUND_QUEUE_SIZE)
+                manual_reader = mode == "in_person"
+                moderator = ScienceBowlModerator(use_camera=False, use_audio=not manual_reader, manual_reader=manual_reader, initial_bank=[], inbound_queue_size=INBOUND_QUEUE_SIZE, outbound_queue_size=OUTBOUND_QUEUE_SIZE)
                 moderator.online_mode = mode == "online"
                 moderator.online_participants = {}
                 moderator.answering_user_id = None
@@ -138,7 +139,7 @@ class RoomManager:
                 moderator.online_participants = {item.user_id: item for item in self.active_connections[room_id] if item.role in {"owner", "player"} and item.team}
 
         self._ensure_reaper()
-        await websocket.send_json({"type": "CONNECTED", "payload": {"role": role, "seat": seat, "mode": mode, "team": team, "name": player_name, "captain": captain, "reading_mode": getattr(moderator, "reading_mode", "stations"), "moderator_reading": dict(getattr(moderator, "moderator_reading", {"active": False, "kind": None}))}})
+        await websocket.send_json({"type": "CONNECTED", "payload": {"role": role, "seat": seat, "mode": mode, "team": team, "name": player_name, "captain": captain, "reading_mode": getattr(moderator, "reading_mode", "stations"), "moderator_reading": dict(getattr(moderator, "moderator_reading", {"active": False, "kind": None})), "manual_reader": bool(getattr(moderator, "manual_reader", False)), "manual_phase": dict(getattr(moderator, "manual_phase", {"phase": "IDLE", "seconds": None, "started_at": None}))}})
         if role == "owner":
             # Re-arm the moderator's last known control so a reconnect (team change,
             # dropped socket) never leaves the HUD without a usable start button.
@@ -780,8 +781,13 @@ async def room_websocket_endpoint(websocket: WebSocket, room_id: str):
                         continue
             elif event_type == "BUZZ" and mode == "in_person":
                 player = event_payload.get("player")
-                expected_team = "Team A" if player == "Manual-A" else "Team B"
-                if player not in ("Manual-A", "Manual-B") or event_payload.get("team") != expected_team:
+                if player in ("Manual-A", "Manual-B"):
+                    expected_team = "Team A" if player == "Manual-A" else "Team B"
+                elif isinstance(player, str) and player[:1] in ("A", "B") and player[1:] in ("-1", "-C", "-3", "-4", "-5"):
+                    expected_team = "Team A" if player.startswith("A") else "Team B"
+                else:
+                    expected_team = None
+                if expected_team is None or event_payload.get("team") != expected_team:
                     await websocket.send_json({"type": "ERROR", "payload": {"message": "Manual buzz must match Team A or Team B"}})
                     continue
             elif role != "owner" and event_type in OWNER_ONLY_EVENTS and not (mode == "online" and event_type in ONLINE_PLAYER_EVENTS):

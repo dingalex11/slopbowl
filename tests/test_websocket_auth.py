@@ -83,14 +83,13 @@ class WebSocketAuthorizationTests(unittest.TestCase):
         self.assertIn("Science Bowl", page.text)
         self.assertEqual(client_script.status_code, 200)
         self.assertIn("CONNECTING TO MATCH", client_script.text)
-        # The online buzzer control is bound by class since the MASSIVE FIX rename.
-        self.assertIn("js-online-buzz", page.text)
-        # The create-match card no longer asks for a hand-typed room code.
-        self.assertNotIn("create-room-code", page.text)
-        self.assertIn("online-player-name", page.text)
-        # The captain-claim control is bound by claimCaptain since the MASSIVE FIX rename.
-        self.assertIn('onclick="claimCaptain(', page.text)
-        self.assertIn('id="online-roster"', page.text)
+        # The active match surface is the in-person manual reader, not the online lobby.
+        self.assertIn('id="manual-reader-panel"', page.text)
+        self.assertIn('id="manual-team-a-buzzers"', page.text)
+        self.assertIn('id="buzzpoint-current"', page.text)
+        self.assertNotIn('id="camera-select"', page.text)
+        self.assertNotIn('id="online-player-name"', page.text)
+        self.assertNotIn('id="online-roster"', page.text)
 
     def test_match_controls_and_camera_frames_are_only_sent_to_moderator_station(self):
         async def verify_broadcasts():
