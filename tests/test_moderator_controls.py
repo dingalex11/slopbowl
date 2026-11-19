@@ -54,6 +54,91 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("complete", text.lower())
 
+    async def test_packet_exhaustion_emits_one_match_complete_summary(self):
+        moderator = ScienceBowlModerator(
+            use_audio=False,
+            initial_bank=[{"tossup_text": "Question", "tossup_answer": "Answer"}],
+        )
+        moderator.current_q_idx = 1
+        moderator.state.team_a_score = 38
+        moderator.state.team_b_score = 28
+        moderator.match_log = [{
+            "Q_Num": 1, "Event_Type": "TOSSUP", "Team": "Team A", "Player": "A-1",
+            "Correct": True, "Points": 4, "Buzzpoint": "capital", "Buzz_Time": "3.200",
+            "Score_A": 38, "Score_B": 28,
+        }]
+
+        task = asyncio.create_task(moderator.run_game_loop())
+        try:
+            message = await self._next_message(moderator)
+            self.assertEqual(message["type"], "MATCH_COMPLETE")
+            self.assertEqual(message["payload"]["score_a"], 38)
+            self.assertEqual(message["payload"]["score_b"], 28)
+            self.assertEqual(message["payload"]["question_count"], 1)
+            self.assertEqual(message["payload"]["log"], moderator.match_log)
+
+            # The loop keeps serving exports and packet loads, but must not announce the
+            # same ending once per idle tick.
+            await asyncio.sleep(1.2)
+            self.assertTrue(moderator.outbound_queue.empty())
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_end_match_mid_read_emits_summary_and_keeps_export_alive(self):
+        """End Match must stop a live tossup and leave the room idle, not dead."""
+        moderator = ScienceBowlModerator(
+            use_audio=False,
+            manual_reader=True,
+            initial_bank=[{"tossup_text": "Question", "tossup_answer": "Answer"}],
+        )
+        moderator.inbound_queue.put_nowait(Event(type="MANUAL_START_TOSSUP", payload={}))
+        task = asyncio.create_task(moderator.run_game_loop())
+
+        async def next_of_type(message_type, timeout=3.0):
+            deadline = asyncio.get_running_loop().time() + timeout
+            while True:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    self.fail(f"timed out waiting for {message_type}")
+                message = await asyncio.wait_for(moderator.outbound_queue.get(), remaining)
+                if message.get("type") == message_type:
+                    return message
+
+        try:
+            # Wait until the human reader is actually mid-read, then pull the plug.
+            deadline = asyncio.get_running_loop().time() + 3.0
+            while True:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    self.fail("timed out waiting for the reading phase")
+                message = await asyncio.wait_for(moderator.outbound_queue.get(), remaining)
+                if message.get("type") == "MANUAL_PHASE" and message["payload"].get("phase") == "READING":
+                    break
+
+            moderator.inbound_queue.put_nowait(Event(type="END_MATCH", payload={}))
+            complete = await next_of_type("MATCH_COMPLETE")
+            # The tossup was never adjudicated, so the summary must not claim it was played.
+            self.assertEqual(complete["payload"]["question_count"], 0)
+            self.assertEqual(complete["payload"]["score_a"], 0)
+            self.assertEqual(complete["payload"]["score_b"], 0)
+            self.assertEqual(complete["payload"]["log"], [])
+            self.assertEqual(moderator.current_q_idx, 1)
+            self.assertEqual(moderator.state.current_state, GameState.QUESTION_COMPLETE)
+            self.assertEqual(moderator.manual_phase["phase"], "IDLE")
+
+            # The finished room still serves the final screen's Export CSV.
+            moderator.inbound_queue.put_nowait(Event(type="EXPORT_CSV", payload={}))
+            exported = await next_of_type("DOWNLOAD_CSV")
+            self.assertIn("Q_Num", exported["payload"]["csv_data"])
+
+            # A forced end is a one-time boundary, not an event replayed every idle tick.
+            await asyncio.sleep(1.2)
+            self.assertTrue(moderator.outbound_queue.empty())
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
     async def test_idle_loop_disarms_a_stale_start_control(self):
         """A moderator whose packet ran out must not keep an armed Start Tossup button."""
         moderator = ScienceBowlModerator(use_audio=False)

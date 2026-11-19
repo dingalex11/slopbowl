@@ -573,6 +573,56 @@
           <span class="text-slate-400 font-mono mt-5 text-sm uppercase tracking-widest">Opens the moderator HUD</span>
         </div>
 
+        <!-- MATCH ENDED SCREEN -->
+        <div id="match-end-screen" class="match-end-screen hidden" role="dialog" aria-modal="true" aria-labelledby="match-end-title" aria-hidden="true">
+          <div class="match-end-card">
+            <div class="match-end-header">
+              <div>
+                <p class="match-end-kicker">FINAL SCORE</p>
+                <h2 id="match-end-title" class="match-end-title">Match complete</h2>
+                <p id="match-end-result" class="match-end-result">Final result</p>
+              </div>
+              <button type="button" id="btn-close-match-end" class="match-end-close" aria-label="Close match summary">&times;</button>
+            </div>
+
+            <div class="match-end-scoreboard">
+              <div class="match-end-team match-end-team-a">
+                <span id="match-end-team-a-name" class="match-end-team-name">TEAM A</span>
+                <strong id="match-end-score-a" class="match-end-team-points">0</strong>
+              </div>
+              <div class="match-end-final-label">FINAL</div>
+              <div class="match-end-team match-end-team-b">
+                <strong id="match-end-score-b" class="match-end-team-points">0</strong>
+                <span id="match-end-team-b-name" class="match-end-team-name">TEAM B</span>
+              </div>
+            </div>
+
+            <div class="match-end-chart-card">
+              <div class="match-end-chart-head">
+                <div>
+                  <h3>Score progression</h3>
+                  <p>Team score by question</p>
+                </div>
+                <div class="match-end-legend">
+                  <span><i class="match-end-dot match-end-dot-a"></i><b id="match-end-legend-a">Team A</b></span>
+                  <span><i class="match-end-dot match-end-dot-b"></i><b id="match-end-legend-b">Team B</b></span>
+                </div>
+              </div>
+              <div class="match-end-chart-wrap">
+                <svg id="match-score-graph" class="match-score-graph" viewBox="0 0 760 300" role="img" aria-label="Team scores by question"></svg>
+              </div>
+            </div>
+
+            <div class="match-end-footer">
+              <span id="match-end-question-count" class="match-end-count">0 questions played</span>
+              <div class="match-end-actions">
+                <button type="button" id="btn-close-match-end-footer" class="match-end-btn match-end-btn-ghost">Review score sheet</button>
+                <button type="button" id="btn-export-csv-end" class="match-end-btn match-end-btn-primary" onclick="sendEvent('EXPORT_CSV')">Export CSV</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- TEAM SCORE RAILS -->
         <div class="match-scorebar">
           <div class="match-team-score match-team-score-a">
@@ -707,7 +757,9 @@
                 <button onclick="triggerChallenge(); playSound('click');">&#9888;&#65039; Challenge</button>
                 <button onclick="sendEvent('ADJUST_SCORE', {team: 'Team A', delta: 4})">+4 Team A</button>
                 <button onclick="sendEvent('ADJUST_SCORE', {team: 'Team B', delta: 4})">+4 Team B</button>
-                <button onclick="sendEvent('EXPORT_CSV')">Export Log</button>
+                <button id="btn-export-csv" onclick="sendEvent('EXPORT_CSV')" title="Download the match log as CSV">Export CSV</button>
+                <button id="btn-match-summary" class="hidden" onclick="window.MatchSummary &amp;&amp; window.MatchSummary.showLast()">Summary</button>
+                <button id="btn-end-match" class="match-end-match" onclick="sendEvent('END_MATCH')" title="End the match now and open the final score screen">End Match</button>
                 <button onclick="sendEvent('FORCE_RESET_STATE')" class="match-reset">Override &amp; Reset</button>
               </div>
 
@@ -1838,6 +1890,7 @@
   <script src="/static/js/slopbowl_ui.js"></script>
   <script src="/static/js/ui.js"></script>
   <script src="/static/js/manual_reader.js"></script>
+  <script src="/static/js/match_summary.js"></script>
   <script src="/static/js/websocket.js"></script>
   <script src="/static/js/pdf_parser.js"></script>
   <script src="/static/js/analytics.js"></script>

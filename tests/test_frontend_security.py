@@ -25,8 +25,9 @@ class FrontendSecurityTests(unittest.TestCase):
 
     def test_match_controls_are_locked_to_the_moderator_station(self):
         source = (ROOT / "services/ui_service.py").read_text(encoding="utf-8")
-        self.assertIn('OWNER_ONLY_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "DOWNLOAD_CSV", "DEBUG_FRAME"}', source)
+        self.assertIn('OWNER_ONLY_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "DOWNLOAD_CSV", "MATCH_COMPLETE", "DEBUG_FRAME"}', source)
         self.assertIn('kind in OWNER_ONLY_OUTPUTS', source)
+        self.assertIn('"END_MATCH"', source)
 
     def test_online_controls_are_bound_to_server_phase_team_and_captain(self):
         source = (ROOT / "static/js/websocket.js").read_text(encoding="utf-8")

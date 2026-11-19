@@ -20,6 +20,7 @@ let onlineBuzzOpen = false;
 let isOnlineCaptain = false;
 let currentOnlineBuzzTeam = null;
 let onlineCaptainOnly = false;
+let currentMatchLog = [];
 // True while the moderator's station is the room's only voice (shared-read mode).
 let moderatorReading = { active: false, kind: null };
 let isReadingOnline = false;
@@ -202,7 +203,29 @@ function connectWebSocket(roomId, apiKey = null) {
             if (loaded) announcePacketLoaded({ count: Number(loaded[1]) });
         }
         else if (data.type === 'PREMATCH_READY') {
+            // A new packet is a new match: put the previous final screen away.
+            currentMatchLog = [];
+            if (window.MatchSummary) window.MatchSummary.hide();
+            document.getElementById('btn-match-summary')?.classList.add('hidden');
+            document.getElementById('btn-end-match')?.classList.remove('hidden');
             announcePacketLoaded(payload);
+        }
+        else if (data.type === 'MATCH_COMPLETE') {
+            currentMatchLog = Array.isArray(payload.log) ? payload.log : currentMatchLog;
+            // The match may end while a question is still being read or answered.
+            // Silence the room and stop any open recording before showing the final screen.
+            cancelSpeech();
+            cancelListening();
+            stopActionTimer();
+            // A forced end can land between the server's phase updates; leave the HUD
+            // idle behind the summary rather than showing a read that is still running.
+            if (window.ManualReader) window.ManualReader.setPhase({ phase: 'IDLE', seconds: null });
+            if (window.MatchSummary) window.MatchSummary.show(payload, currentMatchLog);
+            // Retry the cloud copy at the match boundary in case the final SYNC_LOG was
+            // dropped; the end screen must not depend on the socket staying alive.
+            if (window.saveMatchLogToCloud && typeof currentRoomId !== 'undefined') {
+                window.saveMatchLogToCloud(currentRoomId, currentMatchLog);
+            }
         }
         else if (data.type === 'ERROR') {
             const roomError = payload.message || 'The room rejected that action.';
@@ -217,9 +240,10 @@ function connectWebSocket(roomId, apiKey = null) {
         // ... [Existing websocket.js handlers like NEW_LOG_ENTRY] ...
         
         else if (data.type === 'SYNC_LOG') {
+            currentMatchLog = Array.isArray(payload.log) ? payload.log : [];
             // Push the full array of JSON log entries to Firestore
             if (window.saveMatchLogToCloud && typeof currentRoomId !== 'undefined') {
-                window.saveMatchLogToCloud(currentRoomId, payload.log);
+                window.saveMatchLogToCloud(currentRoomId, currentMatchLog);
             }
         }
         else if (data.type === 'UI_STATE') {
@@ -929,6 +953,20 @@ let mediaRecorder = null;
 let audioChunks = [];
 let micStream = null;
 let recordTimeout = null;
+
+function cancelListening() {
+    if (recordTimeout) {
+        clearTimeout(recordTimeout);
+        recordTimeout = null;
+    }
+    if (mediaRecorder) {
+        // A forced match end must not upload the partial answer after the summary opens.
+        mediaRecorder.ondataavailable = null;
+        mediaRecorder.onstop = null;
+        if (mediaRecorder.state !== "inactive") mediaRecorder.stop();
+    }
+    audioChunks = [];
+}
 
 async function startListening(timeoutSeconds, expiresAt) {
     const statusEl = document.getElementById('header-status');

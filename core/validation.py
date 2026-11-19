@@ -11,7 +11,7 @@ EVENT_TYPES = {
     "PING", "BUZZ", "READING_DONE", "READING_FAILED", "ANSWER_AUDIO", "PROCESS_FRAME",
     "SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION",
     "CALIBRATE_BASELINE", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY",
-    "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT",
+    "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT", "END_MATCH",
     "MATCH_BEGIN", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP",
     "PAUSE_MATCH", "LOG_BUZZPOINT", "MANUAL_READ_DONE", "AUTH_INIT", "SET_READING_MODE",
 }
@@ -154,5 +154,7 @@ def validate_client_event(event_type: Any, payload: Any) -> dict[str, Any]:
         _bounded_string(payload.get("api_key", ""), "API key", 256, allow_empty=True)
     elif event_type == "PAUSE_MATCH" and not isinstance(payload.get("paused"), bool):
         raise ValueError("Pause state must be true or false")
+    elif event_type == "END_MATCH" and payload:
+        raise ValueError("End Match takes no fields")
 
     return payload

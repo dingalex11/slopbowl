@@ -63,8 +63,12 @@ ADMIN_EVENTS = (
     "EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE",
     "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE",
     "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT",
-    "SET_READING_MODE",
+    "SET_READING_MODE", "END_MATCH",
 ) + MANUAL_START_EVENTS
+
+
+class MatchEnded(Exception):
+    """Abort the question in flight and return the room to its idle loop."""
 
 # The two ways an online tossup can be delivered:
 #   stations  - every player's browser speaks the text with its own voice (the default).
@@ -105,6 +109,10 @@ class ScienceBowlModerator:
         self.match_log = []
         self.question_bank = validate_question_bank(initial_bank) if initial_bank else []
         self.current_q_idx = 0
+        # Packet exhaustion is the match boundary: announce it once, then leave the room
+        # idle so the owner can export the log or load the next packet.
+        self.match_complete_notified = False
+        self.match_complete_question_count = None
 
         self.custom_teams = {}
         self.custom_roster = {}
@@ -171,6 +179,61 @@ class ScienceBowlModerator:
             return "⚠️ No question packet loaded — upload one in Pre Match Settings."
         return "🏁 Every question in this packet is complete — load a new packet to play on."
 
+    def _match_complete_data(self) -> dict:
+        """The final score, packet size and adjudicated log for the summary screen."""
+        return {
+            "score_a": self.state.team_a_score,
+            "score_b": self.state.team_b_score,
+            "question_count": (
+                self.match_complete_question_count
+                if self.match_complete_question_count is not None
+                else len(self.question_bank)
+            ),
+            "log": [dict(row) for row in self.match_log],
+        }
+
+    async def _notify_match_complete(self):
+        """Tell the owner station once that the packet has ended.
+
+        The game loop stays alive afterwards so Export CSV, roster changes and a new
+        LOAD_BANK still work; this event is only the boundary marker for the UI.
+        """
+        if self.match_complete_notified:
+            return
+        self.match_complete_notified = True
+        self.state.transition_to(GameState.QUESTION_COMPLETE)
+        if self.ui_state.get("show") != "NONE":
+            await self._set_ui_state("NONE")
+        await self.outbound_queue.put({"type": "MATCH_COMPLETE", "payload": self._match_complete_data()})
+
+    def _prepare_forced_end(self):
+        """Freeze the current match without awarding or adjudicating the live question."""
+        logged_count = 0
+        for row in self.match_log:
+            try:
+                logged_count = max(logged_count, int(row.get("Q_Num", 0)))
+            except (TypeError, ValueError):
+                continue
+        self.match_complete_question_count = min(
+            len(self.question_bank),
+            max(self.current_q_idx, logged_count),
+        )
+        self.current_q_idx = len(self.question_bank)
+        self.state.transition_to(GameState.QUESTION_COMPLETE)
+        self.manual_phase = {"phase": "IDLE", "seconds": None, "started_at": None}
+        self.manual_read_complete = False
+        self.manual_buzzpoint = ""
+        self.manual_after_read = False
+        self.current_reading_id = None
+        self.reading_expected_users.clear()
+        self.reading_completions.clear()
+        self.online_buzz_open = False
+        self.online_buzz_team = None
+        self.online_buzz_captain_only = False
+        self.answer_audio_open = False
+        self.answering_user_id = None
+        self.moderator_reading = {"active": False, "kind": None}
+
     @staticmethod
     def _safe_csv_value(value):
         if isinstance(value, str) and value[:1] in "=+-@\t\r":
@@ -208,6 +271,9 @@ class ScienceBowlModerator:
         if getattr(event, "user_id", None) and getattr(event, "role", None) != "owner":
             return
         evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
+        if evt_type == "END_MATCH":
+            self._prepare_forced_end()
+            raise MatchEnded()
         if evt_type == "AUTH_INIT" and not self.manual_reader:
             api_key = event.payload.get("api_key")
             if api_key:
@@ -255,6 +321,8 @@ class ScienceBowlModerator:
             self.state.team_b_score = 0
             self.state.transition_to(GameState.IDLE)
             self.match_log = []
+            self.match_complete_notified = False
+            self.match_complete_question_count = None
             
             await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": 0, "score_b": 0}})
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"✅ Loaded {len(self.question_bank)} new questions."}})
@@ -398,7 +466,7 @@ class ScienceBowlModerator:
             expected_event_types = [expected_event_types]
             
         # NEW: Added LOAD_BANK, SAVE_ROSTER, and EDIT_LOG_ENTRY to prevent them from being ignored
-        admin_events = ["EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE", "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT", "SET_READING_MODE"]
+        admin_events = ["EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE", "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT", "SET_READING_MODE", "END_MATCH"]
         
         while True:
             event = await self.inbound_queue.get()
@@ -1074,241 +1142,48 @@ class ScienceBowlModerator:
         try:
 
             while True:
-                if not self.question_bank or self.current_q_idx >= len(self.question_bank):
-                    if self.ui_state.get("show") != "NONE":
-                        # Nothing can be started with an empty packet: hide the start controls.
-                        await self._set_ui_state("NONE")
-                    # NEW: Process the queue so LOAD_BANK and SAVE_ROSTER don't get stuck forever
-                    while not self.inbound_queue.empty():
-                        evt = self.inbound_queue.get_nowait()
-                        evt_type = evt.type.name if hasattr(evt.type, 'name') else str(evt.type)
-                        # A manual start that arrives with nothing to read would otherwise
-                        # vanish without a trace: tell the moderator what is missing.
-                        if evt_type in MANUAL_START_EVENTS:
-                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": self._idle_start_message()}})
-                            continue
-                        await self.process_admin_event(evt)
-                    
-                    await asyncio.sleep(1)
-                    continue
-                q_data = self.question_bank[self.current_q_idx]
-                
-                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"✅ Ready for Q{self.current_q_idx+1}. Click 'Start Tossup'"}})
-                
-                safe_preload_text = str(q_data.get('tossup_text', '')).strip()
-                await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": {
-                    "text": safe_preload_text if safe_preload_text else "[WARNING: PYTHON MEMORY HAS NO TEXT FOR THIS QUESTION]", 
-                    "category": str(q_data.get('category', 'GENERAL')),
-                    "options": q_data.get('tossup_options', []),
-                    "visual": q_data.get('tossup_visual', False)
-                }})
-                
-                # Arm the moderator's start control only once a question is actually loaded.
-                await self._set_ui_state("TOSSUP")
-                
-                action = await self.wait_for_moderator_action(["MANUAL_START_TOSSUP"])
-                
-
-                action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
-                if action_type == "FORCE_RESET_STATE": continue 
-                elif action_type == "CHALLENGE":
-                    await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Question Dead", 0.0)
-                    self.state.next_question()
-                    self.current_q_idx += 1
-                    continue
-
-                # HIDE BUTTONS WHILE READING/EVALUATING
-                await self._set_ui_state("NONE")
-
-                if self.manual_reader:
-                    payload, correct, is_interrupt, interrupt_action, buzz_time, buzz_text = await self._handle_manual_tossup_attempt(q_data)
-                else:
-                    payload, correct, is_interrupt, interrupt_action, buzz_time, buzz_text = await self._handle_tossup_attempt(q_data)
-                
-                if interrupt_action == "FORCE_RESET_STATE": 
-                    continue
-                elif interrupt_action == "CHALLENGE":
-                    await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Question Dead", 0.0)
-                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
-                    self.state.next_question()
-                    self.current_q_idx += 1
-                    continue
-                
-                bonus_earned_by = None
-                tossup_ans_text = str(q_data.get('tossup_answer', ''))
-
-                if payload and correct:
-                    bonus_earned_by = payload['team']
-                    self.state.apply_tossup_points(True) 
-                    await self.log_event("TOSSUP", payload['team'], payload['player'], True, 4, buzz_text, buzz_time)
-                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"✅ Correct! 4 points to {bonus_earned_by}."}})
-                    
-                    await self._speak_and_wait("That is correct.")
-
-                elif payload and not correct:
-                    team = payload['team']
-                    self.state.apply_tossup_points(False) 
-                    other_team = "Team B" if team == "Team A" else "Team A"
-                    skip_rebound = False
-                    
-                    if is_interrupt:
-                        # Interrupt Penalty: -4 points and a pause for Moderator Override / Re-read
-                        await self.log_event("TOSSUP", team, payload['player'], False, -4, buzz_text, buzz_time)
-                        await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"❌ NEG! Penalty applied. Waiting for Re-read..."}})
-                        
-                        await self._speak_and_wait("That is incorrect.")
-                        await asyncio.sleep(1)
-                        
-                        # --- PAUSE FOR RE-READ OR OVERRIDE ---
-                        await self._set_ui_state("REREAD", overrides=True)
-                        action = await self.wait_for_moderator_action(["MANUAL_REREAD_TOSSUP", "FORCE_JUDGMENT"])
-                        action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
-                        
-                        if action_type == "FORCE_JUDGMENT" and action.payload.get("correct"):
-                            # REWIND STATE: Refund the -4, award +4, change to correct, and jump to bonus
-                            self.state.apply_tossup_points(True)
-                            if team == "Team A": self.state.team_a_score += 4
-                            else: self.state.team_b_score += 4
-                            
-                            self.match_log[-1].update({"Correct": True, "Points": 4, "Score_A": self.state.team_a_score, "Score_B": self.state.team_b_score, "Edited": True})
-                            await self.outbound_queue.put({"type": "NEW_LOG_ENTRY", "payload": self.match_log[-1]})
-                            
-                            bonus_earned_by = team
-                            skip_rebound = True
-                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "🔧 Override: Marked Correct! Jumping to Bonus."}})
-                        elif action_type == "CHALLENGE":
-                            await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Question Dead", 0.0)
-                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
-                            self.state.next_question()
-                            self.current_q_idx += 1
-                            continue
-                        
-                        if not skip_rebound:
+                try:
+                    if not self.question_bank or self.current_q_idx >= len(self.question_bank):
+                        if self.question_bank and self.current_q_idx >= len(self.question_bank):
+                            await self._notify_match_complete()
+                        if self.ui_state.get("show") != "NONE":
+                            # Nothing can be started with an empty packet: hide the start controls.
                             await self._set_ui_state("NONE")
-                            if self.manual_reader:
-                                payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_manual_tossup_attempt(q_data, allowed_team=other_team)
-                            else:
-                                payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_tossup_attempt(q_data, allowed_team=other_team)
-                        
-                    else:
-                        # Full Read (No Penalty): 0 points, opposing team immediately gets 5 seconds
-                        await self.log_event("TOSSUP", team, payload['player'], False, 0, buzz_text, buzz_time)
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"❌ Incorrect. 5 seconds for {other_team}."}})
-                        
-                        await self._speak_and_wait("That is incorrect.")
-                        
-                        if self.manual_reader:
-                            payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_manual_tossup_attempt(q_data, allowed_team=other_team, skip_read=True)
-                        else:
-                            payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_tossup_attempt(q_data, allowed_team=other_team, skip_read=True)
-
-                    # --- EVALUATE THE REBOUND ATTEMPT ---
-                    if not skip_rebound:
-                        if interrupt_action2 == "FORCE_RESET_STATE": 
-                            continue
-                        elif interrupt_action2 == "CHALLENGE":
-                            await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Question Dead", 0.0)
-                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
-                            self.state.next_question()
-                            self.current_q_idx += 1
-                            continue
-                            
-                        if payload2 and correct2:
-                            bonus_earned_by = other_team
-                            self.state.apply_tossup_points(True) 
-                            await self.log_event("TOSSUP_REBOUND", other_team, payload2['player'], True, 4, buzz_text2, buzz_time2)
-                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"✅ Correct! 4 points to {other_team}."}})
-                            await self._speak_and_wait("That is correct.")
-                            
-                        elif payload2 and not correct2:
-                            self.state.apply_tossup_points(False) 
-                            if is_int2:
-                                await self.log_event("TOSSUP_REBOUND", other_team, payload2['player'], False, -4, buzz_text2, buzz_time2)
-                                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "❌ DOUBLE NEG! Penalty applied."}})
-                            else:
-                                await self.log_event("TOSSUP_REBOUND", other_team, payload2['player'], False, 0, buzz_text2, buzz_time2)
-                                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "❌ Incorrect. No penalty."}})
-                            await self._speak_and_wait(f"That is incorrect. The correct answer is {tossup_ans_text}.", moderator_only=True)
-                            
-                        else:
-                            await self.log_event("DEAD_TOSSUP", "None", "None", False, 0, "Time", 0.0)
-                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏰ Time expired on rebound."}})
-                            await self._speak_and_wait(f"Time. The correct answer is {tossup_ans_text}.", moderator_only=True)
-
-                else:
-                    await self.log_event("DEAD_TOSSUP", "None", "None", False, 0, "Time", 0.0)
-                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏰ Time expired. No buzz."}})
-                    await self._speak_and_wait(f"Time. The correct answer is {tossup_ans_text}.", moderator_only=True)
-
-                await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
-
-                if bonus_earned_by and self.manual_reader:
-                    self.state.transition_to(GameState.READING_BONUS)
-                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🌟 BONUS for {bonus_earned_by}. Click 'Start Bonus'"}})
-
-                    safe_bonus_preload = str(q_data.get('bonus_text', '')).strip()
+                        # NEW: Process the queue so LOAD_BANK and SAVE_ROSTER don't get stuck forever
+                        while not self.inbound_queue.empty():
+                            evt = self.inbound_queue.get_nowait()
+                            evt_type = evt.type.name if hasattr(evt.type, 'name') else str(evt.type)
+                            # A manual start that arrives with nothing to read would otherwise
+                            # vanish without a trace: tell the moderator what is missing.
+                            if evt_type in MANUAL_START_EVENTS:
+                                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": self._idle_start_message()}})
+                                continue
+                            await self.process_admin_event(evt)
+                    
+                        await asyncio.sleep(1)
+                        continue
+                    q_data = self.question_bank[self.current_q_idx]
+                
+                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"✅ Ready for Q{self.current_q_idx+1}. Click 'Start Tossup'"}})
+                
+                    safe_preload_text = str(q_data.get('tossup_text', '')).strip()
                     await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": {
-                        "text": safe_bonus_preload if safe_bonus_preload else "[WARNING: PYTHON MEMORY HAS NO BONUS TEXT]",
+                        "text": safe_preload_text if safe_preload_text else "[WARNING: PYTHON MEMORY HAS NO TEXT FOR THIS QUESTION]", 
                         "category": str(q_data.get('category', 'GENERAL')),
-                        "options": q_data.get('bonus_options', []),
-                        "visual": q_data.get('bonus_visual', False)
+                        "options": q_data.get('tossup_options', []),
+                        "visual": q_data.get('tossup_visual', False)
                     }})
-                    await self._set_ui_state("BONUS")
-                    action = await self.wait_for_moderator_action(["MANUAL_START_BONUS"])
-                    action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
-                    if action_type == "FORCE_RESET_STATE":
-                        continue
-                    if action_type == "CHALLENGE":
-                        await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
-                        self.state.next_question()
-                        self.current_q_idx += 1
-                        continue
+                
+                    # Arm the moderator's start control only once a question is actually loaded.
+                    await self._set_ui_state("TOSSUP")
+                
+                    action = await self.wait_for_moderator_action(["MANUAL_START_TOSSUP"])
+                
 
-                    await self._set_ui_state("NONE")
-                    bonus_correct, bonus_action = await self._handle_manual_bonus(q_data, bonus_earned_by)
-                    if bonus_action == "FORCE_RESET_STATE":
-                        continue
-                    if bonus_action == "CHALLENGE":
-                        await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
-                        self.state.next_question()
-                        self.current_q_idx += 1
-                        continue
-
-                    self.state.transition_to(GameState.EVALUATING_BONUS)
-                    self.state.apply_bonus_points(bool(bonus_correct))
-                    bonus_ans_text = str(q_data.get('bonus_answer', ''))
-                    if bonus_correct:
-                        await self.log_event("BONUS", bonus_earned_by, "Captain", True, 10, "Full Read", 0.0)
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✅ Bonus Correct! +10 points."}})
-                    else:
-                        await self.log_event("BONUS", bonus_earned_by, "Captain", False, 0, "Full Read", 0.0)
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"❌ Bonus Incorrect. The correct answer is {bonus_ans_text}."}})
-                    await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
-
-                elif bonus_earned_by:
-                    self.state.transition_to(GameState.READING_BONUS) 
-                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🌟 BONUS for {bonus_earned_by}. Click 'Start Bonus'"}})
-                    
-                    safe_bonus_preload = str(q_data.get('bonus_text', '')).strip()
-                    await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": {
-                        "text": safe_bonus_preload if safe_bonus_preload else "[WARNING: PYTHON MEMORY HAS NO BONUS TEXT]", 
-                        "category": str(q_data.get('category', 'GENERAL')),
-                        "options": q_data.get('bonus_options', []),
-                        "visual": q_data.get('bonus_visual', False)
-                    }})
-                    
-                    # TELL UI TO ONLY SHOW BONUS BUTTON
-                    await self._set_ui_state("BONUS")
-                    
-                    action = await self.wait_for_moderator_action(["MANUAL_START_BONUS"])
                     action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
                     if action_type == "FORCE_RESET_STATE": continue 
                     elif action_type == "CHALLENGE":
-                        await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
+                        await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Question Dead", 0.0)
                         self.state.next_question()
                         self.current_q_idx += 1
                         continue
@@ -1316,147 +1191,348 @@ class ScienceBowlModerator:
                     # HIDE BUTTONS WHILE READING/EVALUATING
                     await self._set_ui_state("NONE")
 
-                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "🔊 Reading Bonus..."}})
-                    
-                    raw_bonus = str(q_data.get('bonus_text', '')).strip()
-                    bonus_options = q_data.get('bonus_options', [])
-                    bonus_options_spoken = " ".join(bonus_options) if bonus_options else ""
-                    
-                    bonus_text_to_read = f"Bonus, " + raw_bonus + "  " + bonus_options_spoken if raw_bonus else ""
-                    
-                    if self.use_audio and bonus_text_to_read:
-                        await self._speak_and_wait(bonus_text_to_read, announce_kind="bonus")
+                    if self.manual_reader:
+                        payload, correct, is_interrupt, interrupt_action, buzz_time, buzz_text = await self._handle_manual_tossup_attempt(q_data)
+                    else:
+                        payload, correct, is_interrupt, interrupt_action, buzz_time, buzz_text = await self._handle_tossup_attempt(q_data)
+                
+                    if interrupt_action == "FORCE_RESET_STATE": 
+                        continue
+                    elif interrupt_action == "CHALLENGE":
+                        await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Question Dead", 0.0)
+                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
+                        self.state.next_question()
+                        self.current_q_idx += 1
+                        continue
+                
+                    bonus_earned_by = None
+                    tossup_ans_text = str(q_data.get('tossup_answer', ''))
 
-                    self.state.transition_to(GameState.BONUS_CONFERRING) 
-                    spoken_bonus = ""
-                    if self.online_mode:
-                        self.answering_user_id = None
+                    if payload and correct:
+                        bonus_earned_by = payload['team']
+                        self.state.apply_tossup_points(True) 
+                        await self.log_event("TOSSUP", payload['team'], payload['player'], True, 4, buzz_text, buzz_time)
+                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"✅ Correct! 4 points to {bonus_earned_by}."}})
                     
-                    if self.use_audio:
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ Conferring (20s). Buzz to answer!"}})
-                        await self._set_online_buzz_window(True, team=bonus_earned_by, captain_only=True)
+                        await self._speak_and_wait("That is correct.")
+
+                    elif payload and not correct:
+                        team = payload['team']
+                        self.state.apply_tossup_points(False) 
+                        other_team = "Team B" if team == "Team A" else "Team A"
+                        skip_rebound = False
+                    
+                        if is_interrupt:
+                            # Interrupt Penalty: -4 points and a pause for Moderator Override / Re-read
+                            await self.log_event("TOSSUP", team, payload['player'], False, -4, buzz_text, buzz_time)
+                            await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
+                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"❌ NEG! Penalty applied. Waiting for Re-read..."}})
                         
-                        start_bonus_time = asyncio.get_running_loop().time()
-                        buzzed_in = False
-                        challenge_triggered = False
+                            await self._speak_and_wait("That is incorrect.")
+                            await asyncio.sleep(1)
                         
-                        # --- CAPTAIN'S BUZZ / 20 SEC TIMEOUT LOGIC ---
-                        while True:
-                            elapsed = asyncio.get_running_loop().time() - start_bonus_time
-                            remaining = 20.0 - elapsed
+                            # --- PAUSE FOR RE-READ OR OVERRIDE ---
+                            await self._set_ui_state("REREAD", overrides=True)
+                            action = await self.wait_for_moderator_action(["MANUAL_REREAD_TOSSUP", "FORCE_JUDGMENT"])
+                            action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
+                        
+                            if action_type == "FORCE_JUDGMENT" and action.payload.get("correct"):
+                                # REWIND STATE: Refund the -4, award +4, change to correct, and jump to bonus
+                                self.state.apply_tossup_points(True)
+                                if team == "Team A": self.state.team_a_score += 4
+                                else: self.state.team_b_score += 4
                             
-                            if remaining <= 0:
-                                break
-                                
-                            try:
-                                reply = await asyncio.wait_for(self.inbound_queue.get(), timeout=remaining)
-                                evt_type = reply.type.name if hasattr(reply.type, 'name') else str(reply.type)
-                                
-                                if evt_type == "BUZZ":
-                                    if not self.online_mode or (reply.payload.get("team") == bonus_earned_by and reply.payload.get("captain")):
-                                        buzzed_in = True
-                                        if self.online_mode:
-                                            self.answering_user_id = reply.user_id
-                                        await self._set_online_buzz_window(False)
-                                        break
-                                elif evt_type == "CHALLENGE":
-                                    await self._set_online_buzz_window(False)
-                                    challenge_triggered = True
-                                    break
-                                elif evt_type in ADMIN_EVENTS:
-                                    if evt_type not in ["PING", "PAUSE_MATCH"]:
-                                        await self.process_admin_event(reply)
-                            except asyncio.TimeoutError:
-                                break
-                        if self.online_mode and not buzzed_in:
-                            await self._set_online_buzz_window(False)
-                                
-                        if challenge_triggered:
+                                self.match_log[-1].update({"Correct": True, "Points": 4, "Score_A": self.state.team_a_score, "Score_B": self.state.team_b_score, "Edited": True})
+                                await self.outbound_queue.put({"type": "NEW_LOG_ENTRY", "payload": self.match_log[-1]})
+                            
+                                bonus_earned_by = team
+                                skip_rebound = True
+                                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "🔧 Override: Marked Correct! Jumping to Bonus."}})
+                            elif action_type == "CHALLENGE":
+                                await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Question Dead", 0.0)
+                                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
+                                self.state.next_question()
+                                self.current_q_idx += 1
+                                continue
+                        
+                            if not skip_rebound:
+                                await self._set_ui_state("NONE")
+                                if self.manual_reader:
+                                    payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_manual_tossup_attempt(q_data, allowed_team=other_team)
+                                else:
+                                    payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_tossup_attempt(q_data, allowed_team=other_team)
+                        
+                        else:
+                            # Full Read (No Penalty): 0 points, opposing team immediately gets 5 seconds
+                            await self.log_event("TOSSUP", team, payload['player'], False, 0, buzz_text, buzz_time)
+                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"❌ Incorrect. 5 seconds for {other_team}."}})
+                        
+                            await self._speak_and_wait("That is incorrect.")
+                        
+                            if self.manual_reader:
+                                payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_manual_tossup_attempt(q_data, allowed_team=other_team, skip_read=True)
+                            else:
+                                payload2, correct2, is_int2, interrupt_action2, buzz_time2, buzz_text2 = await self._handle_tossup_attempt(q_data, allowed_team=other_team, skip_read=True)
+
+                        # --- EVALUATE THE REBOUND ATTEMPT ---
+                        if not skip_rebound:
+                            if interrupt_action2 == "FORCE_RESET_STATE": 
+                                continue
+                            elif interrupt_action2 == "CHALLENGE":
+                                await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Question Dead", 0.0)
+                                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
+                                self.state.next_question()
+                                self.current_q_idx += 1
+                                continue
+                            
+                            if payload2 and correct2:
+                                bonus_earned_by = other_team
+                                self.state.apply_tossup_points(True) 
+                                await self.log_event("TOSSUP_REBOUND", other_team, payload2['player'], True, 4, buzz_text2, buzz_time2)
+                                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"✅ Correct! 4 points to {other_team}."}})
+                                await self._speak_and_wait("That is correct.")
+                            
+                            elif payload2 and not correct2:
+                                self.state.apply_tossup_points(False) 
+                                if is_int2:
+                                    await self.log_event("TOSSUP_REBOUND", other_team, payload2['player'], False, -4, buzz_text2, buzz_time2)
+                                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "❌ DOUBLE NEG! Penalty applied."}})
+                                else:
+                                    await self.log_event("TOSSUP_REBOUND", other_team, payload2['player'], False, 0, buzz_text2, buzz_time2)
+                                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "❌ Incorrect. No penalty."}})
+                                await self._speak_and_wait(f"That is incorrect. The correct answer is {tossup_ans_text}.", moderator_only=True)
+                            
+                            else:
+                                await self.log_event("DEAD_TOSSUP", "None", "None", False, 0, "Time", 0.0)
+                                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏰ Time expired on rebound."}})
+                                await self._speak_and_wait(f"Time. The correct answer is {tossup_ans_text}.", moderator_only=True)
+
+                    else:
+                        await self.log_event("DEAD_TOSSUP", "None", "None", False, 0, "Time", 0.0)
+                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏰ Time expired. No buzz."}})
+                        await self._speak_and_wait(f"Time. The correct answer is {tossup_ans_text}.", moderator_only=True)
+
+                    await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
+
+                    if bonus_earned_by and self.manual_reader:
+                        self.state.transition_to(GameState.READING_BONUS)
+                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🌟 BONUS for {bonus_earned_by}. Click 'Start Bonus'"}})
+
+                        safe_bonus_preload = str(q_data.get('bonus_text', '')).strip()
+                        await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": {
+                            "text": safe_bonus_preload if safe_bonus_preload else "[WARNING: PYTHON MEMORY HAS NO BONUS TEXT]",
+                            "category": str(q_data.get('category', 'GENERAL')),
+                            "options": q_data.get('bonus_options', []),
+                            "visual": q_data.get('bonus_visual', False)
+                        }})
+                        await self._set_ui_state("BONUS")
+                        action = await self.wait_for_moderator_action(["MANUAL_START_BONUS"])
+                        action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
+                        if action_type == "FORCE_RESET_STATE":
+                            continue
+                        if action_type == "CHALLENGE":
                             await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)
                             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
                             self.state.next_question()
                             self.current_q_idx += 1
                             continue
 
-                        # --- DYNAMIC LISTEN TIMEOUT (ANSWER WINDOW OR REMAINING TIME) ---
-                        elapsed_confer = asyncio.get_running_loop().time() - start_bonus_time
-                        remaining_confer = max(0.0, 20.0 - elapsed_confer)
-                        listen_time = min(ANSWER_WINDOW_SECONDS, remaining_confer)
-                        if self.online_mode and not buzzed_in:
-                            listen_time = 0.0
+                        await self._set_ui_state("NONE")
+                        bonus_correct, bonus_action = await self._handle_manual_bonus(q_data, bonus_earned_by)
+                        if bonus_action == "FORCE_RESET_STATE":
+                            continue
+                        if bonus_action == "CHALLENGE":
+                            await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)
+                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
+                            self.state.next_question()
+                            self.current_q_idx += 1
+                            continue
+
+                        self.state.transition_to(GameState.EVALUATING_BONUS)
+                        self.state.apply_bonus_points(bool(bonus_correct))
+                        bonus_ans_text = str(q_data.get('bonus_answer', ''))
+                        if bonus_correct:
+                            await self.log_event("BONUS", bonus_earned_by, "Captain", True, 10, "Full Read", 0.0)
+                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✅ Bonus Correct! +10 points."}})
+                        else:
+                            await self.log_event("BONUS", bonus_earned_by, "Captain", False, 0, "Full Read", 0.0)
+                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"❌ Bonus Incorrect. The correct answer is {bonus_ans_text}."}})
+                        await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
+
+                    elif bonus_earned_by:
+                        self.state.transition_to(GameState.READING_BONUS) 
+                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🌟 BONUS for {bonus_earned_by}. Click 'Start Bonus'"}})
+                    
+                        safe_bonus_preload = str(q_data.get('bonus_text', '')).strip()
+                        await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": {
+                            "text": safe_bonus_preload if safe_bonus_preload else "[WARNING: PYTHON MEMORY HAS NO BONUS TEXT]", 
+                            "category": str(q_data.get('category', 'GENERAL')),
+                            "options": q_data.get('bonus_options', []),
+                            "visual": q_data.get('bonus_visual', False)
+                        }})
+                    
+                        # TELL UI TO ONLY SHOW BONUS BUTTON
+                        await self._set_ui_state("BONUS")
+                    
+                        action = await self.wait_for_moderator_action(["MANUAL_START_BONUS"])
+                        action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
+                        if action_type == "FORCE_RESET_STATE": continue 
+                        elif action_type == "CHALLENGE":
+                            await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)
+                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
+                            self.state.next_question()
+                            self.current_q_idx += 1
+                            continue
+
+                        # HIDE BUTTONS WHILE READING/EVALUATING
+                        await self._set_ui_state("NONE")
+
+                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "🔊 Reading Bonus..."}})
+                    
+                        raw_bonus = str(q_data.get('bonus_text', '')).strip()
+                        bonus_options = q_data.get('bonus_options', [])
+                        bonus_options_spoken = " ".join(bonus_options) if bonus_options else ""
+                    
+                        bonus_text_to_read = f"Bonus, " + raw_bonus + "  " + bonus_options_spoken if raw_bonus else ""
+                    
+                        if self.use_audio and bonus_text_to_read:
+                            await self._speak_and_wait(bonus_text_to_read, announce_kind="bonus")
+
+                        self.state.transition_to(GameState.BONUS_CONFERRING) 
+                        spoken_bonus = ""
+                        if self.online_mode:
+                            self.answering_user_id = None
+                    
+                        if self.use_audio:
+                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ Conferring (20s). Buzz to answer!"}})
+                            await self._set_online_buzz_window(True, team=bonus_earned_by, captain_only=True)
                         
-                        if listen_time > 0.5: # Only open mic if there is meaningful time left
-                            current_sys_time = time.time()
-                            target_user_id = self.answering_user_id if self.online_mode else None
-                            if not self.online_mode or (buzzed_in and target_user_id):
-                                self.answer_audio_open = True
-                                await self.outbound_queue.put({
-                                    "type": "START_LISTENING", 
-                                    "payload": {"timeout": listen_time, "expires_at": current_sys_time + listen_time, **({"target_user_id": target_user_id} if self.online_mode else {})}
-                                })
+                            start_bonus_time = asyncio.get_running_loop().time()
+                            buzzed_in = False
+                            challenge_triggered = False
+                        
+                            # --- CAPTAIN'S BUZZ / 20 SEC TIMEOUT LOGIC ---
+                            while True:
+                                elapsed = asyncio.get_running_loop().time() - start_bonus_time
+                                remaining = 20.0 - elapsed
                             
-                            try:
-                                while True:
-                                    reply = await asyncio.wait_for(self.inbound_queue.get(), timeout=listen_time + 4.0)
+                                if remaining <= 0:
+                                    break
+                                
+                                try:
+                                    reply = await asyncio.wait_for(self.inbound_queue.get(), timeout=remaining)
                                     evt_type = reply.type.name if hasattr(reply.type, 'name') else str(reply.type)
-                                    
-                                    if evt_type == "ANSWER_AUDIO" and (not self.online_mode or reply.user_id == self.answering_user_id):
-                                        self.answer_audio_open = False
-                                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ Transcribing Bonus..."}})
-                                        b64_audio = reply.payload.get("audio_data", "")
-                                        if self.judge:
-                                            spoken_bonus = await self.judge.transcribe_audio(b64_audio)
-                                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🗣️ Heard: '{spoken_bonus}'"}})
-                                        break
+                                
+                                    if evt_type == "BUZZ":
+                                        if not self.online_mode or (reply.payload.get("team") == bonus_earned_by and reply.payload.get("captain")):
+                                            buzzed_in = True
+                                            if self.online_mode:
+                                                self.answering_user_id = reply.user_id
+                                            await self._set_online_buzz_window(False)
+                                            break
                                     elif evt_type == "CHALLENGE":
+                                        await self._set_online_buzz_window(False)
                                         challenge_triggered = True
                                         break
                                     elif evt_type in ADMIN_EVENTS:
                                         if evt_type not in ["PING", "PAUSE_MATCH"]:
                                             await self.process_admin_event(reply)
-                            except asyncio.TimeoutError:
-                                spoken_bonus = ""
-                            finally:
-                                self.answer_audio_open = False
+                                except asyncio.TimeoutError:
+                                    break
+                            if self.online_mode and not buzzed_in:
+                                await self._set_online_buzz_window(False)
                                 
-                        if challenge_triggered:
-                            await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)
-                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
-                            self.state.next_question()
-                            self.current_q_idx += 1
-                            continue
-                            
-                    else:
-                        await asyncio.sleep(1)
-                        spoken_bonus = "Chloroplast"
+                            if challenge_triggered:
+                                await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)
+                                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
+                                self.state.next_question()
+                                self.current_q_idx += 1
+                                continue
 
-                    self.state.transition_to(GameState.EVALUATING_BONUS) 
-                    bonus_ans_text = str(q_data.get('bonus_answer', ''))
-                    
-                    if self.judge:
-                        bonus_correct = await self.judge.evaluate_answer(spoken_bonus, bonus_ans_text, str(q_data.get('category', 'GENERAL')))
-                    else:
-                        bonus_correct = False
-                    
-                    self.state.apply_bonus_points(bonus_correct) 
-                    if bonus_correct:
-                        await self.log_event("BONUS", bonus_earned_by, "Captain", True, 10, "Full Read", 0.0)
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✅ Bonus Correct! +10 points."}})
-                        await self._speak_and_wait("That is correct.")
-                    else:
-                        await self.log_event("BONUS", bonus_earned_by, "Captain", False, 0, "Full Read", 0.0)
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "❌ Bonus Incorrect."}})
-                        await self._speak_and_wait(f"That is incorrect. The correct answer is {bonus_ans_text}.", moderator_only=True)
+                            # --- DYNAMIC LISTEN TIMEOUT (ANSWER WINDOW OR REMAINING TIME) ---
+                            elapsed_confer = asyncio.get_running_loop().time() - start_bonus_time
+                            remaining_confer = max(0.0, 20.0 - elapsed_confer)
+                            listen_time = min(ANSWER_WINDOW_SECONDS, remaining_confer)
+                            if self.online_mode and not buzzed_in:
+                                listen_time = 0.0
                         
-                    await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
-                    
-                self.state.next_question() 
-                self.current_q_idx += 1
-                await self.outbound_queue.put({"type": "SYNC_LOG", "payload": {"log": self.match_log}})
-                self.answering_user_id = None
-                self.answer_audio_open = False
-                await asyncio.sleep(2)
+                            if listen_time > 0.5: # Only open mic if there is meaningful time left
+                                current_sys_time = time.time()
+                                target_user_id = self.answering_user_id if self.online_mode else None
+                                if not self.online_mode or (buzzed_in and target_user_id):
+                                    self.answer_audio_open = True
+                                    await self.outbound_queue.put({
+                                        "type": "START_LISTENING", 
+                                        "payload": {"timeout": listen_time, "expires_at": current_sys_time + listen_time, **({"target_user_id": target_user_id} if self.online_mode else {})}
+                                    })
+                            
+                                try:
+                                    while True:
+                                        reply = await asyncio.wait_for(self.inbound_queue.get(), timeout=listen_time + 4.0)
+                                        evt_type = reply.type.name if hasattr(reply.type, 'name') else str(reply.type)
+                                    
+                                        if evt_type == "ANSWER_AUDIO" and (not self.online_mode or reply.user_id == self.answering_user_id):
+                                            self.answer_audio_open = False
+                                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ Transcribing Bonus..."}})
+                                            b64_audio = reply.payload.get("audio_data", "")
+                                            if self.judge:
+                                                spoken_bonus = await self.judge.transcribe_audio(b64_audio)
+                                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🗣️ Heard: '{spoken_bonus}'"}})
+                                            break
+                                        elif evt_type == "CHALLENGE":
+                                            challenge_triggered = True
+                                            break
+                                        elif evt_type in ADMIN_EVENTS:
+                                            if evt_type not in ["PING", "PAUSE_MATCH"]:
+                                                await self.process_admin_event(reply)
+                                except asyncio.TimeoutError:
+                                    spoken_bonus = ""
+                                finally:
+                                    self.answer_audio_open = False
+                                
+                            if challenge_triggered:
+                                await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)
+                                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
+                                self.state.next_question()
+                                self.current_q_idx += 1
+                                continue
+                            
+                        else:
+                            await asyncio.sleep(1)
+                            spoken_bonus = "Chloroplast"
 
+                        self.state.transition_to(GameState.EVALUATING_BONUS) 
+                        bonus_ans_text = str(q_data.get('bonus_answer', ''))
+                    
+                        if self.judge:
+                            bonus_correct = await self.judge.evaluate_answer(spoken_bonus, bonus_ans_text, str(q_data.get('category', 'GENERAL')))
+                        else:
+                            bonus_correct = False
+                    
+                        self.state.apply_bonus_points(bonus_correct) 
+                        if bonus_correct:
+                            await self.log_event("BONUS", bonus_earned_by, "Captain", True, 10, "Full Read", 0.0)
+                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✅ Bonus Correct! +10 points."}})
+                            await self._speak_and_wait("That is correct.")
+                        else:
+                            await self.log_event("BONUS", bonus_earned_by, "Captain", False, 0, "Full Read", 0.0)
+                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "❌ Bonus Incorrect."}})
+                            await self._speak_and_wait(f"That is incorrect. The correct answer is {bonus_ans_text}.", moderator_only=True)
+                        
+                        await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
+                    
+                    self.state.next_question() 
+                    self.current_q_idx += 1
+                    await self.outbound_queue.put({"type": "SYNC_LOG", "payload": {"log": self.match_log}})
+                    self.answering_user_id = None
+                    self.answer_audio_open = False
+                    await asyncio.sleep(2)
+
+
+                except MatchEnded:
+                    await self._notify_match_complete()
+                    await asyncio.sleep(0.05)
+                    continue
 
         except asyncio.CancelledError:
             pass

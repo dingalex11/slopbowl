@@ -36,6 +36,9 @@ class ValidationTests(unittest.TestCase):
             validate_client_event("LOAD_BANK", {"bank": []})
         with self.assertRaises(ValueError):
             validate_client_event("UNKNOWN", {})
+        self.assertEqual(validate_client_event("END_MATCH", {}), {})
+        with self.assertRaises(ValueError):
+            validate_client_event("END_MATCH", {"force": True})
         self.assertEqual(validate_client_event("BUZZ", {"team": "Team A", "player": "Manual-A"})["player"], "Manual-A")
         with self.assertRaises(ValueError):
             validate_client_event("ADJUST_SCORE", {"team": "Team A", "delta": 1_000_000})
