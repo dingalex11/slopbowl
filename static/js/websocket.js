@@ -153,11 +153,9 @@ function connectWebSocket(roomId, apiKey = null) {
             currentTeam = payload.team || null;
             isOnlineCaptain = Boolean(payload.captain);
             const onlineBuzzControls = document.getElementById('online-buzz-controls');
-            const manualBuzzControls = document.getElementById('manual-buzz-controls');
             const manualMode = Boolean(payload.manual_reader);
             onlineBuzzControls?.classList.toggle('hidden', currentRoomMode !== 'online');
-            manualBuzzControls?.classList.toggle('hidden', !(currentRoomMode === 'in_person' && currentUserRole === 'owner' && manualMode));
-            manualBuzzControls?.classList.toggle('flex', currentRoomMode === 'in_person' && currentUserRole === 'owner' && manualMode);
+            document.getElementById('match-layout')?.classList.toggle('is-manual', currentRoomMode === 'in_person' && manualMode);
             document.querySelectorAll('.moderator-only-control').forEach((control) => {
                 control.classList.toggle('hidden', currentUserRole !== 'owner');
             });
@@ -521,10 +519,14 @@ function connectWebSocket(roomId, apiKey = null) {
             }
         }
         else if (data.type === 'UPDATE_SCORE') {
-            const scoreA = document.getElementById('score-header-a');
-            const scoreB = document.getElementById('score-header-b');
-            if (scoreA && payload.score_a !== undefined) scoreA.innerText = payload.score_a;
-            if (scoreB && payload.score_b !== undefined) scoreB.innerText = payload.score_b;
+            ['score-header-a', 'hud-score-a'].forEach((id) => {
+                const scoreA = document.getElementById(id);
+                if (scoreA && payload.score_a !== undefined) scoreA.innerText = payload.score_a;
+            });
+            ['score-header-b', 'hud-score-b'].forEach((id) => {
+                const scoreB = document.getElementById(id);
+                if (scoreB && payload.score_b !== undefined) scoreB.innerText = payload.score_b;
+            });
         }
         else if (data.type === 'BUZZ') {
             stopActionTimer(); 

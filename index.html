@@ -561,10 +561,10 @@
     </section>
 
     <!-- ========================================== -->
-    <!-- SLIDE 5: MODERATION HUD (owner)            -->
+    <!-- SLIDE 5: MATCH CONSOLE (owner)             -->
     <!-- ========================================== -->
     <section id="slide-5" class="slide-view hidden py-2 transition-all duration-300">
-      <div class="relative">
+      <div class="relative match-hud">
         <!-- MATCH START OVERLAY -->
         <div id="match-start-overlay" class="absolute inset-0 z-40 bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center rounded-2xl border border-borderDark shadow-2xl">
           <button onclick="beginMatch(); playSound('buzz');" class="px-12 py-6 bg-neonCyan hover:bg-cyan-300 text-black font-black font-mono text-3xl uppercase tracking-wider rounded-2xl shadow-neon-cyan-lg transition transform hover:scale-105 active:scale-95">
@@ -573,239 +573,208 @@
           <span class="text-slate-400 font-mono mt-5 text-sm uppercase tracking-widest">Opens the moderator HUD</span>
         </div>
 
-        <!-- STAGE / PROMPTER PANEL -->
-        <div id="stage-card-panel" class="bg-panel border border-borderDark rounded-2xl p-6 shadow-md transition-all duration-300">
-          <div class="flex flex-col gap-6 w-full">
+        <!-- TEAM SCORE RAILS -->
+        <div class="match-scorebar">
+          <div class="match-team-score match-team-score-a">
+            <span id="hud-team-a-name" class="match-team-name">TEAM A</span>
+            <span id="hud-score-a" class="match-team-points">0</span>
+          </div>
+          <div class="match-score-center">
+            <span class="match-half-label">HALF 1</span>
+            <span id="manual-phase-label" class="match-phase-label">IDLE</span>
+            <span id="manual-clock-wrap" class="match-readout"><span>READ</span><span id="manual-read-clock">0.0s</span></span>
+          </div>
+          <div class="match-team-score match-team-score-b">
+            <span id="hud-score-b" class="match-team-points">0</span>
+            <span id="hud-team-b-name" class="match-team-name">TEAM B</span>
+          </div>
+        </div>
 
-            <!-- TOP META BAR -->
-            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-borderDark pb-3">
-              <div class="flex items-center space-x-2">
-                <span id="stage-cat-badge" class="px-2.5 py-0.5 rounded-full bg-black text-neonCyan border border-neonCyan/60 text-xs font-bold uppercase">--</span>
-                <span id="stage-type-badge" class="px-2.5 py-0.5 rounded-full bg-black text-neonAmber border border-neonAmber/60 text-xs font-bold uppercase">MANUAL READER</span>
-              </div>
-
-              <div class="bg-black px-3 py-1 rounded-full border border-borderDark flex items-center space-x-2 shadow-inner">
-                <span class="w-2 h-2 rounded-full bg-neonGreen animate-pulse"></span>
-                <span class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">STATUS:</span>
-                <span id="header-status" class="text-xs text-neonCyan font-mono font-bold">READY</span>
-              </div>
+        <div id="match-layout" class="match-layout is-manual">
+          <!-- TEAM A ROSTER / BUZZERS -->
+          <aside id="manual-team-a-panel" class="match-side match-side-a">
+            <div class="side-team-head">
+              <span id="side-team-a-name" class="side-team-name">TEAM A</span>
+              <span class="side-team-count">ROSTER</span>
             </div>
+            <p class="side-roster-note">CLICK THE PLAYER WHO BUZZED</p>
+            <div id="manual-team-a-buzzers" class="side-buzzer-list"></div>
+            <p id="manual-buzz-hint" class="side-buzz-hint">Buzz buttons unlock during the 5-second window.</p>
+          </aside>
 
-            <!-- MANUAL READER PANEL -->
-            <div id="manual-reader-panel" class="bg-black border border-neonCyan/40 rounded-2xl p-5 shadow-inner">
-              <div class="flex flex-wrap items-center justify-between gap-3 border-b border-borderDark pb-3 mb-4">
-                <div class="flex items-center gap-3">
-                  <span class="text-[10px] font-mono font-bold text-neonCyan tracking-widest uppercase">READER VIEW</span>
-                  <span id="manual-phase-label" class="px-2 py-0.5 rounded-full bg-panel border border-borderDark text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">IDLE</span>
+          <!-- CENTER MATCH STAGE -->
+          <div class="match-main">
+            <div id="stage-card-panel" class="match-stage-card">
+              <div class="stage-meta">
+                <span id="stage-cat-badge" class="stage-tag">--</span>
+                <span id="stage-type-badge" class="stage-tag stage-tag-amber">MANUAL READER</span>
+                <span id="hud-question-kind" class="stage-tag stage-tag-plain">TOSS-UP</span>
+                <span class="stage-status-line">
+                  <span id="stage-live-dot" class="w-2 h-2 rounded-full bg-neonCyan opacity-80"></span>
+                  <span id="header-status">READY</span>
+                </span>
+              </div>
+
+              <div class="match-clock-strip">
+                <span id="action-timer-label" class="match-clock-label">ACTION CLOCK</span>
+                <div id="action-timer-box" class="match-clock-box">
+                  <span id="action-timer-display">--</span>
                 </div>
-                <div class="flex items-center gap-3">
-                  <span class="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Read stopwatch</span>
-                  <span id="manual-read-clock" class="text-2xl font-black font-mono text-neonGreen digital-lcd">0.0s</span>
+                <div class="match-clock-rail">
+                  <div id="action-timer-bar"></div>
+                </div>
+                <span id="action-timer-warning" class="hidden match-clock-warning">5s</span>
+              </div>
+
+              <div id="manual-reader-panel" class="match-reader-panel">
+                <div class="match-question-wrap">
+                  <div id="reader-question-text" class="match-question-text">Load a packet to see the question here.</div>
+                  <div id="reader-options" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm font-mono"></div>
+                  <div class="match-answer-strip">
+                    <span class="match-answer-label">ANSWER</span>
+                    <span id="reader-answer-key">&mdash;</span>
+                  </div>
                 </div>
               </div>
-              <div id="reader-question-text" class="text-lg md:text-xl text-slate-100 font-mono leading-relaxed min-h-[4rem]">Load a packet to see the question here.</div>
-              <div id="reader-options" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm font-mono"></div>
-              <div class="flex flex-wrap items-center justify-between gap-3 border-t border-borderDark pt-4 mt-4">
-                <div class="flex flex-wrap items-center gap-2">
-                  <button id="btn-manual-question-read" onclick="sendEvent('MANUAL_READ_DONE')" class="bg-neonCyan hover:bg-cyan-300 text-black px-4 py-2 rounded-xl font-black text-[11px] uppercase tracking-wider transition shadow-neon-cyan">
-                    Question read &mdash; 5s buzz
+
+              <div class="match-buzz-banner">
+                <div class="match-buzz-main">
+                  <span class="match-buzz-kicker">FLOOR</span>
+                  <span id="buzz-player-name">FLOOR: CLEAR</span>
+                </div>
+                <div class="match-badges">
+                  <span id="buzz-team-indicator" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+                  <span id="interrupt-badge">INTERRUPT: --</span>
+                  <span id="outcome-badge">OUTCOME: PENDING</span>
+                </div>
+              </div>
+
+              <div id="manual-buzzpoint-panel" class="match-verdict-panel">
+                <div class="match-verdict-info">
+                  <div class="match-verdict-head">
+                    <span>BUZZPOINT</span>
+                    <span id="buzzpoint-status">Not marked</span>
+                  </div>
+                  <div id="buzzpoint-current">No buzzpoint marked</div>
+                  <button id="btn-full-read" onclick="ManualReader.markFullRead()" class="match-full-read" disabled>
+                    Full read / after end
                   </button>
-                  <button id="btn-manual-bonus-read" onclick="sendEvent('MANUAL_READ_DONE')" class="hidden bg-neonAmber hover:bg-amber-400 text-black px-4 py-2 rounded-xl font-black text-[11px] uppercase tracking-wider transition shadow-neon-amber">
-                    Bonus read &mdash; 20s confer
+                </div>
+                <div class="match-verdict-actions">
+                  <div class="match-wrong-preview">
+                    <span>WRONG</span>
+                    <span id="manual-verdict-preview">NEG &minus;4</span>
+                  </div>
+                  <button id="btn-manual-correct" onclick="ManualReader.verdict(true)" disabled>
+                    Correct +4
+                  </button>
+                  <button id="btn-manual-incorrect" onclick="ManualReader.verdict(false)" disabled>
+                    Incorrect
                   </button>
                 </div>
-                <div class="text-right">
-                  <span class="text-[10px] font-mono text-slate-500 uppercase tracking-widest block">Answer key</span>
-                  <span id="reader-answer-key" class="text-sm font-bold text-neonGreen font-mono">&mdash;</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- MAIN CONTENT -->
-            <div class="flex-1 flex flex-col">
-              <div class="text-[10px] font-mono font-bold text-slate-400 tracking-widest uppercase mb-4 flex items-center space-x-2">
-                <span>CURRENT STAGE</span>
-                <span id="stage-live-dot" class="w-2 h-2 rounded-full bg-neonCyan opacity-80"></span>
               </div>
 
-              <div class="flex flex-row items-stretch justify-center gap-8 mb-2">
-                <!-- ACTION CLOCK -->
-                <div id="action-timer-box" class="w-full max-w-[768px] min-h-[288px] bg-black p-8 rounded-3xl border border-neonCyan/40 flex flex-col items-center justify-center text-center shadow-inner relative overflow-hidden">
-                  <div class="flex items-center justify-between w-full absolute top-8 px-10">
-                    <span id="action-timer-label" class="text-base font-bold text-neonCyan tracking-widest uppercase">ACTION CLOCK</span>
-                    <span id="action-timer-warning" class="hidden text-sm font-bold text-neonPink bg-black border border-neonPink px-3 py-1 rounded-lg animate-pulse">
-                      &#9888;&#65039; 5s
-                    </span>
-                  </div>
-
-                  <div id="action-timer-display" class="text-9xl font-black font-mono text-white tracking-tighter drop-shadow-lg my-auto digital-lcd">
-                    --
-                  </div>
-
-                  <div class="w-5/6 mx-auto bg-slate-900 h-4 rounded-full overflow-hidden absolute bottom-10 border border-borderDark">
-                    <div id="action-timer-bar" class="bg-neonCyan h-full w-full transition-all duration-100"></div>
-                  </div>
-                </div>
-
-                <!-- BUZZPOINT + VERDICT PANEL -->
-                <div class="flex flex-col gap-3 w-full lg:w-80 shrink-0">
-                  <div id="manual-buzzpoint-panel" class="bg-black p-4 rounded-xl border border-borderDark flex flex-col gap-3 shadow-inner">
-                    <div class="flex items-center justify-between">
-                      <span class="text-[10px] font-bold text-slate-400 tracking-widest uppercase">Buzzpoint</span>
-                      <span id="buzzpoint-status" class="text-[10px] font-mono font-bold text-slate-500 uppercase">Not marked</span>
-                    </div>
-                    <p class="text-[10px] text-slate-500 font-mono leading-relaxed">Click the player who buzzed, then click the word where they buzzed. The selected word is logged.</p>
-                    <div id="buzzpoint-current" class="bg-panel border border-borderDark rounded-lg px-3 py-2 text-xs font-mono text-slate-400 break-words">No buzzpoint marked</div>
-                    <button id="btn-full-read" onclick="ManualReader.markFullRead()" class="bg-black hover:bg-neonAmber/10 border border-neonAmber text-neonAmber px-3 py-2 rounded-xl font-bold text-[10px] uppercase tracking-wider transition disabled:opacity-40 disabled:cursor-not-allowed" disabled>
-                      Full read / after end
-                    </button>
-                    <div class="border-t border-borderDark pt-3">
-                      <div class="flex items-center justify-between text-[10px] font-mono uppercase tracking-widest">
-                        <span class="text-slate-500">Wrong answer</span>
-                        <span id="manual-verdict-preview" class="text-neonPink font-bold">NEG &minus;4</span>
-                      </div>
-                      <div class="grid grid-cols-2 gap-2 mt-2">
-                        <button id="btn-manual-correct" onclick="ManualReader.verdict(true)" disabled class="bg-black border border-neonGreen text-neonGreen hover:bg-neonGreen hover:text-black px-2 py-2 rounded-xl font-black text-[11px] uppercase transition disabled:opacity-30 disabled:cursor-not-allowed">
-                          Correct +4
-                        </button>
-                        <button id="btn-manual-incorrect" onclick="ManualReader.verdict(false)" disabled class="bg-black border border-neonPink text-neonPink hover:bg-neonPink hover:text-white px-2 py-2 rounded-xl font-black text-[11px] uppercase transition disabled:opacity-30 disabled:cursor-not-allowed">
-                          Incorrect
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+              <div id="manual-read-actions" class="match-read-actions">
+                <button id="btn-manual-question-read" onclick="sendEvent('MANUAL_READ_DONE')">
+                  Question read &mdash; 5s buzz
+                </button>
+                <button id="btn-manual-bonus-read" onclick="sendEvent('MANUAL_READ_DONE')" class="hidden">
+                  Bonus read &mdash; 20s confer
+                </button>
               </div>
 
-              <!-- Legacy stage-title elements stay hidden for JS stability; the manual
-                   reader panel above owns the visible question and answer key. -->
+              <!-- Legacy stage-title elements stay hidden for JS stability. -->
               <h1 id="stage-title-text" class="hidden"></h1>
               <p id="stage-subtitle-text" class="hidden"></p>
             </div>
 
-            <!-- BOTTOM STATUS BADGES -->
-            <div class="flex flex-wrap items-center gap-2 pt-3 font-mono text-xs border-t border-borderDark mt-1">
-              <div class="px-3 py-1 rounded-full bg-black border border-borderDark flex items-center space-x-2">
-                <span id="buzz-team-indicator" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
-                <span id="buzz-player-name" class="text-slate-300 font-bold">FLOOR: CLEAR</span>
+            <!-- MATCH CONTROLS -->
+            <div class="match-control-bar">
+              <div class="match-start-buttons">
+                <button id="btn-start-tossup" onclick="sendEvent('MANUAL_START_TOSSUP')" class="hidden">
+                  &#9654; Start Tossup
+                </button>
+                <button id="btn-reread-tossup" onclick="sendEvent('MANUAL_REREAD_TOSSUP')" class="hidden">
+                  &#9654; Re-read Tossup
+                </button>
+                <button id="btn-start-bonus" onclick="sendEvent('MANUAL_START_BONUS')" class="hidden">
+                  &#9654; Start Bonus
+                </button>
               </div>
-              <span id="interrupt-badge" class="px-3 py-1 rounded-full bg-black border border-borderDark text-slate-500 font-bold">
-                INTERRUPT: --
-              </span>
-              <span id="outcome-badge" class="px-3 py-1 rounded-full bg-black border border-borderDark text-slate-500 font-bold">
-                OUTCOME: PENDING
-              </span>
+
+              <div class="match-secondary-controls">
+                <button id="btn-pause-match" onclick="togglePause()">&#9208; PAUSE</button>
+                <button onclick="triggerChallenge(); playSound('click');">&#9888;&#65039; Challenge</button>
+                <button onclick="sendEvent('ADJUST_SCORE', {team: 'Team A', delta: 4})">+4 Team A</button>
+                <button onclick="sendEvent('ADJUST_SCORE', {team: 'Team B', delta: 4})">+4 Team B</button>
+                <button onclick="sendEvent('EXPORT_CSV')">Export Log</button>
+                <button onclick="sendEvent('FORCE_RESET_STATE')" class="match-reset">Override &amp; Reset</button>
+              </div>
+
+              <!-- AI judgment overrides -->
+              <div id="override-controls" class="hidden flex space-x-2">
+                <button onclick="sendEvent('FORCE_JUDGMENT', {correct: true})" title="Force correct">&#10003;</button>
+                <button onclick="sendEvent('FORCE_JUDGMENT', {correct: false})" title="Force incorrect">&#10007;</button>
+              </div>
+
+              <!-- Online AI mode: the moderator's own buzzer and live room roster. -->
+              <div id="online-buzz-controls" class="w-full hidden flex-col gap-2">
+                <button class="js-online-buzz" onclick="sendEvent('BUZZ', {})" disabled>
+                  MY BUZZER
+                </button>
+                <div id="online-roster" class="js-online-roster flex flex-wrap gap-2 min-h-6"></div>
+              </div>
             </div>
           </div>
+
+          <!-- TEAM B ROSTER / BUZZERS -->
+          <aside id="manual-team-b-panel" class="match-side match-side-b">
+            <div class="side-team-head">
+              <span class="side-team-count">ROSTER</span>
+              <span id="side-team-b-name" class="side-team-name">TEAM B</span>
+            </div>
+            <p class="side-roster-note side-roster-note-b">CLICK THE PLAYER WHO BUZZED</p>
+            <div id="manual-team-b-buzzers" class="side-buzzer-list"></div>
+          </aside>
         </div>
 
-        <!-- MODERATOR CONTROL BAR -->
-        <div class="bg-panel border border-borderDark rounded-2xl p-4 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 mt-4">
-          <div class="flex-1 flex flex-wrap gap-3 w-full">
-            <button id="btn-start-tossup" onclick="sendEvent('MANUAL_START_TOSSUP')" class="hidden flex-1 min-w-[140px] bg-neonCyan hover:bg-cyan-300 text-black py-3 rounded-xl font-black font-mono text-xs uppercase transition shadow-neon-cyan">
-              &#9654; Start Tossup
-            </button>
-            <button id="btn-reread-tossup" onclick="sendEvent('MANUAL_REREAD_TOSSUP')" class="hidden flex-1 min-w-[140px] bg-black border border-neonCyan text-neonCyan hover:bg-neonCyan/10 py-3 rounded-xl font-black font-mono text-xs uppercase transition">
-              &#9654; Re-read Tossup
-            </button>
-            <button id="btn-start-bonus" onclick="sendEvent('MANUAL_START_BONUS')" class="hidden flex-1 min-w-[140px] bg-neonAmber hover:bg-amber-400 text-black py-3 rounded-xl font-black font-mono text-xs uppercase transition shadow-neon-amber">
-              &#9654; Start Bonus
-            </button>
-
-            <!-- AI judgment overrides -->
-            <div id="override-controls" class="hidden flex space-x-2 border-l border-borderDark pl-3">
-              <button onclick="sendEvent('FORCE_JUDGMENT', {correct: true})" title="Force correct" class="w-12 bg-black hover:bg-neonGreen border border-neonGreen text-neonGreen hover:text-black rounded-xl font-bold text-xl transition">&#10003;</button>
-              <button onclick="sendEvent('FORCE_JUDGMENT', {correct: false})" title="Force incorrect" class="w-12 bg-black hover:bg-neonPink border border-neonPink text-neonPink hover:text-white rounded-xl font-bold text-xl transition">&#10007;</button>
-            </div>
-
-            <button id="btn-pause-match" onclick="togglePause()" class="w-24 md:w-32 bg-black border border-borderDark hover:border-neonAmber text-slate-300 py-3 rounded-xl font-bold transition text-xs">
-              &#9208; PAUSE
-            </button>
+        <!-- SCORE SHEET -->
+        <div class="match-scoreboard">
+          <div class="match-scoreboard-head">
+            <span id="scoresheet-team-a-label">TEAM A:</span>
+            <span class="match-scoreboard-title">MATCH SCORE SHEET</span>
+            <span id="scoresheet-team-b-label">TEAM B:</span>
           </div>
 
-          <!-- Online AI mode: the moderator's own buzzer and the live room roster. -->
-          <div id="online-buzz-controls" class="w-full hidden flex-col gap-2 border-t border-borderDark pt-3">
-            <button class="js-online-buzz w-full bg-neonPink disabled:bg-black disabled:text-slate-500 hover:bg-rose-600 text-white py-3 rounded-xl font-black font-mono text-sm tracking-wider shadow-neon-pink disabled:cursor-not-allowed disabled:border disabled:border-borderDark" onclick="sendEvent('BUZZ', {})" disabled>
-              MY BUZZER
-            </button>
-            <div id="online-roster" class="js-online-roster flex flex-wrap gap-2 min-h-6"></div>
+          <div class="match-roster-pills">
+            <span id="match-roster-A-1">P1: Player 1</span>
+            <span id="match-roster-A-C">C: Captain</span>
+            <span id="match-roster-A-3">P3: Player 3</span>
+            <span id="match-roster-A-4">P4: Player 4</span>
+            <span id="match-roster-A-5">P5: Player 5</span>
+            <span id="match-roster-B-1">P1: Player 1</span>
+            <span id="match-roster-B-C">C: Captain</span>
+            <span id="match-roster-B-3">P3: Player 3</span>
+            <span id="match-roster-B-4">P4: Player 4</span>
+            <span id="match-roster-B-5">P5: Player 5</span>
           </div>
 
-          <!-- Named player buzz buttons (in-person manual mode) -->
-          <div id="manual-buzz-controls" class="w-full hidden flex-col gap-2 border-t border-borderDark pt-3">
-            <div class="flex items-center gap-2">
-              <span class="w-14 shrink-0 text-[10px] font-mono font-black text-teamA uppercase tracking-widest">Team A</span>
-              <div id="manual-team-a-buzzers" class="flex flex-wrap gap-2 flex-1"></div>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="w-14 shrink-0 text-[10px] font-mono font-black text-teamB uppercase tracking-widest">Team B</span>
-              <div id="manual-team-b-buzzers" class="flex flex-wrap gap-2 flex-1"></div>
-            </div>
-            <p id="manual-buzz-hint" class="text-[10px] font-mono text-slate-500">Buzz buttons unlock during the 5-second window.</p>
-          </div>
-        </div>
-
-        <!-- SECONDARY CONTROL BAR -->
-        <div class="bg-panel border border-borderDark rounded-2xl p-4 shadow-xl flex flex-wrap items-center gap-3 mt-4">
-          <button onclick="triggerChallenge(); playSound('click');" class="bg-black hover:bg-neonAmber/20 border border-neonAmber text-neonAmber py-2 px-4 rounded-xl font-bold transition text-xs uppercase tracking-wider">
-            &#9888;&#65039; Challenge (Pause &amp; Skip)
-          </button>
-          <button onclick="sendEvent('ADJUST_SCORE', {team: 'Team A', delta: 4})" class="bg-black border border-borderDark hover:border-neonGreen text-slate-300 hover:text-neonGreen py-2 px-4 rounded-xl font-bold transition text-xs uppercase tracking-wider">
-            +4 Team A
-          </button>
-          <button onclick="sendEvent('ADJUST_SCORE', {team: 'Team B', delta: 4})" class="bg-black border border-borderDark hover:border-neonGreen text-slate-300 hover:text-neonGreen py-2 px-4 rounded-xl font-bold transition text-xs uppercase tracking-wider">
-            +4 Team B
-          </button>
-          <button onclick="sendEvent('EXPORT_CSV')" class="bg-black border border-borderDark hover:border-neonCyan text-slate-300 hover:text-neonCyan py-2 px-4 rounded-xl font-bold transition text-xs uppercase tracking-wider">
-            Export Log
-          </button>
-          <button onclick="sendEvent('FORCE_RESET_STATE')" class="bg-black border border-neonPink text-neonPink hover:bg-neonPink hover:text-white py-2 px-4 rounded-xl font-bold transition text-xs uppercase tracking-wider">
-            Override &amp; Reset
-          </button>
-        </div>
-
-        <!-- SCORESHEET (same as the legacy engine scoresheet, editable cells) -->
-        <div class="bg-panel border border-borderDark rounded-2xl p-4 shadow-xl mt-4">
-          <div class="text-xs font-bold text-slate-400 tracking-wider uppercase mb-3 flex justify-between items-center px-1">
-            <span>MATCH EVENT SCORE SHEET</span>
-            <span class="text-[10px] font-mono text-slate-500">DOUBLE-CLICK A CELL TO EDIT</span>
-          </div>
-
-          <div class="flex flex-wrap items-center justify-between gap-3 py-2 px-3 mb-3 bg-black rounded-xl border border-borderDark text-xs font-mono">
-            <div class="flex flex-wrap items-center gap-1.5">
-              <span id="scoresheet-team-a-label" class="text-teamA font-bold text-[11px] uppercase mr-1">TEAM A:</span>
-              <span id="match-roster-A-1" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P1: Player 1</span>
-              <span id="match-roster-A-C" class="px-2 py-0.5 rounded bg-teamA/20 border border-teamA/60 text-teamA font-bold text-[10px]">C: Captain</span>
-              <span id="match-roster-A-3" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P3: Player 3</span>
-              <span id="match-roster-A-4" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P4: Player 4</span>
-              <span id="match-roster-A-5" class="px-2 py-0.5 rounded bg-teamA/10 border border-teamA/30 text-teamA text-[10px]">P5: Player 5</span>
-            </div>
-            <div class="flex flex-wrap items-center gap-1.5 justify-end">
-              <span id="scoresheet-team-b-label" class="text-teamB font-bold text-[11px] uppercase mr-1">TEAM B:</span>
-              <span id="match-roster-B-1" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P1: Player 1</span>
-              <span id="match-roster-B-C" class="px-2 py-0.5 rounded bg-teamB/20 border border-teamB/60 text-teamB font-bold text-[10px]">C: Captain</span>
-              <span id="match-roster-B-3" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P3: Player 3</span>
-              <span id="match-roster-B-4" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P4: Player 4</span>
-              <span id="match-roster-B-5" class="px-2 py-0.5 rounded bg-teamB/10 border border-teamB/30 text-teamB text-[10px]">P5: Player 5</span>
-            </div>
-          </div>
-
-          <div class="overflow-x-auto">
+          <div class="match-scoreboard-table overflow-x-auto">
             <table class="w-full text-left font-mono text-xs">
               <thead>
-                <tr class="border-b border-borderDark text-[10px] text-slate-500">
-                  <th class="py-1 px-4 text-center">TOSS-UP</th>
-                  <th class="py-1 px-4 text-center">BONUS</th>
-                  <th class="py-1 px-2 text-center">CAT / SCORE</th>
-                  <th class="py-1 px-4 text-center">TOSS-UP</th>
-                  <th class="py-1 px-4 text-center">BONUS</th>
+                <tr>
+                  <th class="text-center">TOSS-UP</th>
+                  <th class="text-center">BONUS</th>
+                  <th class="text-center">CAT / SCORE</th>
+                  <th class="text-center">TOSS-UP</th>
+                  <th class="text-center">BONUS</th>
                 </tr>
               </thead>
-              <tbody id="scoresheet-body" class="divide-y divide-borderDark">
+              <tbody id="scoresheet-body">
                 <tr>
                   <td class="py-3 px-4 text-center"></td>
                   <td class="py-3 px-4 text-center"></td>
-                  <td class="py-3 px-2 text-center bg-black border-x border-borderDark text-slate-500 font-bold text-[10px] uppercase tracking-widest">
+                  <td class="py-3 px-2 text-center match-empty-score">
                     Match data will populate here...
                   </td>
                   <td class="py-3 px-4 text-center"></td>
@@ -817,7 +786,6 @@
         </div>
       </div>
     </section>
-
     <!-- ========================================== -->
     <!-- SLIDE 6: BANK & PACKET TOOLS (moderator)   -->
     <!-- ========================================== -->

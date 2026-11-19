@@ -18,10 +18,14 @@ function updateRosterNames(rosterData) {
     const nameA = rosterData.teams["Team A"];
     const nameB = rosterData.teams["Team B"];
 
-    const headerA = document.getElementById('header-team-a-name');
-    const headerB = document.getElementById('header-team-b-name');
-    if (headerA) headerA.innerText = nameA.toUpperCase();
-    if (headerB) headerB.innerText = nameB.toUpperCase();
+    ['header-team-a-name', 'hud-team-a-name', 'side-team-a-name'].forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) element.innerText = nameA;
+    });
+    ['header-team-b-name', 'hud-team-b-name', 'side-team-b-name'].forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) element.innerText = nameB;
+    });
 
     const scoreLabelA = document.getElementById('scoresheet-team-a-label');
     const scoreLabelB = document.getElementById('scoresheet-team-b-label');
@@ -478,6 +482,9 @@ function openManualHudAfterSetup() {
     sendEvent('SAVE_ROSTER', rosterData);
     sendEvent('LOAD_BANK', { bank: window.pendingBank });
     setupComplete = true;
+    const overlay = document.getElementById('match-start-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    if (typeof window.updateHeaderScore === 'function') window.updateHeaderScore();
     navigateTo(5);
 }
 window.openManualHudAfterSetup = openManualHudAfterSetup;

@@ -136,9 +136,14 @@
             button.type = 'button';
             button.dataset.seat = seat;
             button.dataset.team = team;
-            button.className = 'manual-player-buzz min-w-[92px] flex-1 bg-black border border-borderDark text-slate-300 hover:border-neonCyan hover:text-neonCyan px-2 py-1.5 rounded-lg font-mono text-[11px] transition disabled:opacity-35 disabled:cursor-not-allowed';
-            const name = roster.players[seat] || ('Player ' + seat.split('-')[1]);
-            button.textContent = seatLabel(seat) + ' · ' + name;
+            button.className = 'manual-player-buzz';
+            const seatChip = document.createElement('span');
+            seatChip.className = 'player-seat';
+            seatChip.textContent = seatLabel(seat);
+            const playerName = document.createElement('span');
+            playerName.className = 'player-name';
+            playerName.textContent = roster.players[seat] || ('Player ' + seat.split('-')[1]);
+            button.append(seatChip, playerName);
             button.title = team + ' / ' + seat;
             button.addEventListener('click', () => buzz(team, seat));
             holder.appendChild(button);
@@ -219,6 +224,7 @@
         buzzClickTimeout = null;
 
         setText('reader-answer-key', question.answer || '—');
+        setText('hud-question-kind', question.phase === 'BONUS' ? 'BONUS' : 'TOSS-UP');
         setText('manual-verdict-preview', question.phase === 'BONUS' ? 'BONUS +10 / 0' : 'NEG −4');
         setVerdictLabels(question.phase === 'BONUS');
         setText('buzzpoint-current', 'No buzzpoint marked');
@@ -460,11 +466,18 @@
         if (buzzpointPanel) buzzpointPanel.classList.toggle('hidden', !manualMode);
         const modeBadge = $('stage-type-badge');
         if (modeBadge) modeBadge.textContent = manualMode ? 'MANUAL READER' : 'AI READ / JUDGE';
-        const controls = $('manual-buzz-controls');
-        if (controls) {
-            controls.classList.toggle('hidden', !manualMode);
-            controls.classList.toggle('flex', manualMode);
-        }
+        const layout = $('match-layout');
+        if (layout) layout.classList.toggle('is-manual', manualMode);
+        const hud = document.querySelector('.match-hud');
+        if (hud) hud.classList.toggle('is-manual', manualMode);
+        ['manual-team-a-panel', 'manual-team-b-panel'].forEach((id) => {
+            const side = $(id);
+            if (side) side.classList.toggle('hidden', !manualMode);
+        });
+        const clockWrap = $('manual-clock-wrap');
+        if (clockWrap) clockWrap.classList.toggle('hidden', !manualMode);
+        const readActions = $('manual-read-actions');
+        if (readActions) readActions.classList.toggle('hidden', !manualMode);
         if (!manualMode) {
             stopReadClock();
         }
@@ -517,6 +530,7 @@
         buzzClickTimeout = null;
         resetReadClock();
         setText('manual-phase-label', 'IDLE');
+        setText('hud-question-kind', 'TOSS-UP');
         setText('reader-question-text', 'Load a packet to see the question here.');
         setText('reader-answer-key', '—');
         setText('buzzpoint-current', 'No buzzpoint marked');
