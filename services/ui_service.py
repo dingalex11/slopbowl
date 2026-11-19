@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from core.config import APP_ENV, INBOUND_QUEUE_SIZE, MAX_ROOMS, MAX_WEBSOCKET_MESSAGE_BYTES, OUTBOUND_QUEUE_SIZE, PROJECT_ROOT, ROOM_IDLE_TTL_SECONDS, ROOM_REAP_INTERVAL_SECONDS
 from core.events import Event
 from core.validation import validate_client_event, validate_question_bank, validate_room_id
-from services.auth_service import create_online_room, delete_room, get_room_info, get_room_participant, join_online_room, verify_id_token
+from services.auth_service import create_in_person_room, create_online_room, delete_room, get_room_info, get_room_participant, join_online_room, verify_id_token
 from services import challenge_service
 
 logger = logging.getLogger(__name__)
@@ -392,6 +392,23 @@ async def create_generated_online_room(request: Request):
         logger.warning("Unable to create an online room: %s", exc)
         raise HTTPException(status_code=503, detail="Room service unavailable") from exc
     return {"mode": "online", **room}
+
+
+@app.post("/api/rooms/in-person")
+async def create_in_person_room_api(request: Request):
+    """Create the signed-in moderator's local room without a Firestore client write."""
+    user = await _authenticated_user(request)
+    try:
+        room = await asyncio.to_thread(create_in_person_room, user.uid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to create an in-person room: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning("Unable to create an in-person room: %s", exc)
+        raise HTTPException(status_code=503, detail="Room service unavailable") from exc
+    return room
 
 
 @app.post("/api/rooms/{room_id}/online")

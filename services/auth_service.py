@@ -117,6 +117,34 @@ def _is_room_code_taken(exc: Exception) -> bool:
     return (getattr(code, "name", None) or code) in {"ALREADY_EXISTS", 409}
 
 
+def create_in_person_room(owner_uid: str, *, attempts: int = 5) -> dict[str, str]:
+    """Create a local manual-reader room with server credentials.
+
+    The browser used to create this document directly, which made starting a match
+    depend on the deployed Firestore rules. The room is only a private ownership
+    marker, so the authenticated server creates it instead; the client never needs
+    write access to the rooms collection.
+    """
+    if not isinstance(owner_uid, str) or not owner_uid:
+        raise ValueError("Room owner must be a signed-in user")
+    client = firestore.client(_firebase_app())
+    last_error: Exception | None = None
+    for _ in range(attempts):
+        room_id = generate_room_code()
+        room_ref = client.collection("rooms").document(room_id)
+        try:
+            # No mode field: get_room_info treats a missing mode as in_person, and this
+            # keeps the document compatible with the deployed create rule.
+            room_ref.create({"ownerUid": owner_uid, "createdAt": time.time()})
+        except Exception as exc:
+            if _is_room_code_taken(exc):
+                last_error = exc
+                continue
+            raise RuntimeError("Room authorization service is unavailable") from exc
+        return {"room_id": room_id, "mode": "in_person"}
+    raise RuntimeError("Could not allocate a local match room — try again") from last_error
+
+
 def create_online_room(owner_uid: str, name: str, team: str, captain: bool, *, attempts: int = 5) -> dict[str, str | bool]:
     """Create a fresh online room under a generated code, retrying on collisions."""
     if not isinstance(owner_uid, str) or not owner_uid:

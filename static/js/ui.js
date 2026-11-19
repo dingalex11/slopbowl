@@ -174,9 +174,20 @@ if (bankFileInput) {
 }
 
 // --- ROOM CONNECTION ---
+// The app now has two live match types. Switching from one to the other must close the
+// old station; otherwise its socket keeps delivering the previous room into this HUD.
+function closePreviousSocketForSwitch() {
+    const oldSocket = window.ws;
+    if (!oldSocket) return;
+    window._profileRefresh = oldSocket;
+    try { oldSocket.close(4000, 'room-switch'); } catch (error) { /* already closing */ }
+    if (window.ws === oldSocket) window.ws = null;
+}
+
 async function connectToRoom(roomId, apiKey = null, expectedRole = 'owner', entrySlide = null) {
     const existingRoom = window.activeRoomId;
     if (existingRoom && existingRoom === roomId) return;
+    closePreviousSocketForSwitch();
     window.activeRoomId = roomId;
     currentRoomId = roomId;
     updateRoomCodeDisplay();
@@ -449,17 +460,6 @@ function collectRoster() {
     };
 }
 
-function generateInPersonRoomCode() {
-    const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
-    const bytes = new Uint8Array(10);
-    if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
-        window.crypto.getRandomValues(bytes);
-    } else {
-        for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
-    }
-    return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
-}
-
 function openManualHudAfterSetup() {
     if (!window._manualSetupPending) return;
     window._manualSetupPending = false;
@@ -514,7 +514,7 @@ async function startInPersonMatch() {
         openModal('auth-modal');
         return;
     }
-    if (typeof window.ensureRoomOwnership !== 'function') {
+    if (typeof window.createInPersonRoomApi !== 'function') {
         showToast('Sign-in is still initializing. Try again in a moment.');
         return;
     }
@@ -530,19 +530,16 @@ async function startInPersonMatch() {
         window._manualRoster = rosterData;
         updateRosterNames(rosterData);
 
-        if (isRoomConnected() && window.activeRoomId) {
+        if (isRoomConnected() && window.activeRoomId && window.ManualReader?.isManual()) {
             window._manualSetupPending = true;
             openManualHudAfterSetup();
             return;
         }
+        closePreviousSocketForSwitch();
 
-        let roomId = '';
-        let ownsRoom = false;
-        for (let attempt = 0; attempt < 3 && !ownsRoom; attempt += 1) {
-            roomId = generateInPersonRoomCode();
-            ownsRoom = await window.ensureRoomOwnership(roomId, user.uid);
-        }
-        if (!ownsRoom) throw new Error('Could not allocate a local match room. Try again.');
+        const room = await window.createInPersonRoomApi();
+        const roomId = room?.room_id;
+        if (!roomId) throw new Error('The room service did not return a local match room.');
 
         window.activeRoomId = roomId;
         currentRoomId = roomId;
@@ -612,20 +609,6 @@ function updateSeatLabels(payload) {
     if (team) team.innerText = payload.team || '—';
     if (room) room.innerText = (window.activeRoomId || '').toUpperCase() || '—';
 }
-
-// --- AUTO-JOIN FROM URL ---
-window.addEventListener('DOMContentLoaded', () => {
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get('room');
-
-    if (roomParam) {
-        const input = document.getElementById('room-id-input');
-        if (input) {
-            input.value = roomParam;
-            joinRoom();
-        }
-    }
-});
 
 // --- SCREEN LINKS ---
 // #/join/CODE is the shareable room link: it opens the online hub with the code ready.

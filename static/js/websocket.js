@@ -252,7 +252,8 @@ function connectWebSocket(roomId, apiKey = null) {
                 currentStageType = payload.phase === 'BONUS' ? 'BONUS' : 'TOSSUP';
                 window.ManualReader.setQuestion(payload);
             } else {
-                // Online readout remains dormant; the manual reader owns the HUD.
+                // Online AI rooms keep the original audio-only readout; manual rooms
+                // render the packet into the reader panel instead.
                 setStage('READ_TOSSUP');
             }
             

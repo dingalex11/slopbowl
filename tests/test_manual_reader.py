@@ -311,10 +311,10 @@ class ManualReaderPageTests(unittest.TestCase):
         self.assertIn("setVerdictEnabled(!verdictSent);", MANUAL_SOURCE)
         self.assertIn("setVerdictLabels(true);", MANUAL_SOURCE)
 
-    def test_start_match_claims_a_room_and_sends_the_staged_packet(self):
+    def test_start_match_creates_a_server_room_and_sends_the_staged_packet(self):
         self.assertIn("async function startInPersonMatch()", UI_SOURCE)
-        self.assertIn("generateInPersonRoomCode()", UI_SOURCE)
-        self.assertIn("await window.ensureRoomOwnership(roomId, user.uid)", UI_SOURCE)
+        self.assertIn("const room = await window.createInPersonRoomApi();", UI_SOURCE)
+        self.assertNotIn("ensureRoomOwnership(roomId", UI_SOURCE)
         self.assertIn("connectWebSocket(roomId", UI_SOURCE)
         self.assertIn("sendEvent('LOAD_BANK', { bank: window.pendingBank });", UI_SOURCE)
         self.assertIn("sendEvent('SAVE_ROSTER', rosterData);", UI_SOURCE)

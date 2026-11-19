@@ -242,11 +242,11 @@ class ReadingModeBroadcastTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ReadingModeScreenTests(unittest.TestCase):
-    def test_the_retired_online_reading_mode_control_is_off_the_page(self):
-        # The online screens are dormant; manual-reader mode has no shared-read switch
-        # because there is no browser TTS to coordinate.
-        self.assertNotIn('id="reading-mode-stations"', INDEX_SOURCE)
-        self.assertNotIn('id="reading-mode-moderator"', INDEX_SOURCE)
+    def test_the_ai_online_reading_mode_control_is_restored(self):
+        # AI read/judge is its own entry point again, with the shared-read switch the
+        # manual reader does not need.
+        self.assertIn('id="reading-mode-stations"', INDEX_SOURCE)
+        self.assertIn('id="reading-mode-moderator"', INDEX_SOURCE)
         self.assertIn("function setReadingMode(mode)", UI_SOURCE)
         self.assertIn("sendEvent('SET_READING_MODE', { mode });", UI_SOURCE)
 
@@ -261,9 +261,9 @@ class ReadingModeScreenTests(unittest.TestCase):
         self.assertIn('"moderator_reading": dict(getattr(moderator, "moderator_reading"', service_source)
         self.assertIn('"MODERATOR_READING"', service_source)
 
-    def test_the_retired_player_banner_is_off_the_active_page(self):
-        self.assertNotIn('id="player-read-banner"', INDEX_SOURCE)
-        self.assertNotIn('id="player-read-banner-text"', INDEX_SOURCE)
+    def test_the_online_player_banner_is_restored(self):
+        self.assertIn('id="player-read-banner"', INDEX_SOURCE)
+        self.assertIn('id="player-read-banner-text"', INDEX_SOURCE)
         self.assertIn("MODERATOR IS READING", SOCKET_SOURCE)
         self.assertIn("function renderModeratorReading(active, kind = null)", SOCKET_SOURCE)
 

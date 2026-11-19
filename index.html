@@ -279,37 +279,51 @@
       <div class="text-center max-w-2xl mx-auto mb-10">
         <div class="inline-flex items-center space-x-2 px-3 py-1 bg-black border border-neonCyan/60 rounded-full text-neonCyan text-xs font-mono font-semibold mb-4 shadow-neon-cyan">
           <span class="w-2 h-2 rounded-full bg-neonCyan animate-ping"></span>
-          <span>Human reader + click-to-buzz + buzzpoint tracking</span>
+          <span>AI read/judge + manual read + buzzpoint tracking</span>
         </div>
         <h1 class="text-4xl md:text-6xl font-black font-display tracking-tight text-white mb-3">
           SLOP<span class="text-transparent bg-clip-text bg-gradient-to-r from-neonCyan via-sky-300 to-neonAmber">BOWL</span>
         </h1>
         <p class="text-slate-400 text-sm md:text-base font-sans">
-          Run an in-person bout with a human reader: click the player who buzzed, mark the buzzpoint, and run the clocks. Or hone your buzz speed solo.
+          Host an AI-read online room, run an in-person bout with a human reader, drill solo, or take on the Buzzboard. Every mode keeps the same match engine.
         </p>
       </div>
 
-      <!-- Main cards: in-person match, solo practice and the Buzzboard Challenge. The
-           challenge card is a real link
-           (#/board), so the contest a captain runs lives in the address bar like every
-           other screen. -->
-      <div id="home-main-cards" class="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl mb-10">
-        <!-- Card 1: Moderate in person -->
+      <!-- Main cards: the four ways in. AI rooms and manual rooms share the engine;
+           the challenge card is a real link (#/board), so the contest a captain runs
+           lives in the address bar like every other screen. -->
+      <div id="home-main-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full max-w-6xl mb-10">
+        <!-- Card 1: AI read / judge (online rooms) -->
+        <div onclick="navigateTo(3); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonAmber rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-amber hover:-translate-y-1 active:scale-95 relative overflow-hidden">
+          <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonAmber/10 rounded-full blur-xl group-hover:bg-neonAmber/20 transition"></div>
+          <div class="w-16 h-16 rounded-2xl bg-black border border-neonAmber/50 flex items-center justify-center text-neonAmber mb-5 group-hover:scale-110 transition shadow-inner">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9.663 17h4.674M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonAmber transition font-display">AI Read / Judge</h3>
+          <p class="text-xs text-slate-400 leading-relaxed font-sans">
+            Online rooms with automated question reading, microphone answers and AI adjudication. Host or join by room code.
+          </p>
+          <div class="mt-6 flex items-center text-xs font-mono text-neonAmber group-hover:translate-x-1 transition font-bold">
+            Enter AI match hub &rarr;
+          </div>
+        </div>
+
+        <!-- Card 2: Manual read (in person) -->
         <div onclick="navigateTo(4); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonCyan rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-cyan hover:-translate-y-1 active:scale-95 relative overflow-hidden">
           <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonCyan/10 rounded-full blur-xl group-hover:bg-neonCyan/20 transition"></div>
           <div class="w-16 h-16 rounded-2xl bg-black border border-neonCyan/50 flex items-center justify-center text-neonCyan mb-5 group-hover:scale-110 transition shadow-inner">
             <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
           </div>
-          <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonCyan transition font-display">Moderate in person</h3>
+          <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonCyan transition font-display">Manual Read</h3>
           <p class="text-xs text-slate-400 leading-relaxed font-sans">
-            A human reader, click-to-buzz player controls, buzzpoint marking, and live read / buzz / answer clocks.
+            An in-person bout with a human reader: named click-to-buzz controls, buzzpoint marking, and live read / buzz / answer clocks.
           </p>
           <div class="mt-6 flex items-center text-xs font-mono text-neonCyan group-hover:translate-x-1 transition font-bold">
-            Configure Match Station &rarr;
+            Configure match station &rarr;
           </div>
         </div>
 
-        <!-- Card 2: Solo practice drill -->
+        <!-- Card 3: Solo practice drill -->
         <div onclick="openSoloSetup(); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonGreen rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-green hover:-translate-y-1 active:scale-95 relative overflow-hidden">
           <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonGreen/10 rounded-full blur-xl group-hover:bg-neonGreen/20 transition"></div>
           <div class="w-16 h-16 rounded-2xl bg-black border border-neonGreen/50 flex items-center justify-center text-neonGreen mb-5 group-hover:scale-110 transition shadow-inner">
@@ -397,6 +411,70 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 3: ONLINE PLAY (create / join)       -->
+    <!-- ========================================== -->
+    <section id="slide-3" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="flex items-start justify-between mb-6">
+        <div>
+          <h2 class="text-3xl md:text-5xl font-black font-display text-white mb-2">AI read / judge</h2>
+          <p class="text-xs md:text-sm text-slate-400 font-mono">Connect to a live AI-read match pod or host a room as moderator.</p>
+        </div>
+        <button onclick="navigateTo(1); playSound('click');" class="px-3.5 py-1.5 bg-black border border-borderDark text-slate-300 hover:text-neonCyan rounded-xl text-xs font-mono font-bold active:scale-95 transition">&larr; HOME</button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Join Match Card -->
+        <div class="bg-panel border border-neonCyan rounded-2xl p-6 shadow-neon-cyan">
+          <div class="w-14 h-14 rounded-2xl bg-black border border-neonCyan/60 flex items-center justify-center text-neonCyan mb-4 shadow-neon-cyan">
+            <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path></svg>
+          </div>
+          <h3 class="text-2xl font-bold text-white mb-2 font-display">Join Match</h3>
+          <p class="text-xs text-slate-400 mb-6 font-sans">Enter the room code provided by the tournament director. You pick your team on the pre-match screen.</p>
+          <div class="space-y-3">
+            <div>
+              <label class="text-[11px] font-mono font-bold text-neonCyan uppercase block mb-1">Room code</label>
+              <input type="text" id="room-id-input" placeholder="e.g. semifinals-a" oninput="clearLobbyStatus()" class="w-full bg-black border border-borderDark focus:border-neonCyan rounded-xl px-4 py-2.5 text-sm text-white font-mono uppercase focus:outline-none">
+            </div>
+            <div>
+              <label class="text-[11px] font-mono font-bold text-slate-300 uppercase block mb-1">Player handle</label>
+              <input type="text" id="online-player-name" maxlength="64" placeholder="Your name" oninput="clearLobbyStatus()" class="w-full bg-black border border-borderDark focus:border-neonCyan rounded-xl px-4 py-2.5 text-xs text-white font-mono focus:outline-none">
+            </div>
+            <button onclick="joinOnlineRoom(); playSound('click');" class="w-full py-3.5 bg-neonCyan hover:bg-cyan-300 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-cyan transition flex items-center justify-center space-x-2">
+              <span>Enter lobby as player &rarr;</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Create match Card -->
+        <div class="bg-panel border border-neonAmber rounded-2xl p-6 shadow-neon-amber">
+          <div class="w-14 h-14 rounded-2xl bg-black border border-neonAmber/60 flex items-center justify-center text-neonAmber mb-4 shadow-neon-amber">
+            <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          </div>
+          <h3 class="text-2xl font-bold text-white mb-2 font-display">Create match</h3>
+          <p class="text-xs text-slate-400 mb-6 font-sans">Host an official competition pod with packet adjudication &amp; lockout.</p>
+          <div class="space-y-3">
+            <div class="bg-black border border-borderDark rounded-xl px-4 py-3">
+              <span class="text-[11px] font-mono font-bold text-neonAmber uppercase block mb-1">Room code</span>
+              <span class="text-xs text-slate-400 font-mono">Generated automatically &mdash; share it from the lobby.</span>
+            </div>
+            <div>
+              <label class="text-[11px] font-mono font-bold text-slate-300 uppercase block mb-1">Moderator name</label>
+              <input type="text" id="create-player-name" maxlength="64" placeholder="Your name" oninput="clearLobbyStatus()" class="w-full bg-black border border-borderDark focus:border-neonAmber rounded-xl px-4 py-2.5 text-xs text-white font-mono focus:outline-none">
+            </div>
+            <button onclick="createOnlineRoom(); playSound('click');" class="w-full py-3.5 bg-neonAmber hover:bg-amber-400 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-amber transition flex items-center justify-center space-x-2">
+              <span>Configure room as mod &rarr;</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <button onclick="navigateTo(4); playSound('click');" class="w-full mt-6 py-2.5 text-xs text-slate-400 hover:text-neonCyan font-mono uppercase tracking-wider transition">
+        Run this match with a human reader instead &rarr;
+      </button>
+      <p id="online-lobby-status" class="min-h-5 text-xs text-neonAmber font-mono mt-2 text-center"></p>
     </section>
 
     <!-- ========================================== -->
@@ -571,7 +649,7 @@
 
                 <!-- BUZZPOINT + VERDICT PANEL -->
                 <div class="flex flex-col gap-3 w-full lg:w-80 shrink-0">
-                  <div class="bg-black p-4 rounded-xl border border-borderDark flex flex-col gap-3 shadow-inner">
+                  <div id="manual-buzzpoint-panel" class="bg-black p-4 rounded-xl border border-borderDark flex flex-col gap-3 shadow-inner">
                     <div class="flex items-center justify-between">
                       <span class="text-[10px] font-bold text-slate-400 tracking-widest uppercase">Buzzpoint</span>
                       <span id="buzzpoint-status" class="text-[10px] font-mono font-bold text-slate-500 uppercase">Not marked</span>
@@ -643,6 +721,14 @@
             <button id="btn-pause-match" onclick="togglePause()" class="w-24 md:w-32 bg-black border border-borderDark hover:border-neonAmber text-slate-300 py-3 rounded-xl font-bold transition text-xs">
               &#9208; PAUSE
             </button>
+          </div>
+
+          <!-- Online AI mode: the moderator's own buzzer and the live room roster. -->
+          <div id="online-buzz-controls" class="w-full hidden flex-col gap-2 border-t border-borderDark pt-3">
+            <button class="js-online-buzz w-full bg-neonPink disabled:bg-black disabled:text-slate-500 hover:bg-rose-600 text-white py-3 rounded-xl font-black font-mono text-sm tracking-wider shadow-neon-pink disabled:cursor-not-allowed disabled:border disabled:border-borderDark" onclick="sendEvent('BUZZ', {})" disabled>
+              MY BUZZER
+            </button>
+            <div id="online-roster" class="js-online-roster flex flex-wrap gap-2 min-h-6"></div>
           </div>
 
           <!-- Named player buzz buttons (in-person manual mode) -->
@@ -772,6 +858,211 @@
             <h3 class="text-xs font-bold text-slate-400 tracking-widest uppercase">Output Payload [JSON]</h3>
           </div>
           <pre id="pdf-output-json" class="flex-1 bg-black border border-borderDark rounded-xl p-4 overflow-auto text-neonAmber text-xs font-mono max-h-[500px] whitespace-pre-wrap break-words leading-relaxed shadow-inner custom-scrollbar">// Parsed data will stream here...</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 7: PLAYER PRE-MATCH (online player)  -->
+    <!-- ========================================== -->
+    <section id="slide-7" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-xl mx-auto w-full">
+        <h2 class="text-3xl font-black font-display text-white mb-2">Online Pre Match</h2>
+        <p class="text-xs text-slate-400 font-mono mb-6">YOU ARE CONNECTED. WAIT FOR THE MODERATOR TO BEGIN. QUESTIONS ARE READ ALOUD VIA AUDIO &mdash; NO QUESTION TEXT IS SHOWN.</p>
+
+        <div class="bg-panel border border-borderDark rounded-2xl p-6 space-y-4">
+          <div class="flex items-center justify-between border-b border-borderDark pb-3">
+            <span class="text-[11px] font-mono text-slate-400 uppercase">Your seat</span>
+            <span id="player-seat-label" class="text-sm font-mono font-black text-neonCyan">&mdash;</span>
+          </div>
+          <div>
+            <span class="text-[11px] font-mono text-slate-400 uppercase block mb-2">Room roster</span>
+            <div class="js-online-roster flex flex-wrap gap-2 min-h-6"></div>
+          </div>
+          <!-- Team pick: real team join + captain claim -->
+          <div class="grid grid-cols-2 gap-3">
+            <button onclick="switchTeam('Team A'); playSound('click');" class="py-2.5 text-xs font-mono font-black text-teamA border border-teamA rounded-xl hover:bg-teamA hover:text-black active:scale-95 transition">
+              JOIN TEAM A
+            </button>
+            <button onclick="switchTeam('Team B'); playSound('click');" class="py-2.5 text-xs font-mono font-black text-teamB border border-teamB rounded-xl hover:bg-teamB hover:text-black active:scale-95 transition">
+              JOIN TEAM B
+            </button>
+          </div>
+          <button onclick="claimCaptain(); playSound('click');" class="w-full py-2 text-xs font-mono font-bold text-neonCyan border border-neonCyan/50 rounded-xl hover:bg-neonCyan/10 active:scale-95 transition">
+            CLAIM CAPTAIN (one per team)
+          </button>
+
+          <div class="flex items-center space-x-2 bg-black border border-borderDark rounded-xl px-3 py-2">
+            <span class="w-2 h-2 rounded-full bg-neonGreen animate-ping"></span>
+            <span id="player-lobby-status" class="text-xs text-slate-300 font-mono">Connected. Waiting for the moderator...</span>
+          </div>
+          <button onclick="navigateTo(8); playSound('buzz');" class="w-full py-4 bg-neonPink hover:bg-rose-600 text-white font-black font-mono text-lg uppercase tracking-wider rounded-2xl shadow-neon-pink transition active:scale-95">
+            Go to buzzer &rarr;
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 9: MODERATOR PRE-MATCH LOBBY (online) -->
+    <!-- ========================================== -->
+    <section id="slide-9" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-xl mx-auto w-full">
+        <h2 class="text-3xl font-black font-display text-white mb-2">Pre Match Lobby</h2>
+        <p class="text-xs text-slate-400 font-mono mb-6">SHARE THE ROOM CODE WITH PLAYERS AND WAIT FOR THEM TO JOIN, THEN PROCEED TO THE MODERATION HUD.</p>
+
+        <div class="bg-panel border border-neonCyan rounded-2xl p-6 space-y-5 shadow-neon-cyan">
+          <div class="text-center">
+            <span class="text-[11px] font-mono text-slate-400 uppercase block mb-2">Room code &mdash; share with players</span>
+            <div class="flex items-center justify-center gap-3">
+              <span id="mod-lobby-room-code" class="text-4xl font-black font-mono text-neonCyan digital-lcd tracking-widest">&mdash;</span>
+              <button onclick="copyRoomCode(); playSound('click');" class="px-3 py-1.5 bg-black border border-neonCyan text-neonCyan text-xs font-mono font-bold rounded-lg active:scale-95 transition hover:bg-neonCyan/10">COPY</button>
+            </div>
+          </div>
+
+          <div class="border-t border-borderDark pt-4">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[11px] font-mono text-slate-400 uppercase">Players joined</span>
+              <div class="flex items-center space-x-2">
+                <span class="w-2 h-2 rounded-full bg-neonGreen animate-ping"></span>
+                <span class="text-[11px] font-mono text-neonGreen uppercase">Waiting for players</span>
+              </div>
+            </div>
+            <div class="js-online-roster flex flex-wrap gap-2 min-h-10 items-center"></div>
+          </div>
+
+          <!-- Team panels: real roster + real team/captain claiming (moderator included) -->
+          <div class="grid grid-cols-2 gap-4">
+            <div class="bg-black border border-teamA rounded-xl p-3">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-teamA font-mono font-bold text-xs uppercase">Team A</span>
+                <button onclick="claimCaptain('Team A'); playSound('click');" class="px-2 py-0.5 text-[10px] bg-black border border-teamA text-teamA rounded hover:bg-teamA hover:text-black font-mono font-bold">CLAIM CPT</button>
+              </div>
+              <div id="lobby-team-a-list" class="space-y-1 min-h-[52px] text-xs font-mono text-slate-300"></div>
+              <button onclick="switchTeam('Team A'); playSound('click');" class="w-full mt-2 py-1 text-[10px] font-mono font-bold text-teamA border border-teamA/50 rounded hover:bg-teamA/10">JOIN TEAM A</button>
+            </div>
+            <div class="bg-black border border-teamB rounded-xl p-3">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-teamB font-mono font-bold text-xs uppercase">Team B</span>
+                <button onclick="claimCaptain('Team B'); playSound('click');" class="px-2 py-0.5 text-[10px] bg-black border border-teamB text-teamB rounded hover:bg-teamB hover:text-black font-mono font-bold">CLAIM CPT</button>
+              </div>
+              <div id="lobby-team-b-list" class="space-y-1 min-h-[52px] text-xs font-mono text-slate-300"></div>
+              <button onclick="switchTeam('Team B'); playSound('click');" class="w-full mt-2 py-1 text-[10px] font-mono font-bold text-teamB border border-teamB/50 rounded hover:bg-teamB/10">JOIN TEAM B</button>
+            </div>
+          </div>
+
+          <button onclick="copyInviteLink(); playSound('click');" class="w-full py-2 text-xs font-mono font-bold text-neonCyan border border-neonCyan/50 rounded-xl hover:bg-neonCyan/10 active:scale-95 transition">
+            + Copy invite link
+          </button>
+
+          <div class="flex flex-col gap-2">
+            <button onclick="startMatchFromLobby(); playSound('buzz');" class="w-full py-4 bg-neonGreen hover:bg-emerald-400 text-black font-black font-mono text-sm uppercase tracking-wider rounded-xl shadow-neon-green transition active:scale-95">
+              START MATCH
+            </button>
+            <button onclick="navigateTo(3); playSound('click');" class="w-full py-2.5 text-xs text-slate-400 hover:text-white font-mono uppercase tracking-wider transition">
+              Back to online play
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 8: PLAYER BUZZER VIEW (online)       -->
+    <!-- ========================================== -->
+    <section id="slide-8" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-2xl mx-auto w-full">
+        <div class="text-center mb-6">
+          <h2 class="text-3xl md:text-5xl font-black font-display text-white mb-2">Buzz Station</h2>
+          <p class="text-xs text-slate-400 font-mono">LISTEN FOR THE QUESTION AUDIO, THEN BUZZ AND SPEAK YOUR ANSWER.</p>
+        </div>
+
+        <!-- Stage / audio state strip -->
+        <div class="bg-panel border border-borderDark rounded-2xl p-4 mb-5 flex items-center justify-between gap-3">
+          <div class="flex items-center space-x-2">
+            <span id="player-stage-dot" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+            <span id="player-stage-label" class="text-xs font-mono font-bold text-slate-300 uppercase">AWAITING QUESTION</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span class="text-[10px] font-mono text-slate-500 uppercase">MIC</span>
+            <span id="player-mic-label" class="text-xs font-mono font-bold text-neonCyan">STANDBY</span>
+          </div>
+        </div>
+
+        <!-- Shared-read indicator: in moderator-reads mode this station stays silent,
+             so the page must say why instead of looking broken. -->
+        <div id="player-read-banner" class="hidden mb-5 rounded-2xl border border-neonCyan bg-black px-4 py-3 shadow-neon-cyan">
+          <div class="flex items-center gap-3">
+            <span class="relative flex h-2.5 w-2.5 shrink-0">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-neonCyan opacity-75"></span>
+              <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-neonCyan"></span>
+            </span>
+            <div class="min-w-0">
+              <p class="text-[11px] font-mono font-black text-neonCyan uppercase tracking-widest">Moderator is reading</p>
+              <p id="player-read-banner-text" class="text-[10px] font-mono text-slate-400">Listen to the shared audio &mdash; buzz in when you know it.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Giant buzzer -->
+        <button class="js-online-buzz buzz-btn w-full h-32 md:h-40 rounded-2xl bg-gradient-to-b from-slate-900 via-black to-slate-950 hover:border-neonCyan border-4 border-borderDark text-white hover:text-neonCyan font-display font-black text-4xl md:text-5xl tracking-wider transition-all duration-150 shadow-2xl flex items-center justify-center relative cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed" onclick="sendEvent('BUZZ', {}); playSound('buzz');" disabled>
+          BUZZ
+        </button>
+
+        <div class="mt-4 bg-black border border-borderDark rounded-2xl p-4 text-center">
+          <span class="text-[11px] font-mono text-slate-400 uppercase">Answer window opens automatically &mdash; speak clearly into your microphone.</span>
+        </div>
+
+        <div class="mt-4 grid grid-cols-2 gap-4">
+          <div class="bg-panel border border-borderDark rounded-2xl p-4 text-center">
+            <span class="text-[10px] text-slate-400 block font-mono uppercase">Your team</span>
+            <span id="player-team-label" class="text-lg font-black text-neonCyan font-mono">&mdash;</span>
+          </div>
+          <div class="bg-panel border border-borderDark rounded-2xl p-4 text-center">
+            <span class="text-[10px] text-slate-400 block font-mono uppercase">Room</span>
+            <span id="player-room-label" class="text-lg font-black text-neonAmber font-mono">&mdash;</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- SLIDE 10: ONLINE PRE-MATCH SETTINGS (mod)  -->
+    <!-- ========================================== -->
+    <section id="slide-10" class="slide-view hidden py-4 transition-all duration-300">
+      <div class="max-w-2xl mx-auto w-full">
+        <h2 class="text-2xl md:text-3xl font-black font-display text-white mb-2">Online Pre Match Settings (moderator)</h2>
+        <p class="text-xs text-slate-400 font-mono mb-6">UPLOAD THE QUESTION PACKET BEFORE OPENING THE LOBBY.</p>
+
+        <div class="bg-panel border border-neonAmber rounded-2xl p-6 shadow-neon-amber">
+          <div id="settings-packet-drop" onclick="document.getElementById('settings-packet-input').click()" class="border-2 border-dashed border-borderDark rounded-2xl flex flex-col items-center justify-center p-10 text-center cursor-pointer hover:border-neonAmber hover:bg-panelHover transition-all relative overflow-hidden min-h-[220px]">
+            <div class="w-14 h-14 rounded-2xl bg-black border border-neonAmber/60 flex items-center justify-center text-neonAmber mb-4 shadow-neon-amber">
+              <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+            </div>
+            <b class="text-slate-200 font-mono text-sm uppercase">Upload a parsed packet</b>
+            <span class="text-xs text-slate-500 mt-2 font-mono">Click to browse or drop a Slopbowl .json / .txt question package</span>
+          </div>
+          <input type="file" id="settings-packet-input" accept=".json,.txt" class="hidden">
+          <p id="settings-packet-status" class="mt-4 text-center text-xs font-mono font-bold text-neonAmber min-h-5"></p>
+
+          <button onclick="proceedToLobby(); playSound('click');" class="w-full mt-4 py-3.5 bg-neonAmber hover:bg-amber-400 active:scale-95 text-black font-mono font-black text-xs uppercase rounded-xl shadow-neon-amber transition flex items-center justify-center space-x-2">
+            <span>Proceed to lobby &rarr;</span>
+          </button>
+        </div>
+
+        <!-- Reading mode: one voice for the room, or each device reading at its own pace. -->
+        <div class="mt-5 bg-panel border border-borderDark rounded-2xl p-5">
+          <div class="flex items-center justify-between border-b border-borderDark pb-3 mb-3">
+            <h3 class="text-sm font-bold text-white font-display">Question Reading</h3>
+            <span id="reading-mode-badge" class="text-[9px] font-mono font-bold bg-black text-neonCyan border border-neonCyan/60 rounded-full px-2 py-0.5 tracking-widest">EACH DEVICE</span>
+          </div>
+          <p id="reading-mode-note" class="text-[11px] text-slate-400 font-mono leading-relaxed mb-3">
+            Each player's browser speaks the tossup with its own voice, so read speeds differ. Moderator mode keeps every player device silent and runs the read, the interrupt boundary and the buzz clock off one voice.
+          </p>
+          <div class="grid grid-cols-2 gap-3">
+            <button type="button" id="reading-mode-stations" onclick="setReadingMode('stations'); playSound('click');" class="py-2.5 text-[11px] font-mono font-black uppercase rounded-xl border transition active:scale-95">EACH DEVICE</button>
+            <button type="button" id="reading-mode-moderator" onclick="setReadingMode('moderator'); playSound('click');" class="py-2.5 text-[11px] font-mono font-black uppercase rounded-xl border transition active:scale-95">MODERATOR READS</button>
+          </div>
         </div>
       </div>
     </section>

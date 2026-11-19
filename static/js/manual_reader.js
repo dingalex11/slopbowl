@@ -456,6 +456,10 @@
         manualMode = Boolean(enabled);
         const panel = $('manual-reader-panel');
         if (panel) panel.classList.toggle('hidden', !manualMode);
+        const buzzpointPanel = $('manual-buzzpoint-panel');
+        if (buzzpointPanel) buzzpointPanel.classList.toggle('hidden', !manualMode);
+        const modeBadge = $('stage-type-badge');
+        if (modeBadge) modeBadge.textContent = manualMode ? 'MANUAL READER' : 'AI READ / JUDGE';
         const controls = $('manual-buzz-controls');
         if (controls) {
             controls.classList.toggle('hidden', !manualMode);
@@ -463,7 +467,6 @@
         }
         if (!manualMode) {
             stopReadClock();
-            if (typeof stopActionTimer === 'function') stopActionTimer();
         }
         updateBuzzButtons();
         updateTokenState();

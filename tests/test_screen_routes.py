@@ -39,12 +39,11 @@ def function_source(source, name):
 class RouteTableTests(unittest.TestCase):
     def test_every_slide_screen_has_a_route(self):
         self.assertIn("const SLIDES = {", ROUTER_SOURCE)
-        for name, number in (("home", 1), ("'in-person'", 4), ("hud", 5), ("bank", 6),
-                             ("solo", 11), ("board", 13)):
+        for name, number in (("home", 1), ("online", 3), ("'in-person'", 4), ("hud", 5),
+                             ("bank", 6), ("prematch", 7), ("buzzer", 8), ("lobby", 9),
+                             ("'mod-setup'", 10), ("solo", 11), ("board", 13)):
             self.assertIn(f"{name}: {number}", ROUTER_SOURCE,
                           f"slide screen {name} must keep its address")
-        for retired in ("online:", "lobby:", "buzzer:", "prematch:", "mod-setup:"):
-            self.assertNotIn(retired, ROUTER_SOURCE, f"retired online screen {retired} still routes")
 
     def test_the_stations_that_were_popups_have_their_own_screens(self):
         self.assertIn("const STATIONS = {", ROUTER_SOURCE)
@@ -65,11 +64,11 @@ class RouteTableTests(unittest.TestCase):
         self.assertIn("window.routerCloseLogin = closeLogin;", ROUTER_SOURCE)
         self.assertIn("new CustomEvent('app:view'", ROUTER_SOURCE)
 
-    def test_a_challenge_url_carries_its_code(self):
+    def test_a_challenge_or_room_url_carries_its_code(self):
         self.assertIn("params.code = String(parts[1] || '').toLowerCase();", ROUTER_SOURCE)
         self.assertIn("if (name === 'challenge') return p.code ? `#/challenge/${encodeURIComponent(p.code)}`", ROUTER_SOURCE)
-        self.assertNotIn("if (name === 'join')", ROUTER_SOURCE)
-        self.assertNotIn("#/join/", ROUTER_SOURCE)
+        self.assertIn("if (name === 'join')", ROUTER_SOURCE)
+        self.assertIn("#/join/", ROUTER_SOURCE)
 
     def test_an_unknown_address_lands_home_instead_of_a_blank_page(self):
         self.assertIn("if (NAMES.indexOf(name) === -1)", ROUTER_SOURCE)
@@ -88,12 +87,12 @@ class ScreenLinkTests(unittest.TestCase):
         self.assertNotIn("nav-dock-btn", INDEX_SOURCE)
         self.assertNotIn("nav-btn-", INDEX_SOURCE)
 
-    def test_the_home_page_carries_the_ways_in(self):
-        """The manual and solo cards, then the header: no separate index row below them."""
-        for call in ("navigateTo(4)", "openSoloSetup()"):
+    def test_the_home_page_carries_all_four_ways_in(self):
+        """AI read/judge, manual read, solo and Buzzboard are the four main doors."""
+        for call in ("navigateTo(3)", "navigateTo(4)", "openSoloSetup()"):
             self.assertIn(call, INDEX_SOURCE, f"no door for {call}")
-        self.assertNotIn("navigateTo(3)", INDEX_SOURCE)
-        self.assertNotIn("Play / Host online", INDEX_SOURCE)
+        self.assertIn("AI Read / Judge", INDEX_SOURCE)
+        self.assertIn("Manual Read", INDEX_SOURCE)
         self.assertIn('href="#/board"', INDEX_SOURCE)
         # The header carries the packet upload and the stats station.
         self.assertIn('href="#/bank"', INDEX_SOURCE)
@@ -306,7 +305,7 @@ class HeaderScoreTests(unittest.TestCase):
         # Hidden by default: navigating anywhere starts from "no scores on screen".
         self.assertIn("#header-match-score {\n      display: none;", INDEX_SOURCE)
         self.assertIn("#header-match-score.is-live {", INDEX_SOURCE)
-        self.assertIn("const LIVE_SCORE_SCREENS = ['hud'];\n", ROUTER_SOURCE)
+        self.assertIn("const LIVE_SCORE_SCREENS = ['hud', 'buzzer'];\n", ROUTER_SOURCE)
 
     def test_the_hud_keeps_its_scores_hidden_until_the_match_begins(self):
         # router.js is written inside an IIFE, so its functions close on an indented brace.
@@ -325,15 +324,24 @@ class HeaderScoreTests(unittest.TestCase):
 
 
 class ManualEntryPointTests(unittest.TestCase):
-    def test_the_online_entry_points_are_retired(self):
-        self.assertNotIn("if (name === 'join')", ROUTER_SOURCE)
-        self.assertNotIn("#/join/", ROUTER_SOURCE)
-        self.assertNotIn("online: 3", ROUTER_SOURCE)
+    def test_a_manual_match_asks_the_server_to_make_its_room(self):
+        # Creating the rooms document from the browser made Start Match depend on the
+        # deployed Firestore rules; the authenticated backend now owns that write.
+        body = function_source(UI_SOURCE, "startInPersonMatch")
+        self.assertIn("window.createInPersonRoomApi()", body)
+        self.assertNotIn("ensureRoomOwnership", body)
+        self.assertNotIn("generateInPersonRoomCode", UI_SOURCE)
+
+    def test_switching_from_ai_to_manual_closes_the_old_station(self):
+        self.assertIn("function closePreviousSocketForSwitch()", UI_SOURCE)
+        self.assertIn("closePreviousSocketForSwitch();", function_source(UI_SOURCE, "connectToRoom"))
+        body = function_source(UI_SOURCE, "startInPersonMatch")
+        self.assertIn("window.ManualReader?.isManual()", body)
+        self.assertIn("closePreviousSocketForSwitch();", body)
 
     def test_setup_stages_the_packet_until_the_match_starts(self):
         body = function_source(UI_SOURCE, "startInPersonMatch")
         self.assertIn("window.pendingBank = bankJson;", UI_SOURCE)
-        self.assertIn("window.ensureRoomOwnership(roomId, user.uid)", body)
         self.assertIn("window._manualSetupPending = true;", body)
         load = function_source(UI_SOURCE, "openManualHudAfterSetup")
         self.assertIn("sendEvent('LOAD_BANK', { bank: window.pendingBank });", load)

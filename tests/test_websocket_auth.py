@@ -83,13 +83,14 @@ class WebSocketAuthorizationTests(unittest.TestCase):
         self.assertIn("Science Bowl", page.text)
         self.assertEqual(client_script.status_code, 200)
         self.assertIn("CONNECTING TO MATCH", client_script.text)
-        # The active match surface is the in-person manual reader, not the online lobby.
+        # Both match surfaces ship: the in-person manual reader and the AI-read online
+        # rooms are separate entry points, and camera vision stays retired.
         self.assertIn('id="manual-reader-panel"', page.text)
         self.assertIn('id="manual-team-a-buzzers"', page.text)
         self.assertIn('id="buzzpoint-current"', page.text)
+        self.assertIn('id="online-player-name"', page.text)
+        self.assertIn('id="online-roster"', page.text)
         self.assertNotIn('id="camera-select"', page.text)
-        self.assertNotIn('id="online-player-name"', page.text)
-        self.assertNotIn('id="online-roster"', page.text)
 
     def test_match_controls_and_camera_frames_are_only_sent_to_moderator_station(self):
         async def verify_broadcasts():
@@ -298,6 +299,38 @@ class WebSocketAuthorizationTests(unittest.TestCase):
         ):
             response = TestClient(ui_service.app).post("/api/rooms", json={"name": "Mod"})
         self.assertEqual(response.status_code, 503)
+
+    def test_in_person_room_creation_uses_server_credentials_and_no_mode_field(self):
+        created = []
+
+        class Document:
+            def create(self, data):
+                created.append(data)
+
+        class Collection:
+            def document(self, room_id):
+                return Document()
+
+        class Client:
+            def collection(self, name):
+                return Collection()
+
+        with patch.object(auth_service, "_firebase_app", return_value=object()), patch.object(
+            auth_service.firestore, "client", return_value=Client()
+        ), patch.object(auth_service, "generate_room_code", return_value="local1"):
+            room = auth_service.create_in_person_room("owner")
+
+        self.assertEqual(room, {"room_id": "local1", "mode": "in_person"})
+        self.assertEqual(set(created[0]), {"ownerUid", "createdAt"})
+        self.assertEqual(created[0]["ownerUid"], "owner")
+
+    def test_in_person_room_creation_endpoint_returns_the_room(self):
+        with patch.object(ui_service, "_authenticated_user", new=AsyncMock(return_value=FakeUser("owner"))), patch.object(
+            ui_service, "create_in_person_room", return_value={"room_id": "local1", "mode": "in_person"}
+        ):
+            response = TestClient(ui_service.app).post("/api/rooms/in-person", json={})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"room_id": "local1", "mode": "in_person"})
 
     def test_online_player_can_only_submit_answer_audio_in_own_answer_window(self):
         moderator = FakeModerator()

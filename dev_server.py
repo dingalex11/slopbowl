@@ -72,6 +72,20 @@ def get_room_participants(room_id):
     return dict(PARTICIPANTS.get(room_id, {}))
 
 
+def create_in_person_room(owner_uid, *, attempts=5):
+    """In-memory counterpart of the server-side local room allocator."""
+    if not isinstance(owner_uid, str) or not owner_uid:
+        raise ValueError("Room owner must be a signed-in user")
+    for _ in range(attempts):
+        room_id = generate_room_code()
+        if room_id in ROOMS:
+            continue
+        ROOMS[room_id] = {"ownerUid": owner_uid, "mode": "in_person"}
+        PARTICIPANTS.setdefault(room_id, {})
+        return {"room_id": room_id, "mode": "in_person"}
+    raise RuntimeError("Could not allocate a local match room — try again")
+
+
 def create_online_room(owner_uid, name, team, captain, *, attempts=5):
     """Mirror of the real allocator: unique code, owner registered as a participant."""
     if not isinstance(owner_uid, str) or not owner_uid:
@@ -141,6 +155,7 @@ auth_service.verify_id_token = verify_dev_token
 ui_service.verify_id_token = verify_dev_token
 ui_service.get_room_info = get_room_info
 ui_service.get_room_participant = get_room_participant
+ui_service.create_in_person_room = create_in_person_room
 ui_service.create_online_room = create_online_room
 ui_service.join_online_room = join_online_room
 ui_service.delete_room = delete_room
@@ -175,6 +190,7 @@ DEV_SHIM = """
       await devApi("/dev/rooms/in-person", { room_id: roomId });
       return true;
     };
+    window.createInPersonRoomApi = () => devApi("/api/rooms/in-person", {});
     async function devApi(url, body) {
       const response = await fetch(url, {
         method: "POST",

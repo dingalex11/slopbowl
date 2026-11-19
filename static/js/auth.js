@@ -650,6 +650,23 @@ window.joinOnlineRoomApi = async (roomId, name, team, captain) => {
     return result;
 };
 
+window.createInPersonRoomApi = async () => {
+    const user = auth && auth.currentUser;
+    if (!user) throw new Error("Sign in before starting an in-person match.");
+    const token = await user.getIdToken();
+    // The server creates the local room with admin credentials. Firebase rules therefore
+    // cannot stop a signed-in moderator from starting a match on a deployment whose rules
+    // were not updated with the app.
+    const response = await fetch("/api/rooms/in-person", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({})
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "Unable to start an in-person match.");
+    return result;
+};
+
 window.createOnlineRoomApi = async (name, team, captain) => {
     const user = auth && auth.currentUser;
     if (!user) throw new Error("Sign in before creating an online match.");
