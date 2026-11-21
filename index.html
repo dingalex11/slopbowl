@@ -285,14 +285,14 @@
           SLOP<span class="text-transparent bg-clip-text bg-gradient-to-r from-neonCyan via-sky-300 to-neonAmber">BOWL</span>
         </h1>
         <p class="text-slate-400 text-sm md:text-base font-sans">
-          Host an AI-read online room, run an in-person bout with a human reader, drill solo, or take on the Buzzboard. Every mode keeps the same match engine.
+          Host an AI-read online room, run an in-person AI or human-reader bout, drill solo, or take on the Buzzboard. Every mode keeps the same match engine.
         </p>
       </div>
 
       <!-- Main cards: the four ways in. AI rooms and manual rooms share the engine;
            the challenge card is a real link (#/board), so the contest a captain runs
            lives in the address bar like every other screen. -->
-      <div id="home-main-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full max-w-6xl mb-10">
+      <div id="home-main-cards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-5 w-full max-w-7xl mb-10">
         <!-- Card 1: AI read / judge (online rooms) -->
         <div onclick="navigateTo(3); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonAmber rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-amber hover:-translate-y-1 active:scale-95 relative overflow-hidden">
           <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonAmber/10 rounded-full blur-xl group-hover:bg-neonAmber/20 transition"></div>
@@ -323,7 +323,22 @@
           </div>
         </div>
 
-        <!-- Card 3: Solo practice drill -->
+        <!-- Card 3: In-person AI read / judge -->
+        <div onclick="window.routerNavigate('#/in-person-ai'); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonAmber rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-amber hover:-translate-y-1 active:scale-95 relative overflow-hidden">
+          <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonAmber/10 rounded-full blur-xl group-hover:bg-neonAmber/20 transition"></div>
+          <div class="w-16 h-16 rounded-2xl bg-black border border-neonAmber/50 flex items-center justify-center text-neonAmber mb-5 group-hover:scale-110 transition shadow-inner">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3v2m0 14v2M5.6 5.6l1.4 1.4m10 10l1.4 1.4M3 12h2m14 0h2M5.6 18.4l1.4-1.4m10-10l1.4-1.4M12 8a4 4 0 100 8 4 4 0 000-8z"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2 group-hover:text-neonAmber transition font-display">In-Person AI Judge</h3>
+          <p class="text-xs text-slate-400 leading-relaxed font-sans">
+            A local AI read and judge station: automated reading, microphone answers, AI adjudication and optional camera buzz. No room code.
+          </p>
+          <div class="mt-6 flex items-center text-xs font-mono text-neonAmber group-hover:translate-x-1 transition font-bold">
+            Configure AI station &rarr;
+          </div>
+        </div>
+
+        <!-- Card 4: Solo practice drill -->
         <div onclick="openSoloSetup(); playSound('click');" class="group cursor-pointer bg-panel hover:bg-panelHover border border-borderDark hover:border-neonGreen rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-green hover:-translate-y-1 active:scale-95 relative overflow-hidden">
           <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonGreen/10 rounded-full blur-xl group-hover:bg-neonGreen/20 transition"></div>
           <div class="w-16 h-16 rounded-2xl bg-black border border-neonGreen/50 flex items-center justify-center text-neonGreen mb-5 group-hover:scale-110 transition shadow-inner">
@@ -338,7 +353,7 @@
           </div>
         </div>
 
-        <!-- Card 4: Buzzboard Challenge -->
+        <!-- Card 5: Buzzboard Challenge -->
         <a href="#/board" data-route="board" class="app-nav-link group bg-panel hover:bg-panelHover border border-borderDark hover:border-neonPink rounded-2xl p-6 flex flex-col items-center text-center transition-all duration-300 hover:shadow-neon-pink hover:-translate-y-1 active:scale-95 relative overflow-hidden" onclick="playSound('click');">
           <div class="absolute -right-8 -top-8 w-24 h-24 bg-neonPink/10 rounded-full blur-xl group-hover:bg-neonPink/20 transition"></div>
           <div class="w-16 h-16 rounded-2xl bg-black border border-neonPink/50 flex items-center justify-center text-neonPink mb-5 group-hover:scale-110 transition shadow-inner">
@@ -481,7 +496,13 @@
     <!-- SLIDE 4: IN-PERSON MATCH SETUP             -->
     <!-- ========================================== -->
     <section id="slide-4" class="slide-view hidden py-2 transition-all duration-300">
-      <h2 class="text-2xl md:text-3xl font-black font-display text-white mb-4">In person match setup</h2>
+      <div class="flex flex-wrap items-end justify-between gap-3 mb-4">
+        <div>
+          <h2 id="in-person-setup-title" class="text-2xl md:text-3xl font-black font-display text-white">In person match setup</h2>
+          <p id="in-person-setup-subtitle" class="text-xs text-slate-400 font-mono mt-1">The moderator reads the packet aloud. Set the packet and rosters, then start the manual station.</p>
+        </div>
+        <span id="in-person-setup-mode-badge" class="text-xs font-mono bg-black text-neonCyan border border-neonCyan/60 px-2 py-0.5 rounded-full">MANUAL READ</span>
+      </div>
 
       <div class="grid grid-cols-12 gap-5">
 
@@ -530,14 +551,14 @@
 
           <div class="pt-4 border-t border-borderDark mt-4 flex items-center justify-between">
             <span class="text-xs text-slate-400 font-mono">Roster changes apply live across the match HUD and score sheet.</span>
-            <button onclick="startInPersonMatch(); playSound('click');" class="bg-neonCyan hover:bg-cyan-300 text-black px-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition shadow-neon-cyan">
+            <button id="btn-start-in-person-match" onclick="startInPersonMatch(); playSound('click');" class="bg-neonCyan hover:bg-cyan-300 text-black px-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition shadow-neon-cyan">
               Start match
             </button>
           </div>
         </div>
 
         <!-- Manual reader setup note -->
-        <div class="col-span-12 lg:col-span-5 bg-panel border border-neonCyan/40 rounded-2xl p-5">
+        <div id="manual-reader-setup-card" class="col-span-12 lg:col-span-5 bg-panel border border-neonCyan/40 rounded-2xl p-5">
           <div class="flex items-center justify-between pb-3 mb-4 border-b border-borderDark">
             <h3 class="font-bold text-sm tracking-wide text-white uppercase font-display">Manual Reader Station</h3>
             <span class="text-xs font-mono bg-black text-neonGreen border border-neonGreen/60 px-2 py-0.5 rounded-full">CAMERA OPTIONAL</span>
@@ -552,6 +573,28 @@
                 <li>4s answer clock &mdash; starts when a buzz lands</li>
                 <li>Rebound only &mdash; 5s window after a wrong interrupt</li>
                 <li>20s bonus confer &mdash; starts with <span class="text-neonAmber">Bonus read</span></li>
+              </ul>
+            </div>
+            <p class="text-[10px] text-slate-500">Sign in once and the match opens directly. No room code.</p>
+          </div>
+        </div>
+
+        <!-- AI read / judge setup note (shown when the AI station is selected) -->
+        <div id="ai-judge-setup-card" class="col-span-12 lg:col-span-5 bg-panel border border-neonAmber/40 rounded-2xl p-5 hidden">
+          <div class="flex items-center justify-between pb-3 mb-4 border-b border-borderDark">
+            <h3 class="font-bold text-sm tracking-wide text-white uppercase font-display">AI Read / Judge Station</h3>
+            <span class="text-xs font-mono bg-black text-neonAmber border border-neonAmber/60 px-2 py-0.5 rounded-full">AI MODERATOR</span>
+          </div>
+          <div class="space-y-3 text-xs text-slate-300 font-mono leading-relaxed">
+            <p>The AI reads the tossup aloud in this browser, listens for the answer, and judges it. You still start each tossup and bonus from the HUD.</p>
+            <p>Add a Groq API key in Settings before the match so the AI can transcribe and judge answers. Without a key the read and camera buzz still work.</p>
+            <div class="bg-black border border-borderDark rounded-xl p-3">
+              <p class="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Clock set</p>
+              <ul class="space-y-1 text-[11px] text-slate-400">
+                <li>AI read &mdash; live 5s buzz window</li>
+                <li>4s answer clock &mdash; starts when a buzz lands</li>
+                <li>Rebound only &mdash; 5s after a wrong interrupt</li>
+                <li>20s bonus confer &mdash; captain answers</li>
               </ul>
             </div>
             <p class="text-[10px] text-slate-500">Sign in once and the match opens directly. No room code.</p>

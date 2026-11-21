@@ -104,6 +104,9 @@ class ScienceBowlModerator:
             # Manual rooms create the vision engine only when the moderator opts in.
             self.vision = None
         self.camera_buzz_enabled = bool(self.vision)
+        # True while an AI-moderated tossup is reading or in its 5-second buzz window.
+        # Manual rooms use manual_phase instead.
+        self.camera_read_active = False
         if self.vision:
             print("[CAMERA ENABLED]: Vision engine is ready; buzz detection arms during a read.")
         elif self.manual_reader:
@@ -277,6 +280,7 @@ class ScienceBowlModerator:
         self.answer_audio_open = False
         self.answering_user_id = None
         self.moderator_reading = {"active": False, "kind": None}
+        self._set_camera_window(False)
 
     async def _rewind_last_question(self) -> bool:
         """Remove the last completed question and reload it for a fresh attempt."""
@@ -439,7 +443,14 @@ class ScienceBowlModerator:
             # A manual room can be waiting on "Start Tossup" when a packet lands (the
             # dev harness preloads one, and a moderator can replace a packet before the
             # first question). Keep that start control armed instead of hiding it.
-            if self.manual_reader and self.question_bank and self.state.current_state == GameState.IDLE:
+            if (
+                not self.online_mode
+                and self.question_bank
+                and self.current_q_idx < len(self.question_bank)
+                and self.state.current_state == GameState.IDLE
+            ):
+                # Both local modes own their start control: the manual reader and the
+                # in-person AI station. Online rooms arm through their lobby instead.
                 await self._set_ui_state("TOSSUP")
             else:
                 await self._set_ui_state("NONE")
@@ -746,9 +757,20 @@ class ScienceBowlModerator:
             "zones": len(self.vision.rois) if self.vision else 0,
         }
 
+    def _camera_window_open(self) -> bool:
+        if self.manual_reader:
+            return self.manual_phase.get("phase") in ("READING", "BUZZ_WINDOW")
+        return bool(self.camera_read_active)
+
+    def _set_camera_window(self, active: bool):
+        """Arm camera detection for an AI read/rebound window, or close it."""
+        self.camera_read_active = bool(active)
+        if self.vision is not None:
+            self.vision.set_armed(bool(self.camera_read_active and self.camera_buzz_enabled))
+
     async def _set_camera_buzz(self, enabled: bool):
-        if not self.manual_reader:
-            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "Camera buzz is available in manual reader mode only."}})
+        if self.online_mode:
+            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "Camera buzz is available in in-person rooms only."}})
             return
         if enabled:
             if self.vision is None:
@@ -756,7 +778,7 @@ class ScienceBowlModerator:
                 self.ui.vision_service = self.vision
             self.use_camera = True
             self.camera_buzz_enabled = True
-            self.vision.set_armed(self.manual_phase.get("phase") in ("READING", "BUZZ_WINDOW"))
+            self.vision.set_armed(bool(self._camera_window_open()))
         else:
             self.camera_buzz_enabled = False
             if self.vision is not None:
@@ -1015,6 +1037,7 @@ class ScienceBowlModerator:
         safe_display_text = text_to_read if text_to_read else "[WARNING: PYTHON MEMORY HAS NO TEXT FOR THIS QUESTION]"
 
         self.state.transition_to(GameState.READING_TOSSUP)
+        self._set_camera_window(True)
 
         await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": {
             "text": safe_display_text,
@@ -1078,6 +1101,7 @@ class ScienceBowlModerator:
                 continue 
                 
             if evt_type in ("FORCE_RESET_STATE", "CHALLENGE"):
+                self._set_camera_window(False)
                 await self._set_online_buzz_window(False)
                 if shared_read:
                     await self._set_moderator_reading(False)
@@ -1133,6 +1157,7 @@ class ScienceBowlModerator:
                         continue
 
                     if evt_type == "FORCE_RESET_STATE":
+                        self._set_camera_window(False)
                         await self._set_online_buzz_window(False)
                         return None, False, False, True, 0.0, ""
                     elif evt_type == "BUZZ":
@@ -1147,9 +1172,11 @@ class ScienceBowlModerator:
                             await self._set_online_buzz_window(False)
                             break
             except asyncio.TimeoutError:
+                self._set_camera_window(False)
                 await self._set_online_buzz_window(False)
                 return None, False, False, False, 0.0, ""
 
+        self._set_camera_window(False)
         raw_team = buzz_event.payload.get('team', 'Unknown Team')
         raw_player = buzz_event.payload.get('player', 'Captain')
         
@@ -1158,7 +1185,7 @@ class ScienceBowlModerator:
         self.answering_user_id = buzz_event.payload.get("user_id") if self.online_mode else None
         
         self.state.transition_to(GameState.LISTENING_TOSSUP_ANSWER) 
-        await self.outbound_queue.put({"type": "BUZZ", "payload": {"team": team, "player": player}})
+        await self.outbound_queue.put({"type": "BUZZ", "payload": {"team": team, "player": player, "source": str(buzz_event.payload.get("source", "manual"))}})
         
         if is_interrupt and self.use_audio:
             wait_start = asyncio.get_running_loop().time()

@@ -12,6 +12,7 @@
     let currentStream = null;
     let desiredOn = false;
     let roomEnabled = false;
+    let roomMode = 'in_person';
     let frameTimer = null;
     let sendingFrame = false;
     let mappingData = {};
@@ -57,8 +58,8 @@
         if (panel) panel.classList.toggle('hidden', !on);
         const hudButton = $('btn-hud-camera');
         if (hudButton) {
-            const manual = Boolean(window.ManualReader && window.ManualReader.isManual());
-            hudButton.classList.toggle('hidden', !manual);
+            const inPerson = roomMode === 'in_person' || roomMode === 'in_person_ai';
+            hudButton.classList.toggle('hidden', !inPerson);
             hudButton.classList.toggle('is-on', on);
             hudButton.textContent = on ? 'CAM ON' : 'CAM OFF';
             hudButton.setAttribute('aria-pressed', String(on));
@@ -275,6 +276,7 @@
     function applyState(state) {
         const data = state && typeof state === 'object' ? state : {};
         if (typeof data.enabled === 'boolean') roomEnabled = data.enabled;
+        if (typeof data.mode === 'string') roomMode = data.mode;
         if (roomEnabled && desiredOn) startFramePump();
         updateUi();
     }

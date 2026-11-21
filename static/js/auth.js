@@ -667,6 +667,20 @@ window.createInPersonRoomApi = async () => {
     return result;
 };
 
+window.createInPersonAiRoomApi = async () => {
+    const user = auth && auth.currentUser;
+    if (!user) throw new Error("Sign in before starting an in-person AI match.");
+    const token = await user.getIdToken();
+    const response = await fetch("/api/rooms/in-person-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({})
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "Unable to start an in-person AI match.");
+    return result;
+};
+
 window.createOnlineRoomApi = async (name, team, captain) => {
     const user = auth && auth.currentUser;
     if (!user) throw new Error("Sign in before creating an online match.");

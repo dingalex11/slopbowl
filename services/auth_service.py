@@ -11,6 +11,10 @@ from firebase_admin.exceptions import FirebaseError
 from core.config import FIREBASE_PROJECT_ID
 
 
+ROOM_MODES = {"in_person", "in_person_ai", "online"}
+IN_PERSON_MODES = {"in_person", "in_person_ai"}
+
+
 @dataclass(frozen=True)
 class AuthenticatedUser:
     uid: str
@@ -50,7 +54,7 @@ def get_room_info(room_id: str) -> dict[str, str]:
     room_data = snapshot.to_dict() or {}
     owner_uid = room_data.get("ownerUid")
     mode = room_data.get("mode", "in_person")
-    if not isinstance(owner_uid, str) or not owner_uid or mode not in {"in_person", "online"}:
+    if not isinstance(owner_uid, str) or not owner_uid or mode not in ROOM_MODES:
         raise PermissionError("Room metadata is invalid")
     return {"owner_uid": owner_uid, "mode": mode}
 
@@ -117,31 +121,36 @@ def _is_room_code_taken(exc: Exception) -> bool:
     return (getattr(code, "name", None) or code) in {"ALREADY_EXISTS", 409}
 
 
-def create_in_person_room(owner_uid: str, *, attempts: int = 5) -> dict[str, str]:
-    """Create a local manual-reader room with server credentials.
+def create_in_person_room(owner_uid: str, *, mode: str = "in_person", attempts: int = 5) -> dict[str, str]:
+    """Create a local in-person room with server credentials.
 
     The browser used to create this document directly, which made starting a match
     depend on the deployed Firestore rules. The room is only a private ownership
     marker, so the authenticated server creates it instead; the client never needs
-    write access to the rooms collection.
+    write access to the rooms collection. ``in_person_ai`` is the local AI-read/judge
+    station; ``in_person`` remains the human-reader station and keeps the legacy
+    document shape (no mode field) for deployed rules.
     """
     if not isinstance(owner_uid, str) or not owner_uid:
         raise ValueError("Room owner must be a signed-in user")
+    if mode not in IN_PERSON_MODES:
+        raise ValueError("Choose an in-person match mode")
     client = firestore.client(_firebase_app())
     last_error: Exception | None = None
     for _ in range(attempts):
         room_id = generate_room_code()
         room_ref = client.collection("rooms").document(room_id)
+        payload = {"ownerUid": owner_uid, "createdAt": time.time()}
+        if mode == "in_person_ai":
+            payload["mode"] = mode
         try:
-            # No mode field: get_room_info treats a missing mode as in_person, and this
-            # keeps the document compatible with the deployed create rule.
-            room_ref.create({"ownerUid": owner_uid, "createdAt": time.time()})
+            room_ref.create(payload)
         except Exception as exc:
             if _is_room_code_taken(exc):
                 last_error = exc
                 continue
             raise RuntimeError("Room authorization service is unavailable") from exc
-        return {"room_id": room_id, "mode": "in_person"}
+        return {"room_id": room_id, "mode": mode}
     raise RuntimeError("Could not allocate a local match room — try again") from last_error
 
 

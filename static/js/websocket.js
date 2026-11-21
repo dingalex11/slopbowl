@@ -171,7 +171,7 @@ function connectWebSocket(roomId, apiKey = null) {
             updateOnlineBuzzButton();
             if (window.ManualReader) window.ManualReader.onConnected(payload);
             if (window.CameraBuzz && typeof window.CameraBuzz.applyState === 'function') {
-                window.CameraBuzz.applyState({ enabled: Boolean(payload.camera_buzz) });
+                window.CameraBuzz.applyState({ enabled: Boolean(payload.camera_buzz), mode: currentRoomMode });
             }
             if (window._manualSetupPending && typeof window.openManualHudAfterSetup === 'function') {
                 window.openManualHudAfterSetup();
@@ -292,8 +292,10 @@ function connectWebSocket(roomId, apiKey = null) {
                 currentStageType = payload.phase === 'BONUS' ? 'BONUS' : 'TOSSUP';
                 window.ManualReader.setQuestion(payload);
             } else {
-                // Online AI rooms keep the original audio-only readout; manual rooms
-                // render the packet into the reader panel instead.
+                // Online AI and in-person AI rooms keep the original audio-only readout;
+                // manual rooms render the packet into the reader panel instead.
+                const camBadge = document.getElementById('buzz-source-badge');
+                if (camBadge) camBadge.classList.add('hidden');
                 setStage('READ_TOSSUP');
             }
             
@@ -459,6 +461,8 @@ function connectWebSocket(roomId, apiKey = null) {
             
             const playerEl = document.getElementById('buzz-player-name');
             if (playerEl) playerEl.innerText = `FLOOR: ${team} (${player})`;
+            const camBadge = document.getElementById('buzz-source-badge');
+            if (camBadge) camBadge.classList.toggle('hidden', payload.source !== 'camera');
             
             const playerStage = document.getElementById('player-stage-label');
             if (playerStage) playerStage.innerText = `BUZZ: ${team} (${player})`;

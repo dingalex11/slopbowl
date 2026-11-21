@@ -72,17 +72,19 @@ def get_room_participants(room_id):
     return dict(PARTICIPANTS.get(room_id, {}))
 
 
-def create_in_person_room(owner_uid, *, attempts=5):
+def create_in_person_room(owner_uid, *, mode="in_person", attempts=5):
     """In-memory counterpart of the server-side local room allocator."""
     if not isinstance(owner_uid, str) or not owner_uid:
         raise ValueError("Room owner must be a signed-in user")
+    if mode not in {"in_person", "in_person_ai"}:
+        raise ValueError("Choose an in-person match mode")
     for _ in range(attempts):
         room_id = generate_room_code()
         if room_id in ROOMS:
             continue
-        ROOMS[room_id] = {"ownerUid": owner_uid, "mode": "in_person"}
+        ROOMS[room_id] = {"ownerUid": owner_uid, "mode": mode}
         PARTICIPANTS.setdefault(room_id, {})
-        return {"room_id": room_id, "mode": "in_person"}
+        return {"room_id": room_id, "mode": mode}
     raise RuntimeError("Could not allocate a local match room — try again")
 
 
@@ -191,6 +193,7 @@ DEV_SHIM = """
       return true;
     };
     window.createInPersonRoomApi = () => devApi("/api/rooms/in-person", {});
+    window.createInPersonAiRoomApi = () => devApi("/api/rooms/in-person-ai", {});
     async function devApi(url, body) {
       const response = await fetch(url, {
         method: "POST",

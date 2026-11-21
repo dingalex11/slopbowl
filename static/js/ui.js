@@ -494,11 +494,42 @@ function openManualHudAfterSetup() {
 }
 window.openManualHudAfterSetup = openManualHudAfterSetup;
 
+// Slide 4 serves both in-person modes. The card (or the address) selects the
+// station before the room is allocated, so the same packet/roster/camera setup can
+// start either a human reader or the local AI reader/judge.
+function applyInPersonSetupMode(mode) {
+    const ai = mode === 'ai';
+    window.inPersonSetupMode = ai ? 'ai' : 'manual';
+    const title = document.getElementById('in-person-setup-title');
+    const subtitle = document.getElementById('in-person-setup-subtitle');
+    const badge = document.getElementById('in-person-setup-mode-badge');
+    const manualCard = document.getElementById('manual-reader-setup-card');
+    const aiCard = document.getElementById('ai-judge-setup-card');
+    const startButton = document.getElementById('btn-start-in-person-match');
+    if (title) title.textContent = ai ? 'In person AI match setup' : 'In person match setup';
+    if (subtitle) {
+        subtitle.textContent = ai
+            ? 'The AI reads and judges locally. Set the packet and rosters, then start the AI station.'
+            : 'The moderator reads the packet aloud. Set the packet and rosters, then start the manual station.';
+    }
+    if (badge) {
+        badge.textContent = ai ? 'AI READ + JUDGE' : 'MANUAL READ';
+        badge.className = ai
+            ? 'text-xs font-mono bg-black text-neonAmber border border-neonAmber/60 px-2 py-0.5 rounded-full'
+            : 'text-xs font-mono bg-black text-neonCyan border border-neonCyan/60 px-2 py-0.5 rounded-full';
+    }
+    if (manualCard) manualCard.classList.toggle('hidden', ai);
+    if (aiCard) aiCard.classList.toggle('hidden', !ai);
+    if (startButton) startButton.textContent = ai ? 'Start AI match' : 'Start match';
+}
+window.applyInPersonSetupMode = applyInPersonSetupMode;
+
 // One click starts the whole local match: validate the staged packet and roster,
 // claim a local room only this signed-in moderator can open, then send both once
 // the authenticated socket is ready. No room code is shown or entered.
 async function startInPersonMatch() {
     if (manualStartBusy) return;
+    const aiMode = window.inPersonSetupMode === 'ai';
     window._matchClosing = false;
 
     let rosterData;
@@ -527,7 +558,8 @@ async function startInPersonMatch() {
         openModal('auth-modal');
         return;
     }
-    if (typeof window.createInPersonRoomApi !== 'function') {
+    const createRoomApi = aiMode ? window.createInPersonAiRoomApi : window.createInPersonRoomApi;
+    if (typeof createRoomApi !== 'function') {
         showToast('Sign-in is still initializing. Try again in a moment.');
         return;
     }
@@ -550,7 +582,7 @@ async function startInPersonMatch() {
         }
         closePreviousSocketForSwitch();
 
-        const room = await window.createInPersonRoomApi();
+        const room = await createRoomApi();
         const roomId = room?.room_id;
         if (!roomId) throw new Error('The room service did not return a local match room.');
 
@@ -574,7 +606,7 @@ async function startInPersonMatch() {
         manualStartBusy = false;
         if (startButton) {
             startButton.disabled = false;
-            startButton.innerText = 'Start match';
+            startButton.innerText = aiMode ? 'Start AI match' : 'Start match';
         }
     }
 }
@@ -776,6 +808,9 @@ function updateSeatLabels(payload) {
 // #/join/CODE is the shareable room link: it opens the online hub with the code ready.
 document.addEventListener('app:view', (event) => {
     const detail = event.detail || {};
+    if (detail.name === 'in-person' || detail.name === 'in-person-ai') {
+        applyInPersonSetupMode(detail.name === 'in-person-ai' ? 'ai' : 'manual');
+    }
     if (detail.name !== 'online') return;
     const room = detail.params && detail.params.room;
     if (!room) return;

@@ -21,6 +21,7 @@ ROUTER_SOURCE = (ROOT / "static/js/router.js").read_text(encoding="utf-8")
 SHELL_SOURCE = (ROOT / "static/js/slopbowl_ui.js").read_text(encoding="utf-8")
 BUZZPOINT_SOURCE = (ROOT / "static/js/buzzpoint.js").read_text(encoding="utf-8")
 UI_SOURCE = (ROOT / "static/js/ui.js").read_text(encoding="utf-8")
+AUTH_SOURCE = (ROOT / "static/js/auth.js").read_text(encoding="utf-8")
 
 # Every screen a visitor can open, and the address that opens it.
 SCREEN_URLS = (
@@ -39,7 +40,7 @@ def function_source(source, name):
 class RouteTableTests(unittest.TestCase):
     def test_every_slide_screen_has_a_route(self):
         self.assertIn("const SLIDES = {", ROUTER_SOURCE)
-        for name, number in (("home", 1), ("online", 3), ("'in-person'", 4), ("hud", 5),
+        for name, number in (("home", 1), ("online", 3), ("'in-person'", 4), ("'in-person-ai'", 4), ("hud", 5),
                              ("bank", 6), ("prematch", 7), ("buzzer", 8), ("lobby", 9),
                              ("'mod-setup'", 10), ("solo", 11), ("board", 13)):
             self.assertIn(f"{name}: {number}", ROUTER_SOURCE,
@@ -87,11 +88,13 @@ class ScreenLinkTests(unittest.TestCase):
         self.assertNotIn("nav-dock-btn", INDEX_SOURCE)
         self.assertNotIn("nav-btn-", INDEX_SOURCE)
 
-    def test_the_home_page_carries_all_four_ways_in(self):
-        """AI read/judge, manual read, solo and Buzzboard are the four main doors."""
+    def test_the_home_page_carries_all_five_ways_in(self):
+        """Online AI, in-person AI, manual read, solo and Buzzboard are the main doors."""
         for call in ("navigateTo(3)", "navigateTo(4)", "openSoloSetup()"):
             self.assertIn(call, INDEX_SOURCE, f"no door for {call}")
         self.assertIn("AI Read / Judge", INDEX_SOURCE)
+        self.assertIn("In-Person AI Judge", INDEX_SOURCE)
+        self.assertIn("#/in-person-ai", INDEX_SOURCE)
         self.assertIn("Manual Read", INDEX_SOURCE)
         self.assertIn('href="#/board"', INDEX_SOURCE)
         # The header carries the packet upload and the stats station.
@@ -328,7 +331,9 @@ class ManualEntryPointTests(unittest.TestCase):
         # Creating the rooms document from the browser made Start Match depend on the
         # deployed Firestore rules; the authenticated backend now owns that write.
         body = function_source(UI_SOURCE, "startInPersonMatch")
-        self.assertIn("window.createInPersonRoomApi()", body)
+        self.assertIn("const aiMode = window.inPersonSetupMode === 'ai';", body)
+        self.assertIn("window.createInPersonAiRoomApi : window.createInPersonRoomApi", body)
+        self.assertIn("const room = await createRoomApi();", body)
         self.assertNotIn("ensureRoomOwnership", body)
         self.assertNotIn("generateInPersonRoomCode", UI_SOURCE)
 
@@ -356,6 +361,16 @@ class ManualEntryPointTests(unittest.TestCase):
         self.assertNotIn("room-id-input", setup)
         self.assertNotIn("Create room", setup)
         self.assertIn("startInPersonMatch()", setup)
+
+    def test_setup_can_start_either_in_person_mode(self):
+        setup = INDEX_SOURCE[INDEX_SOURCE.index('id="slide-4"')
+                             :INDEX_SOURCE.index('id="slide-5"')]
+        self.assertIn('id="manual-reader-setup-card"', setup)
+        self.assertIn('id="ai-judge-setup-card"', setup)
+        self.assertIn("AI Read / Judge Station", setup)
+        self.assertIn("window.createInPersonAiRoomApi", UI_SOURCE)
+        self.assertIn("applyInPersonSetupMode", UI_SOURCE)
+        self.assertIn("createInPersonAiRoomApi", AUTH_SOURCE)
 
     def test_the_manual_hud_has_its_reader_and_buzzpoint_controls(self):
         for element in ('id="manual-reader-panel"', 'id="reader-question-text"',

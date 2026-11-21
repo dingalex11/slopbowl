@@ -168,6 +168,44 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message["payload"]["show"], "NONE")
 
 
+    async def test_loading_a_packet_arms_the_local_ai_start_control(self):
+        moderator = ScienceBowlModerator(use_audio=False)
+        await moderator.process_admin_event(Event(
+            type="LOAD_BANK",
+            payload={"bank": [{"tossup_text": "Question", "tossup_answer": "Answer"}]},
+        ))
+
+        message = await self._next_of_type(moderator, "UI_STATE")
+        self.assertEqual(message["payload"]["show"], "TOSSUP")
+
+    async def test_camera_buzz_is_rejected_in_online_rooms(self):
+        moderator = ScienceBowlModerator(use_audio=False)
+        moderator.online_mode = True
+
+        await moderator._set_camera_buzz(True)
+
+        message = await moderator.outbound_queue.get()
+        self.assertEqual(message["type"], "UPDATE_STATUS")
+        self.assertIn("in-person", message["payload"]["text"].lower())
+        self.assertIsNone(moderator.vision)
+        self.assertFalse(moderator.camera_buzz_enabled)
+
+    async def test_camera_buzz_can_be_enabled_for_a_local_ai_room(self):
+        moderator = ScienceBowlModerator(use_audio=False)
+        moderator.vision = None
+        with patch.object(main, "VisionService") as vision_class:
+            await moderator._set_camera_buzz(True)
+
+        vision_class.assert_called_once()
+        self.assertTrue(moderator.camera_buzz_enabled)
+        self.assertTrue(moderator.use_camera)
+        vision_class.return_value.set_armed.assert_called_with(False)
+
+        moderator._set_camera_window(True)
+        vision_class.return_value.set_armed.assert_called_with(True)
+        moderator._set_camera_window(False)
+        vision_class.return_value.set_armed.assert_called_with(False)
+
     async def test_manual_start_mid_question_reports_in_progress(self):
         """A start arriving while a question is live must answer, not vanish."""
         moderator = ScienceBowlModerator(use_audio=False)

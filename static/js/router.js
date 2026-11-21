@@ -24,6 +24,7 @@
     settings: 2,
     online: 3,
     'in-person': 4,
+    'in-person-ai': 4,
     hud: 5,
     bank: 6,
     prematch: 7,

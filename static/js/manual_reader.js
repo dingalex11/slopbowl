@@ -588,6 +588,8 @@
         if (buzzpointPanel) buzzpointPanel.classList.toggle('hidden', !manualMode);
         const modeBadge = $('stage-type-badge');
         if (modeBadge) modeBadge.textContent = manualMode ? 'SHORT ANSWER' : 'AI READ / JUDGE';
+        const verdictActions = document.querySelector('.match-verdict-actions');
+        if (verdictActions) verdictActions.classList.toggle('hidden', !manualMode);
         const layout = $('match-layout');
         if (layout) layout.classList.toggle('is-manual', manualMode);
         const hud = document.querySelector('.match-hud');

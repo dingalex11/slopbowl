@@ -428,6 +428,23 @@ async def create_in_person_room_api(request: Request):
     return room
 
 
+@app.post("/api/rooms/in-person-ai")
+async def create_in_person_ai_room_api(request: Request):
+    """Create the signed-in moderator's local AI read/judge station."""
+    user = await _authenticated_user(request)
+    try:
+        room = await asyncio.to_thread(create_in_person_room, user.uid, mode="in_person_ai")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Unable to create an in-person AI room: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning("Unable to create an in-person AI room: %s", exc)
+        raise HTTPException(status_code=503, detail="Room service unavailable") from exc
+    return room
+
+
 @app.post("/api/rooms/{room_id}/online")
 async def create_online_room_endpoint(room_id: str, request: Request):
     if not validate_room_id(room_id):
@@ -813,7 +830,7 @@ async def room_websocket_endpoint(websocket: WebSocket, room_id: str):
                     except PermissionError as exc:
                         await websocket.send_json({"type": "ERROR", "payload": {"message": str(exc)}})
                         continue
-            elif event_type == "BUZZ" and mode == "in_person":
+            elif event_type == "BUZZ" and mode in {"in_person", "in_person_ai"}:
                 player = event_payload.get("player")
                 if player in ("Manual-A", "Manual-B"):
                     expected_team = "Team A" if player == "Manual-A" else "Team B"

@@ -538,7 +538,8 @@ class ManualReaderPageTests(unittest.TestCase):
 
     def test_start_match_creates_a_server_room_and_sends_the_staged_packet(self):
         self.assertIn("async function startInPersonMatch()", UI_SOURCE)
-        self.assertIn("const room = await window.createInPersonRoomApi();", UI_SOURCE)
+        self.assertIn("const createRoomApi = aiMode ? window.createInPersonAiRoomApi : window.createInPersonRoomApi;", UI_SOURCE)
+        self.assertIn("const room = await createRoomApi();", UI_SOURCE)
         self.assertNotIn("ensureRoomOwnership(roomId", UI_SOURCE)
         self.assertIn("connectWebSocket(roomId", UI_SOURCE)
         self.assertIn("sendEvent('LOAD_BANK', { bank: window.pendingBank });", UI_SOURCE)

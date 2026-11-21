@@ -78,6 +78,33 @@ class WebSocketAuthorizationTests(unittest.TestCase):
         ):
             self.assertEqual(auth_service.get_room_info("room"), {"owner_uid": "owner", "mode": "in_person"})
 
+    def test_get_room_info_accepts_an_in_person_ai_room(self):
+        class Snapshot:
+            exists = True
+
+            def to_dict(self):
+                return {"ownerUid": "owner", "mode": "in_person_ai"}
+
+        class Document:
+            def get(self, **kwargs):
+                return Snapshot()
+
+        class Collection:
+            def document(self, room_id):
+                return Document()
+
+        class Client:
+            def collection(self, name):
+                return Collection()
+
+        with patch.object(auth_service, "_firebase_app", return_value=object()), patch.object(
+            auth_service.firestore, "client", return_value=Client()
+        ):
+            self.assertEqual(
+                auth_service.get_room_info("room"),
+                {"owner_uid": "owner", "mode": "in_person_ai"},
+            )
+
     def test_moderator_interface_and_static_client_load(self):
         client = TestClient(ui_service.app)
         page = client.get("/")
