@@ -329,6 +329,7 @@ class ScienceBowlModerator:
                 "visual": replay_q.get("tossup_visual", False),
                 "manual": self.manual_reader,
                 "phase": "TOSSUP",
+                "preview": True,
             }
             await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": replay_payload})
         await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"↩️ Q{q_num} reopened — its score and log entries were removed."}})
@@ -1281,7 +1282,8 @@ class ScienceBowlModerator:
                         "options": q_data.get('tossup_options', []),
                         "visual": q_data.get('tossup_visual', False),
                         "manual": self.manual_reader,
-                        "phase": "TOSSUP"
+                        "phase": "TOSSUP",
+                        "preview": True,
                     }})
                 
                     # Arm the moderator's start control only once a question is actually loaded.

@@ -208,7 +208,44 @@
     }
 
     // --- QUESTION / TOKENS --------------------------------------------------
+    // The server stages the next packet before Start Tossup. Render only the
+    // waiting state: the question, choices and answer key stay hidden until the
+    // moderator starts the read.
+    function renderQuestionPreview(data) {
+        question = {
+            raw_text: '',
+            answer: '',
+            options: [],
+            phase: data.phase === 'BONUS' ? 'BONUS' : 'TOSSUP',
+            allowed_team: null
+        };
+        resetReadClock();
+        buzzActive = false;
+        selectedBuzzpoint = '';
+        selectedToken = null;
+        afterRead = false;
+        questionFinished = false;
+        verdictSent = false;
+        setText('reader-question-text', 'Question loaded. Click Start Tossup to reveal it.');
+        setText('reader-answer-key', '—');
+        const options = $('reader-options');
+        if (options) options.replaceChildren();
+        setText('hud-question-kind', question.phase === 'BONUS' ? 'BONUS' : 'TOSS-UP');
+        setText('buzzpoint-current', 'No buzzpoint marked');
+        setText('buzzpoint-status', 'Not marked');
+        setVerdictLabels(question.phase === 'BONUS');
+        setText('manual-verdict-preview', question.phase === 'BONUS' ? 'BONUS +10 / 0' : 'NEG −4');
+        setFullReadEnabled(false);
+        setVerdictEnabled(false);
+        updateTokenState();
+        updateBuzzButtons();
+    }
+
     function renderQuestion(data) {
+        if (data && data.preview) {
+            renderQuestionPreview(data);
+            return;
+        }
         question = {
             raw_text: String(data.raw_text || data.text || ''),
             answer: String(data.answer || ''),

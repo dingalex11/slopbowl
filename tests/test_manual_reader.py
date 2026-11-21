@@ -219,6 +219,21 @@ class ManualReaderServerTests(unittest.IsolatedAsyncioTestCase):
                 break
         self.assertEqual(message["payload"]["show"], "TOSSUP")
 
+    async def test_the_staged_question_is_preview_only_until_start_tossup(self):
+        moderator = ScienceBowlModerator(use_audio=False, manual_reader=True, initial_bank=[TOSSUP])
+        task = asyncio.create_task(moderator.run_game_loop())
+        try:
+            preload = None
+            while preload is None:
+                message = await asyncio.wait_for(moderator.outbound_queue.get(), 4)
+                if message["type"] == "UPDATE_QUESTION":
+                    preload = message
+            self.assertTrue(preload["payload"]["preview"])
+            self.assertEqual(preload["payload"]["raw_text"], TOSSUP["tossup_text"])
+        finally:
+            task.cancel()
+            await task
+
 
 class ManualReaderSeatTests(unittest.TestCase):
     class FakeModerator:
@@ -324,6 +339,13 @@ class ManualReaderPageTests(unittest.TestCase):
         self.assertIn(".reader-option-line", STYLE_SOURCE)
         self.assertIn(".reader-option-word", STYLE_SOURCE)
         self.assertNotIn(".reader-option.is-selected", STYLE_SOURCE)
+
+    def test_the_staged_question_is_hidden_until_start_tossup(self):
+        self.assertIn("if (data && data.preview) {", MANUAL_SOURCE)
+        self.assertIn("renderQuestionPreview(data);", MANUAL_SOURCE)
+        self.assertIn("Question loaded. Click Start Tossup to reveal it.", MANUAL_SOURCE)
+        main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+        self.assertIn('"preview": True,', main_source)
 
     def test_scoresheet_rebuilds_from_the_authoritative_log(self):
         self.assertIn("function renderScoresheetFromLog(log)", SOCKET_SOURCE)
