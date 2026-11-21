@@ -616,27 +616,22 @@
             <div class="match-end-footer">
               <span id="match-end-question-count" class="match-end-count">0 questions played</span>
               <div class="match-end-actions">
-                <button type="button" id="btn-close-match-end-footer" class="match-end-btn match-end-btn-ghost">Review score sheet</button>
+                <button type="button" id="btn-close-match-end-footer" class="match-end-btn match-end-btn-ghost">Close Match</button>
                 <button type="button" id="btn-export-csv-end" class="match-end-btn match-end-btn-primary" onclick="sendEvent('EXPORT_CSV')">Export CSV</button>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- TEAM SCORE RAILS -->
-        <div class="match-scorebar">
-          <div class="match-team-score match-team-score-a">
-            <span id="hud-team-a-name" class="match-team-name">TEAM A</span>
-            <span id="hud-score-a" class="match-team-points">0</span>
-          </div>
-          <div class="match-score-center">
-            <span class="match-half-label">HALF 1</span>
-            <span id="manual-phase-label" class="match-phase-label">IDLE</span>
-            <span id="manual-clock-wrap" class="match-readout"><span>READ</span><span id="manual-read-clock">0.0s</span></span>
-          </div>
-          <div class="match-team-score match-team-score-b">
-            <span id="hud-score-b" class="match-team-points">0</span>
-            <span id="hud-team-b-name" class="match-team-name">TEAM B</span>
+        <div id="match-close-confirm" class="match-confirm hidden" role="dialog" aria-modal="true" aria-labelledby="match-close-title" aria-hidden="true">
+          <div class="match-confirm-card">
+            <p class="match-end-kicker">END MATCH</p>
+            <h2 id="match-close-title" class="match-confirm-title">Close this room and start over?</h2>
+            <p id="match-close-copy" class="match-confirm-copy">This deletes the room and returns home. All scores, rows, roster entries, and the staged packet will be cleared.</p>
+            <div class="match-confirm-actions">
+              <button type="button" id="btn-cancel-close-match" class="match-end-btn match-end-btn-ghost">Keep Reviewing</button>
+              <button type="button" id="btn-confirm-close-match" class="match-end-btn match-end-btn-danger">Close Room</button>
+            </div>
           </div>
         </div>
 
@@ -659,21 +654,7 @@
                 <span id="stage-cat-badge" class="stage-tag">--</span>
                 <span id="stage-type-badge" class="stage-tag stage-tag-amber">MANUAL READER</span>
                 <span id="hud-question-kind" class="stage-tag stage-tag-plain">TOSS-UP</span>
-                <span class="stage-status-line">
-                  <span id="stage-live-dot" class="w-2 h-2 rounded-full bg-neonCyan opacity-80"></span>
-                  <span id="header-status">READY</span>
-                </span>
-              </div>
-
-              <div class="match-clock-strip">
-                <span id="action-timer-label" class="match-clock-label">ACTION CLOCK</span>
-                <div id="action-timer-box" class="match-clock-box">
-                  <span id="action-timer-display">--</span>
-                </div>
-                <div class="match-clock-rail">
-                  <div id="action-timer-bar"></div>
-                </div>
-                <span id="action-timer-warning" class="hidden match-clock-warning">5s</span>
+                <span id="header-status" class="hidden">READY</span>
               </div>
 
               <div id="manual-reader-panel" class="match-reader-panel">
@@ -692,36 +673,18 @@
                   <span class="match-buzz-kicker">FLOOR</span>
                   <span id="buzz-player-name">FLOOR: CLEAR</span>
                 </div>
-                <div class="match-badges">
-                  <span id="buzz-team-indicator" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
-                  <span id="interrupt-badge">INTERRUPT: --</span>
-                  <span id="outcome-badge">OUTCOME: PENDING</span>
-                </div>
+                <button type="button" id="btn-end-buzzpoint" class="match-end-buzz hidden" onclick="ManualReader.markEndBuzzpoint()" disabled title="Mark the buzz at the end of the question">
+                  End
+                </button>
               </div>
 
-              <div id="manual-buzzpoint-panel" class="match-verdict-panel">
-                <div class="match-verdict-info">
-                  <div class="match-verdict-head">
-                    <span>BUZZPOINT</span>
-                    <span id="buzzpoint-status">Not marked</span>
-                  </div>
-                  <div id="buzzpoint-current">No buzzpoint marked</div>
-                  <button id="btn-full-read" onclick="ManualReader.markFullRead()" class="match-full-read" disabled>
-                    Full read / after end
-                  </button>
-                </div>
-                <div class="match-verdict-actions">
-                  <div class="match-wrong-preview">
-                    <span>WRONG</span>
-                    <span id="manual-verdict-preview">NEG &minus;4</span>
-                  </div>
-                  <button id="btn-manual-correct" onclick="ManualReader.verdict(true)" disabled>
-                    Correct +4
-                  </button>
-                  <button id="btn-manual-incorrect" onclick="ManualReader.verdict(false)" disabled>
-                    Incorrect
-                  </button>
-                </div>
+              <div class="match-verdict-actions">
+                <button id="btn-manual-correct" onclick="ManualReader.verdict(true)" disabled>
+                  Correct +4
+                </button>
+                <button id="btn-manual-incorrect" onclick="ManualReader.verdict(false)" disabled>
+                  Incorrect
+                </button>
               </div>
 
               <div id="manual-read-actions" class="match-read-actions">
@@ -733,40 +696,24 @@
                 </button>
               </div>
 
-              <!-- Legacy stage-title elements stay hidden for JS stability. -->
-              <h1 id="stage-title-text" class="hidden"></h1>
-              <p id="stage-subtitle-text" class="hidden"></p>
-            </div>
-
-            <!-- MATCH CONTROLS -->
-            <div class="match-control-bar">
-              <div class="match-start-buttons">
-                <button id="btn-start-tossup" onclick="sendEvent('MANUAL_START_TOSSUP')" class="hidden">
-                  &#9654; Start Tossup
+              <div class="match-card-actions">
+                <div class="match-start-buttons">
+                  <button id="btn-start-tossup" onclick="sendEvent('MANUAL_START_TOSSUP')" class="hidden">
+                    &#9654; Start Tossup
+                  </button>
+                  <button id="btn-reread-tossup" onclick="sendEvent('MANUAL_REREAD_TOSSUP')" class="hidden">
+                    &#9654; Re-read Tossup
+                  </button>
+                  <button id="btn-start-bonus" onclick="sendEvent('MANUAL_START_BONUS')" class="hidden">
+                    &#9654; Start Bonus
+                  </button>
+                  <button id="btn-override-last-question" onclick="requestOverrideLastQuestion()" class="hidden">
+                    Override Last Question
+                  </button>
+                </div>
+                <button id="btn-end-match" class="match-end-match" onclick="requestEndMatch()" title="End the match now and open the final score screen">
+                  End Match
                 </button>
-                <button id="btn-reread-tossup" onclick="sendEvent('MANUAL_REREAD_TOSSUP')" class="hidden">
-                  &#9654; Re-read Tossup
-                </button>
-                <button id="btn-start-bonus" onclick="sendEvent('MANUAL_START_BONUS')" class="hidden">
-                  &#9654; Start Bonus
-                </button>
-              </div>
-
-              <div class="match-secondary-controls">
-                <button id="btn-pause-match" onclick="togglePause()">&#9208; PAUSE</button>
-                <button onclick="triggerChallenge(); playSound('click');">&#9888;&#65039; Challenge</button>
-                <button onclick="sendEvent('ADJUST_SCORE', {team: 'Team A', delta: 4})">+4 Team A</button>
-                <button onclick="sendEvent('ADJUST_SCORE', {team: 'Team B', delta: 4})">+4 Team B</button>
-                <button id="btn-export-csv" onclick="sendEvent('EXPORT_CSV')" title="Download the match log as CSV">Export CSV</button>
-                <button id="btn-match-summary" class="hidden" onclick="window.MatchSummary &amp;&amp; window.MatchSummary.showLast()">Summary</button>
-                <button id="btn-end-match" class="match-end-match" onclick="sendEvent('END_MATCH')" title="End the match now and open the final score screen">End Match</button>
-                <button onclick="sendEvent('FORCE_RESET_STATE')" class="match-reset">Override &amp; Reset</button>
-              </div>
-
-              <!-- AI judgment overrides -->
-              <div id="override-controls" class="hidden flex space-x-2">
-                <button onclick="sendEvent('FORCE_JUDGMENT', {correct: true})" title="Force correct">&#10003;</button>
-                <button onclick="sendEvent('FORCE_JUDGMENT', {correct: false})" title="Force incorrect">&#10007;</button>
               </div>
 
               <!-- Online AI mode: the moderator's own buzzer and live room roster. -->
@@ -776,6 +723,10 @@
                 </button>
                 <div id="online-roster" class="js-online-roster flex flex-wrap gap-2 min-h-6"></div>
               </div>
+
+              <!-- Legacy stage-title elements stay hidden for JS stability. -->
+              <h1 id="stage-title-text" class="hidden"></h1>
+              <p id="stage-subtitle-text" class="hidden"></p>
             </div>
           </div>
 

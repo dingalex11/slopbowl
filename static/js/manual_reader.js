@@ -33,7 +33,9 @@
     let readClockInterval = null;
     let buzzActive = false;
     let selectedBuzzpoint = '';
+    let selectedToken = null;
     let afterRead = false;
+    let questionFinished = false;
     let verdictSent = false;
     let buzzClickTimeout = null;
 
@@ -219,6 +221,7 @@
         buzzActive = false;
         selectedBuzzpoint = '';
         afterRead = false;
+        questionFinished = false;
         verdictSent = false;
         if (buzzClickTimeout) clearTimeout(buzzClickTimeout);
         buzzClickTimeout = null;
@@ -236,26 +239,16 @@
         updateBuzzButtons();
     }
 
-    function renderOptions() {
-        const holder = $('reader-options');
-        if (!holder) return;
-        holder.replaceChildren();
-        if (!question.options.length) return;
-        const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-        question.options.forEach((option, index) => {
-            const row = document.createElement('div');
-            row.className = 'bg-panel border border-borderDark rounded-lg px-3 py-2 text-slate-300';
-            row.textContent = (letters[index] || String(index + 1)) + '. ' + option;
-            holder.appendChild(row);
-        });
+    // A buzzpoint is capped at 80 characters by the server; a single token can
+    // still be longer than that in a malformed packet.
+    function buzzpointWord(word) {
+        return String(word == null ? '' : word).trim().slice(0, 80);
     }
 
-    function renderTokens() {
-        const holder = $('reader-question-text');
-        if (!holder) return;
-        holder.replaceChildren();
-        const text = question.raw_text || 'Waiting for the next question…';
-        const parts = text.split(/(\s+)/);
+    // Packet text is untrusted, so every word becomes its own text-only button
+    // rather than markup. Used for both the stem and each answer choice.
+    function appendWordTokens(holder, text, extraClass) {
+        const parts = String(text || '').split(/(\s+)/);
         parts.forEach((part) => {
             if (!part) return;
             if (/^\s+$/.test(part)) {
@@ -264,42 +257,84 @@
             }
             const token = document.createElement('button');
             token.type = 'button';
-            token.className = 'reader-token';
+            token.className = extraClass ? 'reader-token ' + extraClass : 'reader-token';
             token.dataset.word = part;
             token.textContent = part;
             token.disabled = true;
             token.addEventListener('click', () => markToken(part, token));
             holder.appendChild(token);
         });
+    }
+
+    function renderOptions() {
+        const holder = $('reader-options');
+        if (!holder) return;
+        holder.replaceChildren();
+        if (!question.options.length) return;
+        question.options.forEach((option) => {
+            // Choices are part of the read. Every word is its own buzzpoint so
+            // a buzz inside a choice is tracked word-for-word, not by row.
+            const line = document.createElement('div');
+            line.className = 'reader-option-line';
+            appendWordTokens(line, option, 'reader-option-word');
+            holder.appendChild(line);
+        });
+    }
+
+    function renderTokens() {
+        const holder = $('reader-question-text');
+        if (!holder) return;
+        selectedToken = null;
+        holder.replaceChildren();
+        appendWordTokens(holder, question.raw_text || 'Waiting for the next question…');
         updateTokenState();
     }
 
     function updateTokenState() {
-        const active = manualMode && buzzActive && !verdictSent;
+        const active = manualMode && buzzActive && !questionFinished && !verdictSent;
         document.querySelectorAll('.reader-token').forEach((token) => {
             token.disabled = !active;
             token.classList.toggle('is-clickable', active);
-            token.classList.toggle('is-selected', Boolean(selectedBuzzpoint) && token.dataset.word === selectedBuzzpoint);
+            // A word can occur several times in a question. Only the occurrence the
+            // moderator actually clicked is the buzzpoint.
+            token.classList.toggle('is-selected', token === selectedToken);
         });
         const holder = $('reader-question-text');
         if (holder) holder.classList.toggle('reader-marking', active);
+        updateEndBuzzButton();
+    }
+
+    // The end marker is the existing after-read (Full Read) buzzpoint. It is only
+    // offered once the question is over, so an interrupted answer cannot be recorded
+    // as if the player had heard the whole question.
+    function updateEndBuzzButton() {
+        const button = $('btn-end-buzzpoint');
+        if (!button) return;
+        const tossupVisible = phase === 'READING' || phase === 'BUZZ_WINDOW' || phase === 'ANSWERING';
+        const visible = Boolean(manualMode && tossupVisible);
+        button.classList.toggle('hidden', !visible);
+        button.disabled = !visible || !buzzActive || !questionFinished || verdictSent;
+        const selected = afterRead && selectedBuzzpoint === 'Full Read';
+        button.classList.toggle('is-selected', selected);
+        button.setAttribute('aria-pressed', String(selected));
     }
 
     function markToken(word, element) {
-        if (!buzzActive || verdictSent || !word) return;
+        if (!buzzActive || questionFinished || verdictSent || !word) return;
         buzzActive = true; // a click can arrive after a phase event; keep marking open
-        selectedBuzzpoint = word;
+        const value = buzzpointWord(word);
+        if (!value) return;
+        selectedBuzzpoint = value;
+        selectedToken = element;
         afterRead = false;
-        setText('buzzpoint-current', '“' + word + '”');
+        setText('buzzpoint-current', '“' + value + '”');
         setText('buzzpoint-status', 'Marked');
         setText('manual-verdict-preview', 'NEG −4');
         setVerdictEnabled(true);
         setFullReadEnabled(true);
-        document.querySelectorAll('.reader-token').forEach((token) => {
-            token.classList.toggle('is-selected', token === element || token.dataset.word === word);
-        });
+        updateTokenState();
         if (typeof sendEvent === 'function') {
-            sendEvent('LOG_BUZZPOINT', { buzzpoint: word, after_read: false });
+            sendEvent('LOG_BUZZPOINT', { buzzpoint: value, after_read: false });
         }
     }
 
@@ -316,8 +351,9 @@
     }
 
     function markFullRead() {
-        if (!buzzActive || verdictSent) return;
+        if (!buzzActive || !questionFinished || verdictSent) return;
         selectedBuzzpoint = 'Full Read';
+        selectedToken = null;
         afterRead = true;
         setText('buzzpoint-current', 'Full read / after end');
         setText('buzzpoint-status', 'Full read');
@@ -326,7 +362,7 @@
         if (preview) {
             preview.className = 'text-neonGreen font-bold';
         }
-        document.querySelectorAll('.reader-token').forEach((token) => token.classList.remove('is-selected'));
+        updateTokenState();
         setVerdictEnabled(true);
         if (typeof sendEvent === 'function') {
             sendEvent('LOG_BUZZPOINT', { buzzpoint: 'Full Read', after_read: true });
@@ -338,6 +374,15 @@
         if (!value) return;
         selectedBuzzpoint = value;
         afterRead = Boolean(isAfterRead) || value === 'Full Read';
+        if (afterRead) questionFinished = true;
+        if (afterRead) {
+            selectedToken = null;
+        } else if (!selectedToken || selectedToken.dataset.word !== value) {
+            // A reconnect or server echo carries only the word, not its occurrence.
+            // Preserve the moderator's exact mark; otherwise fall back to the first match.
+            selectedToken = Array.from(document.querySelectorAll('.reader-token'))
+                .find((token) => token.dataset.word === value) || null;
+        }
         setText('buzzpoint-current', afterRead ? 'Full read / after end' : '“' + value + '”');
         setText('buzzpoint-status', afterRead ? 'Full read' : 'Marked');
         const preview = $('manual-verdict-preview');
@@ -345,9 +390,6 @@
             preview.textContent = afterRead ? 'INCORRECT (0)' : 'NEG −4';
             preview.className = afterRead ? 'text-neonGreen font-bold' : 'text-neonPink font-bold';
         }
-        document.querySelectorAll('.reader-token').forEach((token) => {
-            token.classList.toggle('is-selected', !afterRead && token.dataset.word === value);
-        });
         setFullReadEnabled(true);
         setVerdictEnabled(true);
         updateTokenState();
@@ -362,12 +404,16 @@
 
         if (nextPhase === 'READING') {
             buzzActive = false;
+            questionFinished = false;
+            setText('buzz-player-name', 'FLOOR: CLEAR');
             startReadClock(data.started_at);
             setBuzzReadButton(true);
             setBonusReadButton(false);
             if (typeof stopActionTimer === 'function') stopActionTimer();
         } else if (nextPhase === 'BUZZ_WINDOW') {
             buzzActive = false;
+            questionFinished = true;
+            setText('buzz-player-name', 'FLOOR: AWAITING BUZZ');
             stopReadClock();
             setBuzzReadButton(false);
             setBonusReadButton(false);
@@ -377,11 +423,14 @@
             setBuzzReadButton(false);
             setBonusReadButton(false);
             startAnswerTimer(data.seconds || 4, data.started_at);
-            if (data.after_read || data.buzzpoint === 'Full Read') {
+            questionFinished = Boolean(data.after_read || data.buzzpoint === 'Full Read');
+            if (questionFinished) {
                 applyBuzzpoint('Full Read', true);
             }
         } else if (nextPhase === 'BONUS_READ') {
             buzzActive = false;
+            questionFinished = false;
+            setText('buzz-player-name', 'FLOOR: CLEAR');
             startReadClock(data.started_at);
             setBuzzReadButton(false);
             setBonusReadButton(true);
@@ -394,6 +443,8 @@
             if (typeof stopActionTimer === 'function') stopActionTimer();
         } else if (nextPhase === 'BONUS_CONFER') {
             buzzActive = false;
+            questionFinished = false;
+            setText('buzz-player-name', 'FLOOR: CLEAR');
             stopReadClock();
             setBuzzReadButton(false);
             setBonusReadButton(false);
@@ -405,6 +456,9 @@
             setVerdictEnabled(!verdictSent);
             startConferTimer(data.seconds || 20, data.started_at);
         } else {
+            buzzActive = false;
+            questionFinished = false;
+            setText('buzz-player-name', 'FLOOR: CLEAR');
             stopReadClock();
             setBuzzReadButton(false);
             setBonusReadButton(false);
@@ -465,7 +519,7 @@
         const buzzpointPanel = $('manual-buzzpoint-panel');
         if (buzzpointPanel) buzzpointPanel.classList.toggle('hidden', !manualMode);
         const modeBadge = $('stage-type-badge');
-        if (modeBadge) modeBadge.textContent = manualMode ? 'MANUAL READER' : 'AI READ / JUDGE';
+        if (modeBadge) modeBadge.textContent = manualMode ? 'SHORT ANSWER' : 'AI READ / JUDGE';
         const layout = $('match-layout');
         if (layout) layout.classList.toggle('is-manual', manualMode);
         const hud = document.querySelector('.match-hud');
@@ -494,6 +548,7 @@
     function beginBuzz(payload) {
         const data = payload && typeof payload === 'object' ? payload : {};
         buzzActive = true;
+        if (data.after_read) questionFinished = true;
         if (buzzClickTimeout) clearTimeout(buzzClickTimeout);
         buzzClickTimeout = null;
         stopReadClock();
@@ -524,7 +579,9 @@
         phase = 'IDLE';
         buzzActive = false;
         selectedBuzzpoint = '';
+        selectedToken = null;
         afterRead = false;
+        questionFinished = false;
         verdictSent = false;
         if (buzzClickTimeout) clearTimeout(buzzClickTimeout);
         buzzClickTimeout = null;
@@ -555,6 +612,7 @@
         beginBuzz: beginBuzz,
         setBuzzpoint: applyBuzzpoint,
         markFullRead: markFullRead,
+        markEndBuzzpoint: markFullRead,
         verdict: verdict,
         reset: reset
     };

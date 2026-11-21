@@ -21,6 +21,7 @@ let isOnlineCaptain = false;
 let currentOnlineBuzzTeam = null;
 let onlineCaptainOnly = false;
 let currentMatchLog = [];
+let currentMatchTeardown = false;
 // True while the moderator's station is the room's only voice (shared-read mode).
 let moderatorReading = { active: false, kind: null };
 let isReadingOnline = false;
@@ -203,15 +204,15 @@ function connectWebSocket(roomId, apiKey = null) {
             if (loaded) announcePacketLoaded({ count: Number(loaded[1]) });
         }
         else if (data.type === 'PREMATCH_READY') {
-            // A new packet is a new match: put the previous final screen away.
-            currentMatchLog = [];
-            if (window.MatchSummary) window.MatchSummary.hide();
-            document.getElementById('btn-match-summary')?.classList.add('hidden');
-            document.getElementById('btn-end-match')?.classList.remove('hidden');
+            // A new packet is a new match: clear every score and row from the old one.
+            resetMatchHud();
             announcePacketLoaded(payload);
         }
         else if (data.type === 'MATCH_COMPLETE') {
             currentMatchLog = Array.isArray(payload.log) ? payload.log : currentMatchLog;
+            currentMatchTeardown = Boolean(payload.teardown);
+            window.currentMatchTeardown = currentMatchTeardown;
+            renderScoresheetFromLog(currentMatchLog);
             // The match may end while a question is still being read or answered.
             // Silence the room and stop any open recording before showing the final screen.
             cancelSpeech();
@@ -241,6 +242,9 @@ function connectWebSocket(roomId, apiKey = null) {
         
         else if (data.type === 'SYNC_LOG') {
             currentMatchLog = Array.isArray(payload.log) ? payload.log : [];
+            // The server's full log is authoritative: rebuilding removes any row the
+            // moderator reopened with Override Last Question.
+            renderScoresheetFromLog(currentMatchLog);
             // Push the full array of JSON log entries to Firestore
             if (window.saveMatchLogToCloud && typeof currentRoomId !== 'undefined') {
                 window.saveMatchLogToCloud(currentRoomId, currentMatchLog);
@@ -250,17 +254,27 @@ function connectWebSocket(roomId, apiKey = null) {
             const btnTossup = document.getElementById('btn-start-tossup');
             const btnBonus = document.getElementById('btn-start-bonus');
             const btnReread = document.getElementById('btn-reread-tossup');
-            const overrideGrp = document.getElementById('override-controls');
-            
+            const btnOverride = document.getElementById('btn-override-last-question');
+
             btnTossup?.classList.add('hidden');
             btnBonus?.classList.add('hidden');
             btnReread?.classList.add('hidden');
-            overrideGrp?.classList.add('hidden');
-            
+            btnOverride?.classList.add('hidden');
+
             if (payload.show === 'TOSSUP') btnTossup?.classList.remove('hidden');
             if (payload.show === 'BONUS') btnBonus?.classList.remove('hidden');
             if (payload.show === 'REREAD') btnReread?.classList.remove('hidden');
-            if (payload.overrides) overrideGrp?.classList.remove('hidden');
+            if (payload.can_override && currentUserRole === 'owner') btnOverride?.classList.remove('hidden');
+            if (payload.show === 'BONUS') {
+                const floor = document.getElementById('buzz-player-name');
+                if (floor) floor.textContent = 'FLOOR: CLEAR';
+                const hint = document.getElementById('manual-buzz-hint');
+                if (hint) hint.textContent = 'Bonus ready. Click Start Bonus, then read it aloud.';
+            }
+        }
+        else if (data.type === 'ROOM_CLOSED') {
+            const reason = payload.reason || 'Match ended';
+            if (typeof showToast === 'function') showToast(`${reason} — room closed.`);
         }
         else if (data.type === 'MANUAL_PHASE') {
             if (window.ManualReader) window.ManualReader.setPhase(payload);
@@ -298,150 +312,7 @@ function connectWebSocket(roomId, apiKey = null) {
             // No question or answer text is written to the DOM.
         } 
         else if (data.type === 'NEW_LOG_ENTRY') {
-            const tbody = document.getElementById('scoresheet-body');
-            if (tbody) {
-                if (tbody.children.length === 1 && tbody.textContent.toLowerCase().includes("match data will populate here")) {
-                    tbody.innerHTML = "";
-                }
-
-                let isOverride = payload.Event_Type === 'MANUAL_OVERRIDE';
-                let tr = null;
-                
-                if (!isOverride) {
-                    tr = tbody.querySelector(`tr[data-qnum="${payload.Q_Num}"]`);
-                }
-                
-                if (!tr) {
-                    tr = document.createElement('tr');
-                    if (!isOverride) {
-                        tr.setAttribute('data-qnum', payload.Q_Num);
-                    }
-                    tr.className = "border-b border-isoborder/50 hover:bg-isodark/50 transition";
-                    
-                    tr.innerHTML = `
-                        <td class="py-3 px-4 text-center ta-toss font-mono text-xs"></td>
-                        <td class="py-3 px-4 text-center ta-bonus font-mono text-xs"></td>
-                        <td class="py-2 px-2 text-center bg-isodark border-x border-isoborder min-w-[120px]">
-                            <div class="flex justify-center items-center space-x-2 mb-1">
-                                <span class="text-white font-bold text-xs q-label"></span>
-                                <span class="text-slate-400 font-bold text-[10px] q-cat"></span>
-                            </div>
-                            <div class="flex justify-center items-center space-x-4 text-sm font-black">
-                                <span class="text-teamA q-score-a"></span>
-                                <span class="text-teamB q-score-b"></span>
-                            </div>
-                        </td>
-                        <td class="py-3 px-4 text-center tb-toss font-mono text-xs"></td>
-                        <td class="py-3 px-4 text-center tb-bonus font-mono text-xs"></td>
-                    `;
-                    tbody.prepend(tr);
-                }
-
-                tr.querySelector('.q-label').innerText = isOverride ? 'OVERRIDE' : 'Q' + payload.Q_Num;
-                if (!isOverride) {
-                    tr.querySelector('.q-cat').innerText = typeof currentCategoryAbbrev !== 'undefined' ? currentCategoryAbbrev : 'GEN';
-                }
-                tr.querySelector('.q-score-a').innerText = payload.Score_A;
-                tr.querySelector('.q-score-b').innerText = payload.Score_B;
-
-                if (payload.Event_Type === "DEAD_TOSSUP") return; 
-
-                const makeEditable = (cell, colName) => {
-                    cell.title = "Double-click to edit";
-                    cell.classList.add('cursor-pointer', 'hover:bg-isoborder');
-                    
-                    cell.ondblclick = () => {
-                        // Strip the " *" indicator if it exists so the input box is clean
-                        const currentText = cell.innerText.replace(' *', '').trim();
-                        
-                        const input = document.createElement('input');
-                        input.type = 'text';
-                        input.className = 'w-full bg-isodark text-white font-mono text-center border border-teamA py-1 focus:outline-none';
-                        input.value = currentText;
-                        cell.replaceChildren(input);
-                        input.focus();
-                        
-                        const saveEdit = () => {
-                            const newVal = input.value.trim();
-                            // Optimistic UI update: instantly show the new value with the edit indicator
-                            cell.innerText = newVal + " *";
-                            
-                            sendEvent('EDIT_LOG_ENTRY', {
-                                q_num: payload.Q_Num,
-                                team: payload.Team,
-                                column: colName, // Sends "TOSSUP" or "BONUS"
-                                new_val: newVal
-                            });
-                        };
-                        
-                        let editSaved = false;
-                        input.onblur = () => {
-                            if (editSaved) return;
-                            editSaved = true;
-                            saveEdit();
-                        };
-                        input.onkeydown = (e) => { if (e.key === 'Enter') input.blur(); };
-                    };
-                };
-
-                const setTossup = (selector, points, player, teamColorClass) => {
-                    const cell = tr.querySelector(selector);
-                    cell.classList.remove('text-teamA', 'text-teamB', 'text-red-400', 'text-zinc-500', 'text-emerald-400');
-                    
-                    if (points > 0) {
-                        cell.innerText = `${player} +${points}`;
-                        cell.classList.add(teamColorClass, 'font-bold');
-                    } else if (points < 0) {
-                        cell.innerText = `${player} ${points}`;
-                        cell.classList.add('text-red-400', 'font-bold');
-                    } else {
-                        cell.innerText = `${player} X`;
-                        cell.classList.add('text-zinc-500', 'font-bold');
-                    }
-                    if (payload.Edited) cell.innerText += " *"; // Indicator for edited
-                    makeEditable(cell, 'TOSSUP');
-                };
-
-                const setBonus = (selector, points) => {
-                    const cell = tr.querySelector(selector);
-                    cell.classList.remove('text-teamA', 'text-teamB', 'text-red-400', 'text-zinc-500', 'text-emerald-400');
-                    
-                    // Explicitly handle 10 points (correct) or 0 points (incorrect/dead)
-                    if (points === 10) {
-                        cell.innerText = "10";
-                        cell.classList.add('text-emerald-400', 'font-bold');
-                    } else {
-                        cell.innerText = "0";
-                        cell.classList.add('text-zinc-500', 'font-bold');
-                    }
-                    
-                    if (payload.Edited) cell.innerText += " *"; 
-                    
-                    // Pass 'BONUS' exactly to tell the backend which phase to edit
-                    makeEditable(cell, 'BONUS');
-                };
-
-                if (payload.Team === "Team A") {
-                    if (payload.Event_Type.includes("TOSSUP")) {
-                        setTossup('.ta-toss', payload.Points, payload.Player, 'text-teamA');
-                    } else if (payload.Event_Type === "BONUS") {
-                        setBonus('.ta-bonus', payload.Points);
-                    } else if (isOverride) {
-                        tr.querySelector('.ta-toss').innerText = "🔧";
-                        setBonus('.ta-bonus', payload.Points);
-                    }
-                } 
-                else if (payload.Team === "Team B") {
-                    if (payload.Event_Type.includes("TOSSUP")) {
-                        setTossup('.tb-toss', payload.Points, payload.Player, 'text-teamB');
-                    } else if (payload.Event_Type === "BONUS") {
-                        setBonus('.tb-bonus', payload.Points);
-                    } else if (isOverride) {
-                        tr.querySelector('.tb-toss').innerText = "🔧";
-                        setBonus('.tb-bonus', payload.Points);
-                    }
-                }
-            }
+            applyLogEntry(payload);
         }
         else if (data.type === 'MODERATOR_READING') {
             renderModeratorReading(payload.active, payload.kind);
@@ -602,10 +473,14 @@ function connectWebSocket(roomId, apiKey = null) {
         const statusEl = document.getElementById('header-status');
         currentUserRole = null;
         if (window.ws === socket) window.ws = null;
-        if ([4400, 4401, 4403, 4404, 4409, 4410, 4429, 4503].includes(event.code)) {
+        if ([4400, 4401, 4403, 4404, 4409, 4410, 4411, 4429, 4503].includes(event.code)) {
             if (statusEl) {
-                const messages = {4400: 'INVALID ROOM CODE', 4401: 'SIGN IN TO CONNECT', 4403: 'ROOM ACCESS DENIED', 4404: 'ROOM NOT AVAILABLE', 4409: 'MESSAGE TOO LARGE', 4410: 'ROOM CLOSED - NO ACTIVITY', 4429: 'ROOM BUSY - RETRY MANUALLY', 4503: 'ROOM SERVICE UNAVAILABLE'};
+                const messages = {4400: 'INVALID ROOM CODE', 4401: 'SIGN IN TO CONNECT', 4403: 'ROOM ACCESS DENIED', 4404: 'ROOM NOT AVAILABLE', 4409: 'MESSAGE TOO LARGE', 4410: 'ROOM CLOSED - NO ACTIVITY', 4411: 'MATCH ENDED - ROOM CLOSED', 4429: 'ROOM BUSY - RETRY MANUALLY', 4503: 'ROOM SERVICE UNAVAILABLE'};
                 statusEl.innerText = messages[event.code] || 'CONNECTION CLOSED';
+            }
+            if (event.code === 4411) {
+                window._matchClosing = false;
+                if (typeof showToast === 'function') showToast('Match room closed.');
             }
             if (window.activeRoomId === roomId) window.activeRoomId = null;
             if (pingInterval) clearInterval(pingInterval);
@@ -696,6 +571,201 @@ function sendEvent(eventType, payload = {}) {
             : 'Not connected to a match. Start an in-person match first.');
     }
 }
+
+// --- SCORESHEET ---------------------------------------------------------
+const SCORESHEET_PLACEHOLDER = `
+    <tr>
+        <td class="py-3 px-4 text-center"></td>
+        <td class="py-3 px-4 text-center"></td>
+        <td class="py-3 px-2 text-center match-empty-score">
+            Match data will populate here...
+        </td>
+        <td class="py-3 px-4 text-center"></td>
+        <td class="py-3 px-4 text-center"></td>
+    </tr>`;
+
+function clearMatchScoresheet() {
+    const tbody = document.getElementById('scoresheet-body');
+    if (tbody) tbody.innerHTML = SCORESHEET_PLACEHOLDER;
+}
+
+function makeScoreCellEditable(cell, payload, colName) {
+    cell.title = 'Double-click to edit';
+    cell.classList.add('cursor-pointer', 'hover:bg-isoborder');
+    cell.ondblclick = () => {
+        const currentText = cell.innerText.replace(' *', '').trim();
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'w-full bg-isodark text-white font-mono text-center border border-teamA py-1 focus:outline-none';
+        input.value = currentText;
+        cell.replaceChildren(input);
+        input.focus();
+
+        const saveEdit = () => {
+            const newVal = input.value.trim();
+            cell.innerText = newVal + ' *';
+            sendEvent('EDIT_LOG_ENTRY', {
+                q_num: payload.Q_Num,
+                team: payload.Team,
+                column: colName,
+                new_val: newVal,
+            });
+        };
+
+        let editSaved = false;
+        input.onblur = () => {
+            if (editSaved) return;
+            editSaved = true;
+            saveEdit();
+        };
+        input.onkeydown = (event) => { if (event.key === 'Enter') input.blur(); };
+    };
+}
+
+function applyLogEntry(payload, categoryLabel = currentCategoryAbbrev) {
+    const tbody = document.getElementById('scoresheet-body');
+    if (!tbody || !payload || typeof payload !== 'object') return;
+    if (tbody.children.length === 1 && tbody.textContent.toLowerCase().includes('match data will populate here')) {
+        tbody.innerHTML = '';
+    }
+
+    const isOverride = payload.Event_Type === 'MANUAL_OVERRIDE';
+    let tr = null;
+    if (!isOverride) tr = tbody.querySelector(`tr[data-qnum="${payload.Q_Num}"]`);
+    if (!tr) {
+        tr = document.createElement('tr');
+        if (!isOverride) tr.setAttribute('data-qnum', payload.Q_Num);
+        tr.className = 'border-b border-isoborder/50 hover:bg-isodark/50 transition';
+        tr.innerHTML = `
+            <td class="py-3 px-4 text-center ta-toss font-mono text-xs"></td>
+            <td class="py-3 px-4 text-center ta-bonus font-mono text-xs"></td>
+            <td class="py-2 px-2 text-center bg-isodark border-x border-isoborder min-w-[120px]">
+                <div class="flex justify-center items-center space-x-2 mb-1">
+                    <span class="text-white font-bold text-xs q-label"></span>
+                    <span class="text-slate-400 font-bold text-[10px] q-cat"></span>
+                </div>
+                <div class="flex justify-center items-center space-x-4 text-sm font-black">
+                    <span class="text-teamA q-score-a"></span>
+                    <span class="text-teamB q-score-b"></span>
+                </div>
+            </td>
+            <td class="py-3 px-4 text-center tb-toss font-mono text-xs"></td>
+            <td class="py-3 px-4 text-center tb-bonus font-mono text-xs"></td>
+        `;
+        tbody.prepend(tr);
+    }
+
+    tr.querySelector('.q-label').innerText = isOverride ? 'OVERRIDE' : 'Q' + payload.Q_Num;
+    if (!isOverride) {
+        tr.querySelector('.q-cat').innerText = categoryLabel || 'GEN';
+    }
+    tr.querySelector('.q-score-a').innerText = payload.Score_A;
+    tr.querySelector('.q-score-b').innerText = payload.Score_B;
+
+    if (payload.Event_Type === 'DEAD_TOSSUP') return;
+
+    const setTossup = (selector, points, player, teamColorClass) => {
+        const cell = tr.querySelector(selector);
+        cell.classList.remove('text-teamA', 'text-teamB', 'text-red-400', 'text-zinc-500', 'text-emerald-400');
+        if (points > 0) {
+            cell.innerText = `${player} +${points}`;
+            cell.classList.add(teamColorClass, 'font-bold');
+        } else if (points < 0) {
+            cell.innerText = `${player} ${points}`;
+            cell.classList.add('text-red-400', 'font-bold');
+        } else {
+            cell.innerText = `${player} X`;
+            cell.classList.add('text-zinc-500', 'font-bold');
+        }
+        if (payload.Edited) cell.innerText += ' *';
+        makeScoreCellEditable(cell, payload, 'TOSSUP');
+    };
+
+    const setBonus = (selector, points) => {
+        const cell = tr.querySelector(selector);
+        cell.classList.remove('text-teamA', 'text-teamB', 'text-red-400', 'text-zinc-500', 'text-emerald-400');
+        if (points === 10) {
+            cell.innerText = '10';
+            cell.classList.add('text-emerald-400', 'font-bold');
+        } else {
+            cell.innerText = '0';
+            cell.classList.add('text-zinc-500', 'font-bold');
+        }
+        if (payload.Edited) cell.innerText += ' *';
+        makeScoreCellEditable(cell, payload, 'BONUS');
+    };
+
+    if (payload.Team === 'Team A') {
+        if (payload.Event_Type.includes('TOSSUP')) {
+            setTossup('.ta-toss', payload.Points, payload.Player, 'text-teamA');
+        } else if (payload.Event_Type === 'BONUS') {
+            setBonus('.ta-bonus', payload.Points);
+        } else if (isOverride) {
+            tr.querySelector('.ta-toss').innerText = '🔧';
+            setBonus('.ta-bonus', payload.Points);
+        }
+    } else if (payload.Team === 'Team B') {
+        if (payload.Event_Type.includes('TOSSUP')) {
+            setTossup('.tb-toss', payload.Points, payload.Player, 'text-teamB');
+        } else if (payload.Event_Type === 'BONUS') {
+            setBonus('.tb-bonus', payload.Points);
+        } else if (isOverride) {
+            tr.querySelector('.tb-toss').innerText = '🔧';
+            setBonus('.tb-bonus', payload.Points);
+        }
+    }
+}
+
+function renderScoresheetFromLog(log) {
+    const tbody = document.getElementById('scoresheet-body');
+    if (!tbody) return;
+    const categories = new Map();
+    tbody.querySelectorAll('tr[data-qnum]').forEach((row) => {
+        categories.set(String(row.dataset.qnum), row.querySelector('.q-cat')?.innerText || '');
+    });
+    clearMatchScoresheet();
+    (Array.isArray(log) ? log : []).forEach((entry) => {
+        const qNum = entry && entry.Q_Num != null ? String(entry.Q_Num) : '';
+        applyLogEntry(entry, categories.get(qNum) || currentCategoryAbbrev);
+    });
+}
+
+function resetMatchHud() {
+    currentMatchLog = [];
+    currentMatchTeardown = false;
+    window.currentMatchTeardown = false;
+    if (window.MatchSummary) {
+        window.MatchSummary.hide();
+        if (typeof window.MatchSummary.reset === 'function') window.MatchSummary.reset();
+    }
+    clearMatchScoresheet();
+    ['score-header-a', 'score-header-b'].forEach((id) => {
+        const score = document.getElementById(id);
+        if (score) score.innerText = '0';
+    });
+    const question = document.getElementById('reader-question-text');
+    if (question) question.innerText = 'Load a packet to see the question here.';
+    const answer = document.getElementById('reader-answer-key');
+    if (answer) answer.innerHTML = '&mdash;';
+    const options = document.getElementById('reader-options');
+    if (options) options.replaceChildren();
+    const category = document.getElementById('stage-cat-badge');
+    if (category) category.innerText = '--';
+    const kind = document.getElementById('hud-question-kind');
+    if (kind) kind.innerText = 'TOSS-UP';
+    const buzz = document.getElementById('buzz-player-name');
+    if (buzz) buzz.innerText = 'FLOOR: CLEAR';
+    document.getElementById('btn-override-last-question')?.classList.add('hidden');
+    document.getElementById('btn-end-match')?.classList.remove('hidden');
+    if (window.ManualReader) {
+        window.ManualReader.reset();
+        window.ManualReader.setPhase({ phase: 'IDLE', seconds: null });
+    }
+}
+
+window.clearMatchScoresheet = clearMatchScoresheet;
+window.renderMatchScoresheet = renderScoresheetFromLog;
+window.resetMatchHud = resetMatchHud;
 
 // --- TEXT TO SPEECH (TTS) LOGIC ---
 function updateOnlineBuzzButton() {

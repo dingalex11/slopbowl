@@ -38,7 +38,7 @@ async def _revalidate_client_code(request: Request, call_next):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
-OWNER_ONLY_EVENTS = {"SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY", "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT", "END_MATCH", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP",    "PAUSE_MATCH", "MATCH_BEGIN", "READING_DONE", "READING_FAILED", "ANSWER_AUDIO", "LOG_BUZZPOINT", "MANUAL_READ_DONE", "AUTH_INIT", "SET_READING_MODE"}
+OWNER_ONLY_EVENTS = {"SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY", "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT", "END_MATCH", "OVERRIDE_LAST_QUESTION", "CLOSE_MATCH", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP", "PAUSE_MATCH", "MATCH_BEGIN", "READING_DONE", "READING_FAILED", "ANSWER_AUDIO", "LOG_BUZZPOINT", "MANUAL_READ_DONE", "AUTH_INIT", "SET_READING_MODE"}
 OWNER_ONLY_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "DOWNLOAD_CSV", "MATCH_COMPLETE", "DEBUG_FRAME"}
 ONLINE_PUBLIC_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "UPDATE_STATUS", "UPDATE_SCORE", "BUZZ", "ROOM_ROSTER", "CONNECTED", "ERROR", "OPEN_BUZZ", "CLOSE_BUZZ", "MODERATOR_READING"}
 ONLINE_PLAYER_EVENTS = {"BUZZ", "ANSWER_AUDIO", "READING_DONE", "READING_FAILED", "PING"}
@@ -164,7 +164,18 @@ class RoomManager:
 
     async def listen_for_outbound(self, room_id: str, moderator):
         while True:
-            await self.broadcast_to_room(room_id, await moderator.outbound_queue.get())
+            message = await moderator.outbound_queue.get()
+            if message.get("type") == "ROOM_CLOSE_REQUESTED":
+                # Let the owner receive the final acknowledgement before the socket is
+                # closed. Teardown runs in its own task because it cancels this one.
+                await self.broadcast_to_room(room_id, {"type": "ROOM_CLOSED", "payload": {"reason": "Match ended"}})
+                close_task = asyncio.create_task(
+                    self.close_room(room_id, code=4411, reason="Match ended"),
+                    name=f"close:{room_id}",
+                )
+                close_task.add_done_callback(self._log_task_failure)
+                return
+            await self.broadcast_to_room(room_id, message)
 
     async def disconnect(self, connection: RoomConnection, room_id: str):
         roster_changed = False
@@ -206,6 +217,10 @@ class RoomManager:
             await self._expire_room(room_id)
 
     async def _expire_room(self, room_id: str):
+        await self.close_room(room_id, code=4410, reason="Room closed after inactivity")
+
+    async def close_room(self, room_id: str, *, code: int = 4410, reason: str = "Room closed"):
+        """Close every station, stop the room tasks, and free its Firestore code."""
         async with self.lock:
             connections = self.active_connections.pop(room_id, [])
             self.rooms.pop(room_id, None)
@@ -213,10 +228,12 @@ class RoomManager:
             self.last_activity.pop(room_id, None)
             self.buzz_locks.pop(room_id, None)
             tasks = self.room_tasks.pop(room_id, [])
-        await asyncio.gather(*(connection.websocket.close(code=4410, reason="Room closed after inactivity") for connection in connections), return_exceptions=True)
+        await asyncio.gather(*(connection.websocket.close(code=code, reason=reason) for connection in connections), return_exceptions=True)
+        current_task = asyncio.current_task()
         for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+            if task is not current_task:
+                task.cancel()
+        await asyncio.gather(*(task for task in tasks if task is not current_task), return_exceptions=True)
         # A closed local room must not leave its Firestore document behind: that is
         # what kept codes "already taken" forever and stopped rooms from closing.
         try:

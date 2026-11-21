@@ -494,6 +494,7 @@ window.openManualHudAfterSetup = openManualHudAfterSetup;
 // the authenticated socket is ready. No room code is shown or entered.
 async function startInPersonMatch() {
     if (manualStartBusy) return;
+    window._matchClosing = false;
 
     let rosterData;
     try {
@@ -578,6 +579,153 @@ async function startInPersonMatch() {
 function confirmSetup() {
     return startInPersonMatch();
 }
+
+// --- MATCH CONFIRMATIONS / ROOM TEARDOWN ---------------------------------
+let _matchConfirmAction = null;
+
+function closeMatchConfirm() {
+    const modal = document.getElementById('match-close-confirm');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        modal.setAttribute('aria-hidden', 'true');
+    }
+    _matchConfirmAction = null;
+}
+
+function openMatchConfirm({ title, copy, confirmLabel, action }) {
+    const modal = document.getElementById('match-close-confirm');
+    if (!modal) {
+        if (window.confirm(copy)) action();
+        return;
+    }
+    _matchConfirmAction = action;
+    const titleEl = document.getElementById('match-close-title');
+    const copyEl = document.getElementById('match-close-copy');
+    const confirmEl = document.getElementById('btn-confirm-close-match');
+    if (titleEl) titleEl.textContent = title;
+    if (copyEl) copyEl.textContent = copy;
+    if (confirmEl) confirmEl.textContent = confirmLabel;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    modal.setAttribute('aria-hidden', 'false');
+    window.setTimeout(() => confirmEl?.focus(), 0);
+}
+
+function requestEndMatch() {
+    closeMatchConfirm();
+    sendEvent('END_MATCH');
+}
+
+function requestOverrideLastQuestion() {
+    openMatchConfirm({
+        title: 'Replay the last question?',
+        copy: 'Its score and scoresheet entries will be removed, then the same tossup will reload for a fresh read.',
+        confirmLabel: 'Replay Question',
+        action: () => {
+            // Drop the old question immediately; the server follows with the exact
+            // tossup being reopened, so the next question must not remain on screen.
+            window.ManualReader?.setQuestion({
+                raw_text: 'Reopening last question…',
+                answer: '',
+                options: [],
+                phase: 'TOSSUP',
+            });
+            sendEvent('OVERRIDE_LAST_QUESTION');
+        },
+    });
+}
+
+function resetMatchSetupData() {
+    window.pendingBank = null;
+    window.pendingBankName = '';
+    window._manualRoster = null;
+    window._manualSetupPending = false;
+    window.onlineProfile = null;
+    const bankInput = document.getElementById('bank-file-input');
+    if (bankInput) bankInput.value = '';
+    const settingsInput = document.getElementById('settings-packet-input');
+    if (settingsInput) settingsInput.value = '';
+    const bankLabel = document.getElementById('bank-file-name');
+    if (bankLabel) {
+        bankLabel.innerText = 'No packet loaded. Browse a JSON file or use the BANK tools.';
+        bankLabel.className = 'text-xs text-neonAmber font-mono font-bold animate-pulse';
+    }
+    const settingsStatus = document.getElementById('settings-packet-status');
+    if (settingsStatus) settingsStatus.innerText = '';
+    const teamDefaults = { 'input-team-a-name': 'Team A', 'input-team-b-name': 'Team B' };
+    Object.entries(teamDefaults).forEach(([id, value]) => {
+        const input = document.getElementById(id);
+        if (input) input.value = value;
+    });
+    const rosterDefaults = { 1: 'Player 1', C: 'Captain', 3: 'Player 3', 4: 'Player 4', 5: 'Player 5' };
+    ['A', 'B'].forEach((team) => {
+        Object.entries(rosterDefaults).forEach(([seat, value]) => {
+            const input = document.getElementById(`roster-${team}-${seat}`);
+            if (input) input.value = value;
+        });
+    });
+}
+
+function resetMatchAfterRoomClose() {
+    window._matchClosing = true;
+    if (typeof cancelSpeech === 'function') cancelSpeech();
+    if (typeof cancelListening === 'function') cancelListening();
+    if (typeof stopActionTimer === 'function') stopActionTimer();
+    if (window.MatchSummary) window.MatchSummary.reset();
+    if (window.ManualReader) window.ManualReader.reset();
+    if (typeof window.resetMatchHud === 'function') window.resetMatchHud();
+    window.activeRoomId = null;
+    currentRoomId = null;
+    isMatchPaused = false;
+    resetMatchSetupData();
+    const overlay = document.getElementById('match-start-overlay');
+    if (overlay) overlay.classList.remove('hidden');
+    closeMatchConfirm();
+    // Drop the old room address as well as its data before returning home.
+    window.history.replaceState({}, '', `${window.location.pathname}#/`);
+    if (typeof navigateTo === 'function') navigateTo(1);
+    if (typeof window.updateHeaderScore === 'function') window.updateHeaderScore();
+}
+
+function requestMatchRoomClose() {
+    const summary = window.MatchSummary;
+    const teardown = Boolean(window.currentMatchTeardown);
+    if (!teardown) {
+        if (summary) summary.hide();
+        return;
+    }
+    openMatchConfirm({
+        title: 'Close this room and start over?',
+        copy: 'This deletes the room and returns home. All scores, rows, roster entries, and the staged packet will be cleared.',
+        confirmLabel: 'Close Room',
+        action: () => {
+            sendEvent('CLOSE_MATCH');
+            resetMatchAfterRoomClose();
+        },
+    });
+}
+
+const _confirmButton = document.getElementById('btn-confirm-close-match');
+_confirmButton?.addEventListener('click', () => {
+    const action = _matchConfirmAction;
+    closeMatchConfirm();
+    if (typeof action === 'function') action();
+});
+document.getElementById('btn-cancel-close-match')?.addEventListener('click', closeMatchConfirm);
+document.addEventListener('keydown', (event) => {
+    const modal = document.getElementById('match-close-confirm');
+    if (event.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        closeMatchConfirm();
+    }
+}, true);
+
+window.requestEndMatch = requestEndMatch;
+window.requestOverrideLastQuestion = requestOverrideLastQuestion;
+window.requestMatchRoomClose = requestMatchRoomClose;
+window.resetMatchAfterRoomClose = resetMatchAfterRoomClose;
 
 // --- MATCH START ---
 // There is no global match clock: the match runs off live play and question counts.

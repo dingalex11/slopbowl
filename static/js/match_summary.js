@@ -174,8 +174,8 @@
             graphLog.reduce((highest, row) => Math.max(highest, number(row && row.Q_Num, 0)), 0)
         )));
 
-        const nameA = teamName('hud-team-a-name', 'Team A');
-        const nameB = teamName('hud-team-b-name', 'Team B');
+        const nameA = teamName('side-team-a-name', teamName('hud-team-a-name', 'Team A'));
+        const nameB = teamName('side-team-b-name', teamName('hud-team-b-name', 'Team B'));
         const result = scoreA === scoreB
             ? `Tie game, ${scoreA}-${scoreB}`
             : `${scoreA > scoreB ? nameA : nameB} wins, ${Math.max(scoreA, scoreB)}-${Math.min(scoreA, scoreB)}`;
@@ -194,13 +194,17 @@
             score_a: scoreA,
             score_b: scoreB,
             question_count: questionCount,
+            teardown: Boolean(safe.teardown),
         };
         lastLog = graphLog;
 
+        const closeFooter = document.getElementById('btn-close-match-end-footer');
+        if (closeFooter) closeFooter.textContent = safe.teardown ? 'Close Match' : 'Close';
         screen.classList.remove('hidden');
         screen.setAttribute('aria-hidden', 'false');
-        document.getElementById('btn-end-match')?.classList.add('hidden');
-        document.getElementById('btn-match-summary')?.classList.remove('hidden');
+        // A natural packet ending can still be reviewed without destroying the room.
+        // An explicit End Match hides the now-finished control.
+        document.getElementById('btn-end-match')?.classList.toggle('hidden', Boolean(safe.teardown));
         window.setTimeout(() => document.getElementById('btn-close-match-end')?.focus(), 0);
     }
 
@@ -214,12 +218,27 @@
         if (lastPayload) show(lastPayload, lastLog);
     }
 
+    function requestClose() {
+        if (!screen || screen.classList.contains('hidden')) return;
+        if (lastPayload && lastPayload.teardown && typeof window.requestMatchRoomClose === 'function') {
+            window.requestMatchRoomClose();
+            return;
+        }
+        hide();
+    }
+
+    function reset() {
+        lastPayload = null;
+        lastLog = [];
+        hide();
+    }
+
     ['btn-close-match-end', 'btn-close-match-end-footer'].forEach((id) => {
-        document.getElementById(id)?.addEventListener('click', hide);
+        document.getElementById(id)?.addEventListener('click', requestClose);
     });
     document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && screen && !screen.classList.contains('hidden')) hide();
+        if (event.key === 'Escape' && screen && !screen.classList.contains('hidden')) requestClose();
     });
 
-    window.MatchSummary = { show, hide, showLast };
+    window.MatchSummary = { show, hide, showLast, reset };
 })();

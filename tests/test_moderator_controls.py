@@ -24,6 +24,17 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
             if message.get("type") == "UPDATE_STATUS":
                 return message["payload"]["text"]
 
+    async def _next_of_type(self, moderator, message_type, timeout=3.0):
+        """Return the next server message of one type."""
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                self.fail(f"timed out waiting for {message_type}")
+            message = await asyncio.wait_for(moderator.outbound_queue.get(), remaining)
+            if message.get("type") == message_type:
+                return message
+
     async def test_start_tossup_without_bank_reports_missing_packet(self):
         moderator = ScienceBowlModerator(use_audio=False)
         moderator.inbound_queue.put_nowait(Event(type="MANUAL_START_TOSSUP", payload={}))
@@ -76,6 +87,7 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(message["payload"]["score_b"], 28)
             self.assertEqual(message["payload"]["question_count"], 1)
             self.assertEqual(message["payload"]["log"], moderator.match_log)
+            self.assertFalse(message["payload"]["teardown"])
 
             # The loop keeps serving exports and packet loads, but must not announce the
             # same ending once per idle tick.
@@ -123,6 +135,7 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(complete["payload"]["score_a"], 0)
             self.assertEqual(complete["payload"]["score_b"], 0)
             self.assertEqual(complete["payload"]["log"], [])
+            self.assertTrue(complete["payload"]["teardown"])
             self.assertEqual(moderator.current_q_idx, 1)
             self.assertEqual(moderator.state.current_state, GameState.QUESTION_COMPLETE)
             self.assertEqual(moderator.manual_phase["phase"], "IDLE")
@@ -429,6 +442,167 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(task, return_exceptions=True)
 
         self.assertEqual(listening["payload"]["timeout"], 4.0)
+
+    async def test_rewind_last_question_removes_its_rows_and_points(self):
+        """Override is a replay: the completed question and everything it scored disappear."""
+        moderator = ScienceBowlModerator(
+            use_audio=False,
+            manual_reader=True,
+            initial_bank=[
+                {"tossup_text": "First", "tossup_answer": "One"},
+                {"tossup_text": "Second", "tossup_answer": "Two"},
+            ],
+        )
+        moderator.current_q_idx = 1
+        moderator.state.question_number = 2
+        moderator.state.team_a_score = 14
+        moderator.match_log = [
+            {"Q_Num": 1, "Event_Type": "TOSSUP", "Team": "Team A", "Player": "A-1", "Correct": True, "Points": 4, "Score_A": 4, "Score_B": 0},
+            {"Q_Num": 1, "Event_Type": "BONUS", "Team": "Team A", "Player": "Captain", "Correct": True, "Points": 10, "Score_A": 14, "Score_B": 0},
+        ]
+
+        self.assertTrue(await moderator._rewind_last_question())
+
+        self.assertEqual(moderator.match_log, [])
+        self.assertEqual(moderator.state.team_a_score, 0)
+        self.assertEqual(moderator.state.team_b_score, 0)
+        self.assertEqual(moderator.current_q_idx, 0)
+        self.assertEqual(moderator.state.question_number, 1)
+        self.assertEqual(moderator.state.current_state, GameState.IDLE)
+        messages = []
+        while not moderator.outbound_queue.empty():
+            messages.append(await moderator.outbound_queue.get())
+        self.assertIn("SYNC_LOG", [message["type"] for message in messages])
+        self.assertEqual(next(message for message in messages if message["type"] == "SYNC_LOG")["payload"]["log"], [])
+        reopened = next(message for message in messages if message["type"] == "UPDATE_QUESTION")
+        self.assertEqual(reopened["payload"]["text"], "First")
+        self.assertEqual(reopened["payload"]["answer"], "One")
+        self.assertTrue(reopened["payload"]["manual"])
+
+    async def test_override_at_start_tossup_wait_reloads_the_same_question(self):
+        moderator = ScienceBowlModerator(
+            use_audio=False,
+            manual_reader=True,
+            initial_bank=[
+                {"tossup_text": "First", "tossup_answer": "One"},
+                {"tossup_text": "Second", "tossup_answer": "Two"},
+            ],
+        )
+        moderator.current_q_idx = 1
+        moderator.state.question_number = 2
+        moderator.state.team_a_score = 4
+        moderator.match_log = [
+            {"Q_Num": 1, "Event_Type": "TOSSUP", "Team": "Team A", "Player": "A-1", "Correct": True, "Points": 4, "Score_A": 4, "Score_B": 0},
+        ]
+        task = asyncio.create_task(moderator.run_game_loop())
+        seen = []
+        try:
+            state = await self._next_of_type(moderator, "UI_STATE")
+            self.assertEqual(state["payload"]["show"], "TOSSUP")
+            self.assertTrue(state["payload"]["can_override"])
+            moderator.inbound_queue.put_nowait(Event(type="OVERRIDE_LAST_QUESTION", payload={}))
+            while True:
+                message = await self._next_message(moderator)
+                seen.append(message)
+                if message.get("type") == "UI_STATE" and message["payload"].get("show") == "TOSSUP":
+                    state = message
+                    break
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        questions = [m["payload"]["text"] for m in seen if m["type"] == "UPDATE_QUESTION"]
+        self.assertIn("First", questions)
+        self.assertFalse(state["payload"]["can_override"])
+        self.assertEqual(moderator.match_log, [])
+        self.assertEqual(moderator.state.team_a_score, 0)
+        self.assertEqual(moderator.current_q_idx, 0)
+        self.assertIn("SYNC_LOG", [message["type"] for message in seen])
+
+    async def test_override_at_start_bonus_wait_replays_the_tossup(self):
+        moderator = ScienceBowlModerator(
+            use_audio=False,
+            manual_reader=True,
+            initial_bank=[{
+                "tossup_text": "What is the capital of France?",
+                "tossup_answer": "Paris",
+                "bonus_text": "Name the river through Paris.",
+                "bonus_answer": "The Seine",
+            }],
+        )
+        task = asyncio.create_task(moderator.run_game_loop())
+        stage = 0
+        try:
+            while True:
+                message = await self._next_message(moderator)
+                kind = message.get("type")
+                payload = message.get("payload", {})
+                if kind == "UI_STATE" and payload.get("show") == "TOSSUP" and stage == 0:
+                    self.assertFalse(payload.get("can_override"))
+                    stage = 1
+                    moderator.inbound_queue.put_nowait(Event(type="MANUAL_START_TOSSUP", payload={}))
+                elif kind == "MANUAL_PHASE" and payload.get("phase") == "READING" and stage == 1:
+                    stage = 2
+                    moderator.inbound_queue.put_nowait(Event(type="MANUAL_READ_DONE", payload={}))
+                elif kind == "MANUAL_PHASE" and payload.get("phase") == "BUZZ_WINDOW" and stage == 2:
+                    stage = 3
+                    moderator.inbound_queue.put_nowait(Event(type="BUZZ", payload={"team": "Team A", "player": "A-1"}))
+                elif kind == "MANUAL_PHASE" and payload.get("phase") == "ANSWERING" and stage == 3:
+                    stage = 4
+                    moderator.inbound_queue.put_nowait(Event(type="FORCE_JUDGMENT", payload={"correct": True}))
+                elif kind == "UI_STATE" and payload.get("show") == "BONUS" and stage == 4:
+                    self.assertTrue(payload.get("can_override"))
+                    self.assertEqual(moderator.state.team_a_score, 4)
+                    stage = 5
+                    moderator.inbound_queue.put_nowait(Event(type="OVERRIDE_LAST_QUESTION", payload={}))
+                elif kind == "UI_STATE" and payload.get("show") == "TOSSUP" and stage == 5:
+                    self.assertFalse(payload.get("can_override"))
+                    break
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        self.assertEqual(stage, 5)
+        self.assertEqual(moderator.match_log, [])
+        self.assertEqual(moderator.state.team_a_score, 0)
+        self.assertEqual(moderator.current_q_idx, 0)
+        self.assertEqual(moderator.state.question_number, 1)
+
+    async def test_end_after_a_natural_finish_reopens_the_teardown_summary(self):
+        """Closing a packet summary and then choosing End Match must still offer teardown."""
+        moderator = ScienceBowlModerator(
+            use_audio=False,
+            initial_bank=[{"tossup_text": "Question", "tossup_answer": "Answer"}],
+        )
+        moderator.current_q_idx = 1
+        moderator.match_complete_notified = True
+        moderator.match_complete_question_count = 1
+        moderator.state.transition_to(GameState.QUESTION_COMPLETE)
+        moderator.match_log = [{
+            "Q_Num": 1, "Event_Type": "TOSSUP", "Team": "Team A", "Player": "A-1",
+            "Correct": True, "Points": 4, "Score_A": 4, "Score_B": 0,
+        }]
+        moderator.state.team_a_score = 4
+        moderator.inbound_queue.put_nowait(Event(type="END_MATCH", payload={}))
+
+        task = asyncio.create_task(moderator.run_game_loop())
+        try:
+            complete = await self._next_of_type(moderator, "MATCH_COMPLETE")
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        self.assertTrue(complete["payload"]["teardown"])
+        self.assertEqual(complete["payload"]["score_a"], 4)
+        self.assertEqual(complete["payload"]["question_count"], 1)
+
+    async def test_close_match_emits_the_room_teardown_request(self):
+        moderator = ScienceBowlModerator(use_audio=False)
+
+        await moderator.process_admin_event(Event(type="CLOSE_MATCH", payload={}))
+
+        message = await moderator.outbound_queue.get()
+        self.assertEqual(message["type"], "ROOM_CLOSE_REQUESTED")
 
 
 if __name__ == "__main__":

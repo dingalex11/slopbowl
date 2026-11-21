@@ -63,7 +63,7 @@ ADMIN_EVENTS = (
     "EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE",
     "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE",
     "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT",
-    "SET_READING_MODE", "END_MATCH",
+    "SET_READING_MODE", "END_MATCH", "CLOSE_MATCH",
 ) + MANUAL_START_EVENTS
 
 
@@ -113,6 +113,8 @@ class ScienceBowlModerator:
         # idle so the owner can export the log or load the next packet.
         self.match_complete_notified = False
         self.match_complete_question_count = None
+        # Explicit End Match opens the teardown path; packet exhaustion does not.
+        self.match_ended_by_user = False
 
         self.custom_teams = {}
         self.custom_roster = {}
@@ -133,7 +135,7 @@ class ScienceBowlModerator:
         # Broadcast to player stations while the moderator's station is the one speaking.
         self.moderator_reading = {"active": False, "kind": None}
         self.answer_audio_open = False
-        self.ui_state = {"show": "NONE", "overrides": False}
+        self.ui_state = {"show": "NONE", "overrides": False, "can_override": False}
         # The manual-reader HUD is driven by phase events and explicit buzzpoint marks.
         # Keeping the last phase lets a reconnecting owner station rebuild its clocks.
         self.manual_phase = {"phase": "IDLE", "seconds": None, "started_at": None}
@@ -170,7 +172,8 @@ class ScienceBowlModerator:
         Keeping the last state lets a moderator who reconnects (team change, dropped
         socket) be re-armed instead of facing a HUD with no usable start control.
         """
-        self.ui_state = {"show": show, "overrides": bool(overrides)}
+        can_override = show in ("TOSSUP", "BONUS") and self._last_logged_question_number() is not None
+        self.ui_state = {"show": show, "overrides": bool(overrides), "can_override": can_override}
         await self.outbound_queue.put({"type": "UI_STATE", "payload": dict(self.ui_state)})
 
     def _idle_start_message(self) -> str:
@@ -178,6 +181,35 @@ class ScienceBowlModerator:
         if not self.question_bank:
             return "⚠️ No question packet loaded — upload one in Pre Match Settings."
         return "🏁 Every question in this packet is complete — load a new packet to play on."
+
+    def _last_logged_question_number(self):
+        """The highest question number that has an adjudicated log row, if any."""
+        highest = None
+        for row in self.match_log:
+            try:
+                q_num = int(row.get("Q_Num"))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if q_num > 0 and (highest is None or q_num > highest):
+                highest = q_num
+        return highest
+
+    def _recalculate_scores_from_log(self) -> tuple[int, int]:
+        """Rebuild both scores from the surviving event rows."""
+        score_a = 0
+        score_b = 0
+        for row in self.match_log:
+            try:
+                points = int(row.get("Points", 0) or 0)
+            except (TypeError, ValueError):
+                points = 0
+            if row.get("Team") == "Team A":
+                score_a += points
+            elif row.get("Team") == "Team B":
+                score_b += points
+        self.state.team_a_score = score_a
+        self.state.team_b_score = score_b
+        return score_a, score_b
 
     def _match_complete_data(self) -> dict:
         """The final score, packet size and adjudicated log for the summary screen."""
@@ -190,6 +222,7 @@ class ScienceBowlModerator:
                 else len(self.question_bank)
             ),
             "log": [dict(row) for row in self.match_log],
+            "teardown": bool(self.match_ended_by_user),
         }
 
     async def _notify_match_complete(self):
@@ -208,6 +241,10 @@ class ScienceBowlModerator:
 
     def _prepare_forced_end(self):
         """Freeze the current match without awarding or adjudicating the live question."""
+        self.match_ended_by_user = True
+        # A natural packet ending may already have shown its summary; ending it now
+        # must publish the explicit teardown summary instead of being suppressed.
+        self.match_complete_notified = False
         logged_count = 0
         for row in self.match_log:
             try:
@@ -233,6 +270,69 @@ class ScienceBowlModerator:
         self.answer_audio_open = False
         self.answering_user_id = None
         self.moderator_reading = {"active": False, "kind": None}
+
+    async def _rewind_last_question(self) -> bool:
+        """Remove the last completed question and reload it for a fresh attempt."""
+        q_num = self._last_logged_question_number()
+        if q_num is None:
+            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ There is no completed question to override."}})
+            return False
+
+        self.match_log = [
+            row for row in self.match_log
+            if str(row.get("Q_Num", "")) != str(q_num)
+        ]
+        score_a, score_b = self._recalculate_scores_from_log()
+
+        self.current_q_idx = max(0, q_num - 1)
+        self.state.question_number = q_num
+        self.state.active_team = None
+        self.state.active_player = None
+        self.state.interrupted_at_word = -1
+        self.state.is_interrupted = False
+        self.state.transition_to(GameState.IDLE)
+        self.match_complete_notified = False
+        self.match_complete_question_count = None
+        self.match_ended_by_user = False
+
+        self.manual_phase = {"phase": "IDLE", "seconds": None, "started_at": None}
+        self.manual_read_complete = False
+        self.manual_read_started = 0.0
+        self.manual_buzzpoint = ""
+        self.manual_after_read = False
+        self.manual_question = {}
+        self.current_reading_id = None
+        self.reading_expected_users.clear()
+        self.reading_completions.clear()
+        self.online_buzz_open = False
+        self.online_buzz_team = None
+        self.online_buzz_captain_only = False
+        self.answer_audio_open = False
+        self.answering_user_id = None
+        self.moderator_reading = {"active": False, "kind": None}
+        self.ui_state = {"show": "NONE", "overrides": False, "can_override": False}
+
+        await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": score_a, "score_b": score_b}})
+        await self.outbound_queue.put({"type": "SYNC_LOG", "payload": {"log": [dict(row) for row in self.match_log]}})
+        # Publish the reopened question now. The loop will preload it again after the
+        # override, but this event is what guarantees the HUD stops showing the
+        # question that was staged after the removed one.
+        if self.question_bank and 0 <= self.current_q_idx < len(self.question_bank):
+            replay_q = self.question_bank[self.current_q_idx]
+            replay_text = str(replay_q.get("tossup_text", "")).strip()
+            replay_payload = {
+                "text": replay_text if replay_text else "[WARNING: PYTHON MEMORY HAS NO TEXT FOR THIS QUESTION]",
+                "raw_text": replay_text,
+                "answer": str(replay_q.get("tossup_answer", "")).strip(),
+                "category": str(replay_q.get("category", "GENERAL")),
+                "options": replay_q.get("tossup_options", []),
+                "visual": replay_q.get("tossup_visual", False),
+                "manual": self.manual_reader,
+                "phase": "TOSSUP",
+            }
+            await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": replay_payload})
+        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"↩️ Q{q_num} reopened — its score and log entries were removed."}})
+        return True
 
     @staticmethod
     def _safe_csv_value(value):
@@ -323,6 +423,7 @@ class ScienceBowlModerator:
             self.match_log = []
             self.match_complete_notified = False
             self.match_complete_question_count = None
+            self.match_ended_by_user = False
             
             await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": 0, "score_b": 0}})
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"✅ Loaded {len(self.question_bank)} new questions."}})
@@ -355,6 +456,11 @@ class ScienceBowlModerator:
         elif evt_type == "EXPORT_CSV":
             csv_data = self.generate_csv()
             await self.outbound_queue.put({"type": "DOWNLOAD_CSV", "payload": {"csv_data": csv_data}})
+
+        elif evt_type == "CLOSE_MATCH":
+            # The room manager owns the socket registry and Firestore document, so it
+            # performs the actual teardown when it sees this outbound request.
+            await self.outbound_queue.put({"type": "ROOM_CLOSE_REQUESTED", "payload": {}})
             
         elif evt_type == "UPDATE_STATUS":
             if isinstance(event, dict):
@@ -1169,18 +1275,25 @@ class ScienceBowlModerator:
                     safe_preload_text = str(q_data.get('tossup_text', '')).strip()
                     await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": {
                         "text": safe_preload_text if safe_preload_text else "[WARNING: PYTHON MEMORY HAS NO TEXT FOR THIS QUESTION]", 
+                        "raw_text": safe_preload_text,
+                        "answer": str(q_data.get('tossup_answer', '')).strip(),
                         "category": str(q_data.get('category', 'GENERAL')),
                         "options": q_data.get('tossup_options', []),
-                        "visual": q_data.get('tossup_visual', False)
+                        "visual": q_data.get('tossup_visual', False),
+                        "manual": self.manual_reader,
+                        "phase": "TOSSUP"
                     }})
                 
                     # Arm the moderator's start control only once a question is actually loaded.
                     await self._set_ui_state("TOSSUP")
                 
-                    action = await self.wait_for_moderator_action(["MANUAL_START_TOSSUP"])
+                    action = await self.wait_for_moderator_action(["MANUAL_START_TOSSUP", "OVERRIDE_LAST_QUESTION"])
                 
 
                     action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
+                    if action_type == "OVERRIDE_LAST_QUESTION":
+                        await self._rewind_last_question()
+                        continue
                     if action_type == "FORCE_RESET_STATE": continue 
                     elif action_type == "CHALLENGE":
                         await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Question Dead", 0.0)
@@ -1321,13 +1434,20 @@ class ScienceBowlModerator:
                         safe_bonus_preload = str(q_data.get('bonus_text', '')).strip()
                         await self.outbound_queue.put({"type": "UPDATE_QUESTION", "payload": {
                             "text": safe_bonus_preload if safe_bonus_preload else "[WARNING: PYTHON MEMORY HAS NO BONUS TEXT]",
+                            "raw_text": safe_bonus_preload,
+                            "answer": str(q_data.get('bonus_answer', '')).strip(),
                             "category": str(q_data.get('category', 'GENERAL')),
                             "options": q_data.get('bonus_options', []),
-                            "visual": q_data.get('bonus_visual', False)
+                            "visual": q_data.get('bonus_visual', False),
+                            "manual": self.manual_reader,
+                            "phase": "BONUS"
                         }})
                         await self._set_ui_state("BONUS")
-                        action = await self.wait_for_moderator_action(["MANUAL_START_BONUS"])
+                        action = await self.wait_for_moderator_action(["MANUAL_START_BONUS", "OVERRIDE_LAST_QUESTION"])
                         action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
+                        if action_type == "OVERRIDE_LAST_QUESTION":
+                            await self._rewind_last_question()
+                            continue
                         if action_type == "FORCE_RESET_STATE":
                             continue
                         if action_type == "CHALLENGE":
@@ -1374,8 +1494,11 @@ class ScienceBowlModerator:
                         # TELL UI TO ONLY SHOW BONUS BUTTON
                         await self._set_ui_state("BONUS")
                     
-                        action = await self.wait_for_moderator_action(["MANUAL_START_BONUS"])
+                        action = await self.wait_for_moderator_action(["MANUAL_START_BONUS", "OVERRIDE_LAST_QUESTION"])
                         action_type = action.type.name if hasattr(action.type, 'name') else str(action.type)
+                        if action_type == "OVERRIDE_LAST_QUESTION":
+                            await self._rewind_last_question()
+                            continue
                         if action_type == "FORCE_RESET_STATE": continue 
                         elif action_type == "CHALLENGE":
                             await self.log_event("CHALLENGE", "None", "Moderator", False, 0, "Bonus Dead", 0.0)

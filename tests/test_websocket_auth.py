@@ -18,6 +18,7 @@ class FakeModerator:
     def __init__(self):
         from types import SimpleNamespace
         self.inbound_queue = asyncio.Queue()
+        self.outbound_queue = asyncio.Queue()
         self.online_buzz_open = False
         self.online_buzz_team = None
         self.online_buzz_captain_only = False
@@ -48,6 +49,8 @@ class FakeSocket:
 
     async def close(self, code=None, reason=None):
         self.closed = True
+        self.close_code = code
+        self.close_reason = reason
 
 
 class WebSocketAuthorizationTests(unittest.TestCase):
@@ -87,7 +90,7 @@ class WebSocketAuthorizationTests(unittest.TestCase):
         # rooms are separate entry points, and camera vision stays retired.
         self.assertIn('id="manual-reader-panel"', page.text)
         self.assertIn('id="manual-team-a-buzzers"', page.text)
-        self.assertIn('id="buzzpoint-current"', page.text)
+        self.assertIn('id="btn-override-last-question"', page.text)
         self.assertIn('id="online-player-name"', page.text)
         self.assertIn('id="online-roster"', page.text)
         self.assertNotIn('id="camera-select"', page.text)
@@ -192,9 +195,40 @@ class WebSocketAuthorizationTests(unittest.TestCase):
             self.assertNotIn("round-one", manager.rooms)
             self.assertNotIn("round-one", manager.last_activity)
             self.assertEqual(socket.closed, True)
+            self.assertEqual(socket.close_code, 4410)
             delete.assert_called_once_with("round-one")
 
         asyncio.run(verify_expiry())
+
+    def test_match_end_closes_the_room_with_a_no_reconnect_code(self):
+        """An owner closing a finished match must tear the room down, not leave its code held."""
+        async def verify_teardown():
+            manager = ui_service.RoomManager()
+            socket = FakeSocket()
+            connection = ui_service.RoomConnection(socket, "owner", "owner")
+            moderator = FakeModerator()
+            manager.active_connections["finished"] = [connection]
+            manager.rooms["finished"] = moderator
+            manager.room_modes["finished"] = "in_person"
+            manager.room_tasks["finished"] = []
+            manager.last_activity["finished"] = time.monotonic()
+            moderator.outbound_queue.put_nowait({"type": "ROOM_CLOSE_REQUESTED", "payload": {}})
+
+            with patch.object(ui_service, "delete_room") as delete:
+                await manager.listen_for_outbound("finished", moderator)
+                for _ in range(50):
+                    if "finished" not in manager.rooms:
+                        break
+                    await asyncio.sleep(0.01)
+
+            self.assertEqual(socket.messages[0]["type"], "ROOM_CLOSED")
+            self.assertEqual(socket.close_code, 4411)
+            self.assertIn("match ended", socket.close_reason.lower())
+            self.assertNotIn("finished", manager.active_connections)
+            self.assertNotIn("finished", manager.last_activity)
+            delete.assert_called_once_with("finished")
+
+        asyncio.run(verify_teardown())
 
     def test_idle_room_is_reaped_after_no_player_action(self):
         async def verify_reaping():

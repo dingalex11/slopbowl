@@ -358,10 +358,11 @@ class ManualEntryPointTests(unittest.TestCase):
     def test_the_manual_hud_has_its_reader_and_buzzpoint_controls(self):
         for element in ('id="manual-reader-panel"', 'id="reader-question-text"',
                         'id="reader-answer-key"', 'id="manual-team-a-buzzers"',
-                        'id="manual-team-b-buzzers"', 'id="btn-full-read"',
+                        'id="manual-team-b-buzzers"', 'id="btn-override-last-question"',
                         'id="btn-manual-correct"', 'id="btn-manual-incorrect"',
                         'id="btn-manual-question-read"', 'id="btn-manual-bonus-read"'):
             self.assertIn(element, INDEX_SOURCE)
+        self.assertNotIn('id="btn-full-read"', INDEX_SOURCE)
 
 
 if __name__ == "__main__":

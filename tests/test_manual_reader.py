@@ -31,6 +31,7 @@ from main import ScienceBowlModerator
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_SOURCE = (ROOT / "index.html").read_text(encoding="utf-8")
 MANUAL_SOURCE = (ROOT / "static/js/manual_reader.js").read_text(encoding="utf-8")
+STYLE_SOURCE = (ROOT / "static/css/style.css").read_text(encoding="utf-8")
 SOCKET_SOURCE = (ROOT / "static/js/websocket.js").read_text(encoding="utf-8")
 UI_SOURCE = (ROOT / "static/js/ui.js").read_text(encoding="utf-8")
 
@@ -62,6 +63,10 @@ class ManualReaderValidationTests(unittest.TestCase):
 
         self.assertIn("MANUAL_READ_DONE", EVENT_TYPES)
         self.assertIn("MANUAL_READ_DONE", ui_service.OWNER_ONLY_EVENTS)
+
+    def test_override_and_close_are_owner_only(self):
+        self.assertIn("OVERRIDE_LAST_QUESTION", ui_service.OWNER_ONLY_EVENTS)
+        self.assertIn("CLOSE_MATCH", ui_service.OWNER_ONLY_EVENTS)
 
     def test_buzzpoint_accepts_the_after_read_flag(self):
         self.assertEqual(
@@ -281,21 +286,75 @@ class ManualReaderPageTests(unittest.TestCase):
             'id="reader-answer-key"',
             'id="manual-team-a-buzzers"',
             'id="manual-team-b-buzzers"',
-            'id="buzzpoint-current"',
-            'id="btn-full-read"',
+            'id="btn-end-buzzpoint"',
             'id="btn-manual-correct"',
             'id="btn-manual-incorrect"',
             'id="btn-manual-question-read"',
             'id="btn-manual-bonus-read"',
+            'id="btn-start-tossup"',
+            'id="btn-start-bonus"',
+            'id="btn-override-last-question"',
+            'id="btn-end-match"',
         ):
             self.assertIn(element, INDEX_SOURCE)
+        self.assertNotIn('id="manual-buzzpoint-panel"', INDEX_SOURCE)
+        self.assertNotIn('id="btn-full-read"', INDEX_SOURCE)
+        self.assertIn("ManualReader.markEndBuzzpoint()", INDEX_SOURCE)
+        self.assertIn("markEndBuzzpoint: markFullRead", MANUAL_SOURCE)
+        self.assertNotIn('id="btn-pause-match"', INDEX_SOURCE)
+        self.assertNotIn('id="btn-export-csv"', INDEX_SOURCE)
 
     def test_packet_words_are_text_not_markup(self):
         self.assertIn("document.createElement('button')", MANUAL_SOURCE)
         self.assertIn("token.textContent = part;", MANUAL_SOURCE)
         self.assertNotIn("innerHTML", MANUAL_SOURCE)
-        self.assertIn("sendEvent('LOG_BUZZPOINT', { buzzpoint: word, after_read: false });", MANUAL_SOURCE)
+        self.assertIn("sendEvent('LOG_BUZZPOINT', { buzzpoint: value, after_read: false });", MANUAL_SOURCE)
         self.assertIn("sendEvent('LOG_BUZZPOINT', { buzzpoint: 'Full Read', after_read: true });", MANUAL_SOURCE)
+
+    def test_answer_choices_are_word_level_clickable_text(self):
+        """A buzz inside a choice marks the exact word, not the whole choice."""
+        self.assertIn("appendWordTokens(line, option, 'reader-option-word');", MANUAL_SOURCE)
+        self.assertIn("line.className = 'reader-option-line';", MANUAL_SOURCE)
+        self.assertNotIn("reader-option-letter", MANUAL_SOURCE)
+        self.assertIn("token.dataset.word = part;", MANUAL_SOURCE)
+        self.assertIn("sendEvent('LOG_BUZZPOINT', { buzzpoint: value, after_read: false });", MANUAL_SOURCE)
+        self.assertNotIn("reader-option bg-panel", MANUAL_SOURCE)
+        self.assertNotIn("markOption", MANUAL_SOURCE)
+        self.assertNotIn("selectedOption", MANUAL_SOURCE)
+        self.assertIn(".reader-option-line", STYLE_SOURCE)
+        self.assertIn(".reader-option-word", STYLE_SOURCE)
+        self.assertNotIn(".reader-option.is-selected", STYLE_SOURCE)
+
+    def test_scoresheet_rebuilds_from_the_authoritative_log(self):
+        self.assertIn("function renderScoresheetFromLog(log)", SOCKET_SOURCE)
+        self.assertIn("currentMatchLog = Array.isArray(payload.log) ? payload.log : [];", SOCKET_SOURCE)
+        self.assertIn("renderScoresheetFromLog(currentMatchLog);", SOCKET_SOURCE)
+        self.assertIn("resetMatchHud();", SOCKET_SOURCE)
+
+    def test_end_match_and_override_use_the_owner_controls(self):
+        self.assertIn("onclick=\"requestEndMatch()\"", INDEX_SOURCE)
+        self.assertIn("onclick=\"requestOverrideLastQuestion()\"", INDEX_SOURCE)
+        self.assertIn("function requestEndMatch()", UI_SOURCE)
+        self.assertIn("function requestOverrideLastQuestion()", UI_SOURCE)
+        self.assertIn("sendEvent('OVERRIDE_LAST_QUESTION')", UI_SOURCE)
+        self.assertIn("sendEvent('CLOSE_MATCH');", UI_SOURCE)
+
+    def test_the_final_screen_confirms_before_deleting_the_room(self):
+        self.assertIn('id="match-close-confirm"', INDEX_SOURCE)
+        self.assertIn('id="btn-confirm-close-match"', INDEX_SOURCE)
+        self.assertIn("function requestMatchRoomClose()", UI_SOURCE)
+        self.assertIn("function resetMatchAfterRoomClose()", UI_SOURCE)
+        self.assertIn("Close this room and start over?", UI_SOURCE)
+        self.assertIn("currentMatchTeardown", SOCKET_SOURCE)
+        self.assertIn("4411: 'MATCH ENDED - ROOM CLOSED'", SOCKET_SOURCE)
+
+    def test_repeated_word_marks_only_the_clicked_occurrence(self):
+        """Selecting the second "the" must not light up every "the" in the question."""
+        self.assertIn("let selectedToken = null;", MANUAL_SOURCE)
+        self.assertIn("selectedToken = element;", MANUAL_SOURCE)
+        self.assertIn("token.classList.toggle('is-selected', token === selectedToken);", MANUAL_SOURCE)
+        self.assertNotIn("token === element || token.dataset.word === word", MANUAL_SOURCE)
+        self.assertNotIn("token.dataset.word === selectedBuzzpoint", MANUAL_SOURCE)
 
     def test_the_socket_dispatches_manual_phase_and_buzzpoint(self):
         self.assertIn("data.type === 'MANUAL_PHASE'", SOCKET_SOURCE)
