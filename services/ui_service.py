@@ -38,8 +38,8 @@ async def _revalidate_client_code(request: Request, call_next):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
-OWNER_ONLY_EVENTS = {"SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY", "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT", "END_MATCH", "OVERRIDE_LAST_QUESTION", "CLOSE_MATCH", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP", "PAUSE_MATCH", "MATCH_BEGIN", "READING_DONE", "READING_FAILED", "ANSWER_AUDIO", "LOG_BUZZPOINT", "MANUAL_READ_DONE", "AUTH_INIT", "SET_READING_MODE"}
-OWNER_ONLY_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "DOWNLOAD_CSV", "MATCH_COMPLETE", "DEBUG_FRAME"}
+OWNER_ONLY_EVENTS = {"SAVE_ROSTER", "LOAD_BANK", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "ADJUST_SCORE", "EXPORT_CSV", "EDIT_LOG_ENTRY", "CHALLENGE", "FORCE_RESET_STATE", "FORCE_JUDGMENT", "FORCE_ACCEPT", "END_MATCH", "OVERRIDE_LAST_QUESTION", "CLOSE_MATCH", "MANUAL_START_TOSSUP", "MANUAL_START_BONUS", "MANUAL_REREAD_TOSSUP", "PAUSE_MATCH", "MATCH_BEGIN", "READING_DONE", "READING_FAILED", "ANSWER_AUDIO", "LOG_BUZZPOINT", "MANUAL_READ_DONE", "AUTH_INIT", "SET_READING_MODE", "DEAD_TOSSUP", "SET_CAMERA_BUZZ"}
+OWNER_ONLY_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "DOWNLOAD_CSV", "MATCH_COMPLETE", "DEBUG_FRAME", "CAMERA_BUZZ_STATE"}
 ONLINE_PUBLIC_OUTPUTS = {"START_READING", "START_LISTENING", "UPDATE_QUESTION", "UI_STATE", "NEW_LOG_ENTRY", "SYNC_LOG", "UPDATE_STATUS", "UPDATE_SCORE", "BUZZ", "ROOM_ROSTER", "CONNECTED", "ERROR", "OPEN_BUZZ", "CLOSE_BUZZ", "MODERATOR_READING"}
 ONLINE_PLAYER_EVENTS = {"BUZZ", "ANSWER_AUDIO", "READING_DONE", "READING_FAILED", "PING"}
 
@@ -139,7 +139,7 @@ class RoomManager:
                 moderator.online_participants = {item.user_id: item for item in self.active_connections[room_id] if item.role in {"owner", "player"} and item.team}
 
         self._ensure_reaper()
-        await websocket.send_json({"type": "CONNECTED", "payload": {"role": role, "seat": seat, "mode": mode, "team": team, "name": player_name, "captain": captain, "reading_mode": getattr(moderator, "reading_mode", "stations"), "moderator_reading": dict(getattr(moderator, "moderator_reading", {"active": False, "kind": None})), "manual_reader": bool(getattr(moderator, "manual_reader", False)), "manual_phase": dict(getattr(moderator, "manual_phase", {"phase": "IDLE", "seconds": None, "started_at": None}))}})
+        await websocket.send_json({"type": "CONNECTED", "payload": {"role": role, "seat": seat, "mode": mode, "team": team, "name": player_name, "captain": captain, "reading_mode": getattr(moderator, "reading_mode", "stations"), "moderator_reading": dict(getattr(moderator, "moderator_reading", {"active": False, "kind": None})), "manual_reader": bool(getattr(moderator, "manual_reader", False)), "manual_phase": dict(getattr(moderator, "manual_phase", {"phase": "IDLE", "seconds": None, "started_at": None})), "camera_buzz": bool(getattr(moderator, "camera_buzz_enabled", False)), "camera_zones": len(getattr(getattr(moderator, "vision", None), "rois", {}) or {})}})
         if role == "owner":
             # Re-arm the moderator's last known control so a reconnect (team change,
             # dropped socket) never leaves the HUD without a usable start button.

@@ -82,18 +82,22 @@ class WebSocketAuthorizationTests(unittest.TestCase):
         client = TestClient(ui_service.app)
         page = client.get("/")
         client_script = client.get("/static/js/websocket.js")
+        camera_script = client.get("/static/js/camera.js")
         self.assertEqual(page.status_code, 200)
         self.assertIn("Science Bowl", page.text)
         self.assertEqual(client_script.status_code, 200)
+        self.assertEqual(camera_script.status_code, 200)
         self.assertIn("CONNECTING TO MATCH", client_script.text)
         # Both match surfaces ship: the in-person manual reader and the AI-read online
-        # rooms are separate entry points, and camera vision stays retired.
+        # rooms are separate entry points. Camera buzz is an optional manual feature.
         self.assertIn('id="manual-reader-panel"', page.text)
         self.assertIn('id="manual-team-a-buzzers"', page.text)
         self.assertIn('id="btn-override-last-question"', page.text)
         self.assertIn('id="online-player-name"', page.text)
         self.assertIn('id="online-roster"', page.text)
-        self.assertNotIn('id="camera-select"', page.text)
+        self.assertIn('id="camera-select"', page.text)
+        self.assertIn("window.CameraBuzz = {", camera_script.text)
+        self.assertNotIn("window.addEventListener('load'", camera_script.text)
 
     def test_match_controls_and_camera_frames_are_only_sent_to_moderator_station(self):
         async def verify_broadcasts():

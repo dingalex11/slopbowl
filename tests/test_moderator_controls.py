@@ -543,11 +543,13 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
                     moderator.inbound_queue.put_nowait(Event(type="MANUAL_START_TOSSUP", payload={}))
                 elif kind == "MANUAL_PHASE" and payload.get("phase") == "READING" and stage == 1:
                     stage = 2
-                    moderator.inbound_queue.put_nowait(Event(type="MANUAL_READ_DONE", payload={}))
-                elif kind == "MANUAL_PHASE" and payload.get("phase") == "BUZZ_WINDOW" and stage == 2:
-                    stage = 3
                     moderator.inbound_queue.put_nowait(Event(type="BUZZ", payload={"team": "Team A", "player": "A-1"}))
-                elif kind == "MANUAL_PHASE" and payload.get("phase") == "ANSWERING" and stage == 3:
+                elif kind == "MANUAL_PHASE" and payload.get("phase") == "ANSWERING" and stage == 2:
+                    stage = 3
+                    moderator.inbound_queue.put_nowait(
+                        Event(type="LOG_BUZZPOINT", payload={"buzzpoint": "Full Read", "after_read": True})
+                    )
+                elif kind == "BUZZPOINT_SET" and stage == 3:
                     stage = 4
                     moderator.inbound_queue.put_nowait(Event(type="FORCE_JUDGMENT", payload={"correct": True}))
                 elif kind == "UI_STATE" and payload.get("show") == "BONUS" and stage == 4:

@@ -2,17 +2,17 @@
 
 A human reads the packet. The moderator clicks the named player who buzzed,
 marks the word where the buzz happened, then judges the answer. The server no
-longer waits on speech, a camera, a microphone or an AI judge in this mode.
+longer waits on speech, a microphone or an AI judge in this mode, and camera
+buzz stays off until the moderator explicitly enables it.
 
 What these tests protect:
 
-* manual mode creates no vision, speech or judge path
+* manual mode creates no vision, speech or judge path until camera buzz is opted in
 * a word inside the question is a NEG (−4); Full read / after end is 0
-* a buzz after the read is automatically classified as Full read
+* Dead ends a no-buzz toss-up; End marks a live buzz as Full read
 * the named seat, not just the legacy Manual-A/B buttons, identifies the team
-* the 5-second window and the 20-second bonus confer clock are emitted, and a
-  missed buzz window ends the tossup
-* the active page and script order carry the manual HUD, not the camera setup
+* the rebound-only 5-second window and the 20-second bonus confer clock are emitted
+* the active page and script order carry the manual HUD and the optional camera panel
 """
 
 import asyncio
@@ -34,6 +34,7 @@ MANUAL_SOURCE = (ROOT / "static/js/manual_reader.js").read_text(encoding="utf-8"
 STYLE_SOURCE = (ROOT / "static/css/style.css").read_text(encoding="utf-8")
 SOCKET_SOURCE = (ROOT / "static/js/websocket.js").read_text(encoding="utf-8")
 UI_SOURCE = (ROOT / "static/js/ui.js").read_text(encoding="utf-8")
+CAMERA_SOURCE = (ROOT / "static/js/camera.js").read_text(encoding="utf-8")
 
 TOSSUP = {
     "tossup_text": "What is the capital of France?",
@@ -64,6 +65,21 @@ class ManualReaderValidationTests(unittest.TestCase):
         self.assertIn("MANUAL_READ_DONE", EVENT_TYPES)
         self.assertIn("MANUAL_READ_DONE", ui_service.OWNER_ONLY_EVENTS)
 
+    def test_dead_and_camera_controls_are_owner_only_client_events(self):
+        from core.validation import EVENT_TYPES
+
+        for event_type in ("DEAD_TOSSUP", "SET_CAMERA_BUZZ"):
+            self.assertIn(event_type, EVENT_TYPES)
+            self.assertIn(event_type, ui_service.OWNER_ONLY_EVENTS)
+        self.assertIn("CAMERA_BUZZ_STATE", ui_service.OWNER_ONLY_OUTPUTS)
+        self.assertEqual(validate_client_event("DEAD_TOSSUP", {}), {})
+        with self.assertRaises(ValueError):
+            validate_client_event("DEAD_TOSSUP", {"force": True})
+        self.assertEqual(validate_client_event("SET_CAMERA_BUZZ", {"enabled": True}), {"enabled": True})
+        for bad in ({"enabled": "yes"}, {}, {"enabled": True, "zones": 1}):
+            with self.assertRaises(ValueError):
+                validate_client_event("SET_CAMERA_BUZZ", bad)
+
     def test_override_and_close_are_owner_only(self):
         self.assertIn("OVERRIDE_LAST_QUESTION", ui_service.OWNER_ONLY_EVENTS)
         self.assertIn("CLOSE_MATCH", ui_service.OWNER_ONLY_EVENTS)
@@ -78,11 +94,17 @@ class ManualReaderValidationTests(unittest.TestCase):
 
 
 class ManualReaderServerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_manual_mode_has_no_vision_speech_or_judge(self):
+    async def test_manual_mode_keeps_camera_speech_and_judge_off_until_opt_in(self):
         moderator = ScienceBowlModerator(use_audio=True, use_camera=True, manual_reader=True)
         self.assertTrue(moderator.manual_reader)
         self.assertIsNone(moderator.vision)
+        self.assertFalse(moderator.camera_buzz_enabled)
         self.assertIsNone(moderator.judge)
+
+        await moderator._set_camera_buzz(True)
+        state = await next_message(moderator, "CAMERA_BUZZ_STATE")
+        self.assertTrue(state["payload"]["enabled"])
+        self.assertIsNotNone(moderator.vision)
 
     async def test_word_inside_the_question_is_a_neg(self):
         moderator = ScienceBowlModerator(use_audio=False, manual_reader=True)
@@ -119,24 +141,25 @@ class ManualReaderServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(moderator.state.is_interrupted)
         self.assertEqual(moderator.state.apply_tossup_points(False)["penalty_points"], -4)
 
-    async def test_full_read_after_the_question_is_zero_not_a_neg(self):
+    async def test_end_after_a_buzz_is_full_read_zero_not_a_neg(self):
         moderator = ScienceBowlModerator(use_audio=False, manual_reader=True)
         task = asyncio.create_task(moderator._handle_manual_tossup_attempt(TOSSUP))
 
         await next_message(moderator, "UPDATE_QUESTION")
         await next_message(moderator, "MANUAL_PHASE")
 
-        moderator.inbound_queue.put_nowait(Event(type="MANUAL_READ_DONE", payload={}, role="owner"))
-        window = await next_message(moderator, "MANUAL_PHASE")
-        self.assertEqual(window["payload"]["phase"], "BUZZ_WINDOW")
-        self.assertEqual(window["payload"]["seconds"], 5.0)
-
         moderator.inbound_queue.put_nowait(Event(type="BUZZ", payload={"team": "Team B", "player": "B-1"}, role="owner"))
         buzz = await next_message(moderator, "BUZZ")
-        self.assertTrue(buzz["payload"]["after_read"])
-        answering = await next_message(moderator, "MANUAL_PHASE")
-        self.assertEqual(answering["payload"]["buzzpoint"], "Full Read")
-        self.assertTrue(answering["payload"]["after_read"])
+        self.assertEqual(buzz["payload"]["source"], "manual")
+        self.assertFalse(buzz["payload"]["after_read"])
+        await next_message(moderator, "MANUAL_PHASE")
+
+        moderator.inbound_queue.put_nowait(
+            Event(type="LOG_BUZZPOINT", payload={"buzzpoint": "Full Read", "after_read": True}, role="owner")
+        )
+        marked = await next_message(moderator, "BUZZPOINT_SET")
+        self.assertEqual(marked["payload"]["buzzpoint"], "Full Read")
+        self.assertEqual(marked["payload"]["points_if_wrong"], 0)
 
         moderator.inbound_queue.put_nowait(Event(type="FORCE_JUDGMENT", payload={"correct": False}, role="owner"))
         _payload, correct, interrupted, _action, _buzz_time, buzz_text = await asyncio.wait_for(task, 2)
@@ -146,6 +169,80 @@ class ManualReaderServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(buzz_text, "Full Read")
         self.assertFalse(moderator.state.is_interrupted)
         self.assertEqual(moderator.state.apply_tossup_points(False)["penalty_points"], 0)
+
+    async def test_a_normal_tossup_never_enters_a_buzz_window(self):
+        moderator = ScienceBowlModerator(use_audio=False, manual_reader=True)
+        task = asyncio.create_task(moderator._handle_manual_tossup_attempt(TOSSUP))
+
+        await next_message(moderator, "UPDATE_QUESTION")
+        reading = await next_message(moderator, "MANUAL_PHASE")
+        self.assertEqual(reading["payload"]["phase"], "READING")
+        await asyncio.sleep(0.4)
+
+        seen = []
+        while not moderator.outbound_queue.empty():
+            seen.append(moderator.outbound_queue.get_nowait())
+        phases = [m["payload"]["phase"] for m in seen if m.get("type") == "MANUAL_PHASE"]
+        self.assertNotIn("BUZZ_WINDOW", phases)
+
+        moderator.inbound_queue.put_nowait(Event(type="DEAD_TOSSUP", payload={}, role="owner"))
+        await asyncio.wait_for(task, 2)
+
+    async def test_dead_ends_a_no_buzz_tossup(self):
+        moderator = ScienceBowlModerator(use_audio=False, manual_reader=True)
+        task = asyncio.create_task(moderator._handle_manual_tossup_attempt(TOSSUP))
+
+        await next_message(moderator, "UPDATE_QUESTION")
+        reading = await next_message(moderator, "MANUAL_PHASE")
+        self.assertEqual(reading["payload"]["phase"], "READING")
+
+        moderator.inbound_queue.put_nowait(Event(type="DEAD_TOSSUP", payload={}, role="owner"))
+        result = await asyncio.wait_for(task, 2)
+        self.assertEqual(result, (None, False, False, False, 0.0, ""))
+        idle = await next_message(moderator, "MANUAL_PHASE")
+        self.assertEqual(idle["payload"]["phase"], "IDLE")
+
+    async def test_camera_detection_arms_only_in_live_tossup_windows(self):
+        moderator = ScienceBowlModerator(use_audio=False, manual_reader=True)
+        await moderator._set_camera_buzz(True)
+        await next_message(moderator, "CAMERA_BUZZ_STATE")
+        vision = moderator.vision
+        self.assertIsNotNone(vision)
+
+        await moderator._set_manual_phase("READING")
+        self.assertTrue(vision.armed)
+        await moderator._set_manual_phase("ANSWERING")
+        self.assertFalse(vision.armed)
+        await moderator._set_manual_phase("BONUS_READ")
+        self.assertFalse(vision.armed)
+        await moderator._set_manual_phase("BUZZ_WINDOW", 5.0)
+        self.assertTrue(vision.armed)
+        await moderator._set_manual_phase("IDLE")
+        self.assertFalse(vision.armed)
+
+    async def test_camera_frames_only_emit_while_armed(self):
+        import numpy as np
+
+        moderator = ScienceBowlModerator(use_audio=False, manual_reader=True)
+        await moderator._set_camera_buzz(True)
+        await next_message(moderator, "CAMERA_BUZZ_STATE")
+        vision = moderator.vision
+        vision.update_rois({"A-1": [0.0, 0.0, 1.0, 1.0]})
+
+        dark = np.zeros((360, 640, 3), dtype=np.uint8)
+        bright = np.full_like(dark, 255)
+        vision.set_armed(False)
+        await vision.process_frame(dark, 1.0)
+        await vision.process_frame(bright, 1.1)
+        self.assertTrue(moderator.inbound_queue.empty())
+
+        vision.set_armed(True)
+        await vision.process_frame(dark, 2.0)
+        self.assertTrue(moderator.inbound_queue.empty())
+        await vision.process_frame(bright, 2.1)
+        event = await asyncio.wait_for(moderator.inbound_queue.get(), 1)
+        self.assertEqual(event.type, "BUZZ")
+        self.assertEqual(event.payload["source"], "camera")
 
     async def test_full_read_marker_flips_a_word_mark_to_zero(self):
         moderator = ScienceBowlModerator(use_audio=False, manual_reader=True)
@@ -287,11 +384,23 @@ class ManualReaderPageTests(unittest.TestCase):
         self.assertLess(INDEX_SOURCE.index("static/js/ui.js"), manual_at)
         self.assertLess(manual_at, INDEX_SOURCE.index("static/js/websocket.js"))
 
-    def test_the_camera_setup_and_camera_script_are_not_active(self):
-        self.assertNotIn("static/js/camera.js", INDEX_SOURCE)
+    def test_the_camera_setup_is_opt_in_and_loads_after_the_socket(self):
+        self.assertIn("static/js/camera.js", INDEX_SOURCE)
+        self.assertLess(
+            INDEX_SOURCE.index("static/js/websocket.js"),
+            INDEX_SOURCE.index("static/js/camera.js"),
+        )
+        for element in ('id="video-stream"', 'id="calib-canvas"', 'id="camera-select"', 'id="camera-panel-body"'):
+            self.assertIn(element, INDEX_SOURCE)
+        self.assertIn("Enable camera buzz", INDEX_SOURCE)
         self.assertNotIn("match-video-stream", INDEX_SOURCE)
-        self.assertNotIn("camera-select", INDEX_SOURCE)
         self.assertNotIn("Vision Detection Engine", INDEX_SOURCE)
+        # Opt-in only: no load-time camera probe, prompt or stream.
+        self.assertNotIn("window.addEventListener('load'", CAMERA_SOURCE)
+        self.assertNotIn("loadCameras", CAMERA_SOURCE)
+        self.assertIn("window.CameraBuzz = {", CAMERA_SOURCE)
+        self.assertIn("startForMatch: startForMatch", CAMERA_SOURCE)
+        self.assertIn("window.CameraBuzz.startForMatch()", UI_SOURCE)
 
     def test_the_hud_carries_the_manual_controls(self):
         for element in (
@@ -302,9 +411,17 @@ class ManualReaderPageTests(unittest.TestCase):
             'id="manual-team-a-buzzers"',
             'id="manual-team-b-buzzers"',
             'id="btn-end-buzzpoint"',
+            'id="btn-dead-tossup"',
+            'id="btn-hud-camera"',
+            'id="buzz-source-badge"',
+            'id="manual-clock-wrap"',
+            'id="action-timer-label"',
+            'id="action-timer-box"',
+            'id="action-timer-display"',
+            'id="action-timer-bar"',
+            'id="action-timer-warning"',
             'id="btn-manual-correct"',
             'id="btn-manual-incorrect"',
-            'id="btn-manual-question-read"',
             'id="btn-manual-bonus-read"',
             'id="btn-start-tossup"',
             'id="btn-start-bonus"',
@@ -315,9 +432,34 @@ class ManualReaderPageTests(unittest.TestCase):
         self.assertNotIn('id="manual-buzzpoint-panel"', INDEX_SOURCE)
         self.assertNotIn('id="btn-full-read"', INDEX_SOURCE)
         self.assertIn("ManualReader.markEndBuzzpoint()", INDEX_SOURCE)
+        self.assertIn("ManualReader.deadTossup()", INDEX_SOURCE)
         self.assertIn("markEndBuzzpoint: markFullRead", MANUAL_SOURCE)
+        self.assertIn("deadTossup: deadTossup", MANUAL_SOURCE)
+        self.assertIn("sendEvent('DEAD_TOSSUP', {})", MANUAL_SOURCE)
+        self.assertNotIn('id="btn-manual-question-read"', INDEX_SOURCE)
         self.assertNotIn('id="btn-pause-match"', INDEX_SOURCE)
         self.assertNotIn('id="btn-export-csv"', INDEX_SOURCE)
+
+    def test_dead_and_end_live_under_the_question_and_clock_above_the_scoresheet(self):
+        options_at = INDEX_SOURCE.index('id="reader-options"')
+        end_at = INDEX_SOURCE.index('id="btn-end-buzzpoint"')
+        answer_at = INDEX_SOURCE.index('class="match-answer-strip"')
+        self.assertLess(options_at, end_at)
+        self.assertLess(end_at, answer_at)
+        dead_at = INDEX_SOURCE.index('id="btn-dead-tossup"')
+        self.assertLess(options_at, dead_at)
+        self.assertLess(dead_at, answer_at)
+
+        banner = INDEX_SOURCE[
+            INDEX_SOURCE.index('<div class="match-buzz-banner">')
+            :INDEX_SOURCE.index('<div class="match-verdict-actions">')
+        ]
+        self.assertNotIn('btn-end-buzzpoint', banner)
+        self.assertNotIn('btn-dead-tossup', banner)
+
+        clock_at = INDEX_SOURCE.index('id="manual-clock-wrap"')
+        self.assertLess(INDEX_SOURCE.index('id="match-layout"'), clock_at)
+        self.assertLess(clock_at, INDEX_SOURCE.index('class="match-scoreboard"'))
 
     def test_packet_words_are_text_not_markup(self):
         self.assertIn("document.createElement('button')", MANUAL_SOURCE)
@@ -378,9 +520,11 @@ class ManualReaderPageTests(unittest.TestCase):
         self.assertNotIn("token === element || token.dataset.word === word", MANUAL_SOURCE)
         self.assertNotIn("token.dataset.word === selectedBuzzpoint", MANUAL_SOURCE)
 
-    def test_the_socket_dispatches_manual_phase_and_buzzpoint(self):
+    def test_the_socket_dispatches_manual_phase_buzzpoint_and_camera_state(self):
         self.assertIn("data.type === 'MANUAL_PHASE'", SOCKET_SOURCE)
         self.assertIn("data.type === 'BUZZPOINT_SET'", SOCKET_SOURCE)
+        self.assertIn("data.type === 'CAMERA_BUZZ_STATE'", SOCKET_SOURCE)
+        self.assertIn("window.CameraBuzz.applyState(payload)", SOCKET_SOURCE)
         self.assertIn("window.ManualReader.beginBuzz(payload);", SOCKET_SOURCE)
         self.assertIn("window.ManualReader.onConnected(payload);", SOCKET_SOURCE)
         self.assertIn("data.type === 'DOWNLOAD_CSV'", SOCKET_SOURCE)
@@ -399,6 +543,7 @@ class ManualReaderPageTests(unittest.TestCase):
         self.assertIn("connectWebSocket(roomId", UI_SOURCE)
         self.assertIn("sendEvent('LOAD_BANK', { bank: window.pendingBank });", UI_SOURCE)
         self.assertIn("sendEvent('SAVE_ROSTER', rosterData);", UI_SOURCE)
+        self.assertIn("window.CameraBuzz.startForMatch()", UI_SOURCE)
 
 
 class ManualReaderLogTests(unittest.TestCase):

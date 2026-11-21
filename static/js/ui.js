@@ -481,6 +481,11 @@ function openManualHudAfterSetup() {
     updateRosterNames(rosterData);
     sendEvent('SAVE_ROSTER', rosterData);
     sendEvent('LOAD_BANK', { bank: window.pendingBank });
+    // Camera buzz is opt-in: startForMatch() does nothing until the moderator
+    // has enabled the camera in setup.
+    if (window.CameraBuzz && typeof window.CameraBuzz.startForMatch === 'function') {
+        window.CameraBuzz.startForMatch();
+    }
     setupComplete = true;
     const overlay = document.getElementById('match-start-overlay');
     if (overlay) overlay.classList.add('hidden');
@@ -614,6 +619,7 @@ function openMatchConfirm({ title, copy, confirmLabel, action }) {
 
 function requestEndMatch() {
     closeMatchConfirm();
+    if (window.CameraBuzz && typeof window.CameraBuzz.stop === 'function') window.CameraBuzz.stop();
     sendEvent('END_MATCH');
 }
 
@@ -672,6 +678,7 @@ function resetMatchAfterRoomClose() {
     if (typeof cancelSpeech === 'function') cancelSpeech();
     if (typeof cancelListening === 'function') cancelListening();
     if (typeof stopActionTimer === 'function') stopActionTimer();
+    if (window.CameraBuzz && typeof window.CameraBuzz.stop === 'function') window.CameraBuzz.stop();
     if (window.MatchSummary) window.MatchSummary.reset();
     if (window.ManualReader) window.ManualReader.reset();
     if (typeof window.resetMatchHud === 'function') window.resetMatchHud();

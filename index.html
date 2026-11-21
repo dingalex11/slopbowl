@@ -540,21 +540,56 @@
         <div class="col-span-12 lg:col-span-5 bg-panel border border-neonCyan/40 rounded-2xl p-5">
           <div class="flex items-center justify-between pb-3 mb-4 border-b border-borderDark">
             <h3 class="font-bold text-sm tracking-wide text-white uppercase font-display">Manual Reader Station</h3>
-            <span class="text-xs font-mono bg-black text-neonGreen border border-neonGreen/60 px-2 py-0.5 rounded-full">NO CAMERA</span>
+            <span class="text-xs font-mono bg-black text-neonGreen border border-neonGreen/60 px-2 py-0.5 rounded-full">CAMERA OPTIONAL</span>
           </div>
           <div class="space-y-3 text-xs text-slate-300 font-mono leading-relaxed">
-            <p>The moderator reads the packet aloud from this screen. There is no camera, microphone, text-to-speech or AI judge in this mode.</p>
-            <p>The HUD shows the question, the answer key and one buzz button per named player. When someone buzzes, click that player, click the word where they buzzed, then judge the answer.</p>
+            <p>The moderator reads the packet aloud from this screen. There is no microphone, text-to-speech or AI judge in this mode.</p>
+            <p>The HUD shows the question, the answer key and one buzz button per named player. When someone buzzes, click that player or let the camera catch it, mark the word where it happened, then judge the answer.</p>
             <div class="bg-black border border-borderDark rounded-xl p-3">
               <p class="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Clock set</p>
               <ul class="space-y-1 text-[11px] text-slate-400">
                 <li>Read stopwatch &mdash; runs while you read</li>
-                <li>5s buzz window &mdash; starts with <span class="text-neonCyan">Question read</span></li>
-                <li>4s answer clock &mdash; starts when you click the buzzer</li>
+                <li>4s answer clock &mdash; starts when a buzz lands</li>
+                <li>Rebound only &mdash; 5s window after a wrong interrupt</li>
                 <li>20s bonus confer &mdash; starts with <span class="text-neonAmber">Bonus read</span></li>
               </ul>
             </div>
             <p class="text-[10px] text-slate-500">Sign in once and the match opens directly. No room code.</p>
+          </div>
+        </div>
+
+        <!-- Optional camera buzz: off until the moderator opts in. -->
+        <div class="col-span-12 bg-panel border border-borderDark rounded-2xl p-5">
+          <div class="flex flex-wrap items-center justify-between gap-3 pb-3 mb-4 border-b border-borderDark">
+            <div>
+              <h3 class="font-bold text-sm tracking-wide text-white uppercase font-display">Camera Buzz <span class="text-slate-500">(optional)</span></h3>
+              <p class="text-[11px] text-slate-400 font-mono mt-1">Off by default. Nothing touches your camera until you click Enable.</p>
+            </div>
+            <button type="button" id="btn-camera-enable" onclick="CameraBuzz.toggle()" aria-pressed="false" class="bg-black hover:bg-panelHover border border-neonGreen/60 text-neonGreen px-4 py-2 rounded-xl text-xs uppercase font-bold font-mono transition">
+              Enable camera buzz
+            </button>
+          </div>
+          <div id="camera-panel-body" class="hidden grid grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4">
+            <div class="camera-stage">
+              <div class="camera-stage-frame">
+                <video id="video-stream" autoplay playsinline muted></video>
+                <canvas id="calib-canvas" aria-label="Camera calibration zones"></canvas>
+              </div>
+              <div class="camera-stage-controls">
+                <select id="camera-select" aria-label="Camera device"></select>
+                <button type="button" onclick="CameraBuzz.refreshDevices()">Refresh</button>
+              </div>
+            </div>
+            <div class="space-y-3 text-xs text-slate-300 font-mono leading-relaxed">
+              <p id="calib-instruction" class="camera-calib-instruction">Draw Box: A-1</p>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="camera-panel-btn" onclick="CameraBuzz.saveCalibration()">Save zones</button>
+                <button type="button" class="camera-panel-btn" onclick="CameraBuzz.zero()">Re-zero</button>
+                <button type="button" class="camera-panel-btn camera-panel-btn-ghost" onclick="CameraBuzz.resetCalibration()">Reset</button>
+              </div>
+              <p class="text-[11px] text-slate-400">Draw one box per seat in order A-1, A-C, A-3, A-4, A-5, B-1, B-C, B-3, B-4, B-5. Re-zero with the room at match brightness.</p>
+              <p id="camera-setup-status" class="text-[11px] text-slate-500" role="status">Camera off. Manual buzzers stay available either way.</p>
+            </div>
           </div>
         </div>
       </div>
@@ -654,6 +689,7 @@
                 <span id="stage-cat-badge" class="stage-tag">--</span>
                 <span id="stage-type-badge" class="stage-tag stage-tag-amber">MANUAL READER</span>
                 <span id="hud-question-kind" class="stage-tag stage-tag-plain">TOSS-UP</span>
+                <button type="button" id="btn-hud-camera" class="stage-tag stage-tag-plain stage-cam-toggle hidden" onclick="CameraBuzz.toggle()" aria-pressed="false" title="Toggle camera buzz">CAM OFF</button>
                 <span id="header-status" class="hidden">READY</span>
               </div>
 
@@ -661,6 +697,14 @@
                 <div class="match-question-wrap">
                   <div id="reader-question-text" class="match-question-text">Load a packet to see the question here.</div>
                   <div id="reader-options" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm font-mono"></div>
+                  <div class="match-question-actions">
+                    <button type="button" id="btn-dead-tossup" class="match-dead-tossup hidden" onclick="ManualReader.deadTossup()" disabled title="End a toss-up that drew no buzz">
+                      Dead
+                    </button>
+                    <button type="button" id="btn-end-buzzpoint" class="match-end-buzz hidden" onclick="ManualReader.markEndBuzzpoint()" disabled title="Mark the buzz at the end of the question">
+                      End
+                    </button>
+                  </div>
                   <div class="match-answer-strip">
                     <span class="match-answer-label">ANSWER</span>
                     <span id="reader-answer-key">&mdash;</span>
@@ -672,10 +716,8 @@
                 <div class="match-buzz-main">
                   <span class="match-buzz-kicker">FLOOR</span>
                   <span id="buzz-player-name">FLOOR: CLEAR</span>
+                  <span id="buzz-source-badge" class="match-cam-badge hidden">CAM</span>
                 </div>
-                <button type="button" id="btn-end-buzzpoint" class="match-end-buzz hidden" onclick="ManualReader.markEndBuzzpoint()" disabled title="Mark the buzz at the end of the question">
-                  End
-                </button>
               </div>
 
               <div class="match-verdict-actions">
@@ -688,9 +730,6 @@
               </div>
 
               <div id="manual-read-actions" class="match-read-actions">
-                <button id="btn-manual-question-read" onclick="sendEvent('MANUAL_READ_DONE')">
-                  Question read &mdash; 5s buzz
-                </button>
                 <button id="btn-manual-bonus-read" onclick="sendEvent('MANUAL_READ_DONE')" class="hidden">
                   Bonus read &mdash; 20s confer
                 </button>
@@ -739,6 +778,14 @@
             <p class="side-roster-note side-roster-note-b">CLICK THE PLAYER WHO BUZZED</p>
             <div id="manual-team-b-buzzers" class="side-buzzer-list"></div>
           </aside>
+        </div>
+
+        <!-- LIVE CLOCK: answer, rebound and bonus confer only. -->
+        <div id="manual-clock-wrap" class="match-clock-strip hidden">
+          <span id="action-timer-label" class="match-clock-label">CLOCK</span>
+          <div id="action-timer-box" class="match-clock-box"><span id="action-timer-display">--</span></div>
+          <div class="match-clock-rail"><div id="action-timer-bar" class="h-full"></div></div>
+          <span id="action-timer-warning" class="match-clock-warning hidden">FINAL 5 SECONDS</span>
         </div>
 
         <!-- SCORE SHEET -->
@@ -1843,6 +1890,7 @@
   <script src="/static/js/manual_reader.js"></script>
   <script src="/static/js/match_summary.js"></script>
   <script src="/static/js/websocket.js"></script>
+  <script src="/static/js/camera.js"></script>
   <script src="/static/js/pdf_parser.js"></script>
   <script src="/static/js/analytics.js"></script>
   <script src="/static/js/buzzboard_analytics.js"></script>

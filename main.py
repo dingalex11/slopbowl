@@ -63,7 +63,7 @@ ADMIN_EVENTS = (
     "EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE",
     "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE",
     "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT",
-    "SET_READING_MODE", "END_MATCH", "CLOSE_MATCH",
+    "SET_READING_MODE", "END_MATCH", "CLOSE_MATCH", "SET_CAMERA_BUZZ",
 ) + MANUAL_START_EVENTS
 
 
@@ -90,7 +90,7 @@ class ScienceBowlModerator:
         self.manual_reader = bool(manual_reader)
         
         if self.manual_reader:
-            print("[MANUAL READER]: Human reader mode; no TTS, camera, microphone or AI judge.")
+            print("[MANUAL READER]: Human reader mode; no TTS, microphone or AI judge. Camera buzz is optional.")
         elif not self.use_audio:
             print("[AUDIO DISABLED]: Falling back to silent mock audio mode.")
             
@@ -101,7 +101,14 @@ class ScienceBowlModerator:
         if self.use_camera and not self.manual_reader:
             self.vision = VisionService(self.inbound_queue, self.outbound_queue)
         else:
+            # Manual rooms create the vision engine only when the moderator opts in.
             self.vision = None
+        self.camera_buzz_enabled = bool(self.vision)
+        if self.vision:
+            print("[CAMERA ENABLED]: Vision engine is ready; buzz detection arms during a read.")
+        elif self.manual_reader:
+            print("[CAMERA OPTIONAL]: Off until the moderator enables camera buzz in setup.")
+        else:
             print("[CAMERA DISABLED]: Vision engine is off; using manual/keyboard buzzers.")
 
         self.ui = HTMLGUIService(self.inbound_queue, self.outbound_queue, self.vision)
@@ -469,12 +476,16 @@ class ScienceBowlModerator:
             else:
                 await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": event.payload})
             
-        elif evt_type == "SAVE_CALIBRATION" and self.use_camera:
+        elif evt_type == "SET_CAMERA_BUZZ":
+            await self._set_camera_buzz(bool(event.payload.get("enabled")))
+        elif evt_type == "SAVE_CALIBRATION" and self.vision:
             self.vision.update_rois(event.payload)
-        elif evt_type == "RESET_CALIBRATION" and self.use_camera:
+            await self.outbound_queue.put({"type": "CAMERA_BUZZ_STATE", "payload": self._camera_state()})
+        elif evt_type == "RESET_CALIBRATION" and self.vision:
             self.vision.clear_rois()
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✅ Camera ROIs Cleared!"}})
-        elif evt_type == "CALIBRATE_BASELINE" and self.use_camera:
+            await self.outbound_queue.put({"type": "CAMERA_BUZZ_STATE", "payload": self._camera_state()})
+        elif evt_type == "CALIBRATE_BASELINE" and self.vision:
             self.vision.request_baseline_calibration()
         
         elif evt_type == "EDIT_LOG_ENTRY":
@@ -551,7 +562,7 @@ class ScienceBowlModerator:
             await self.outbound_queue.put({"type": "SYNC_LOG", "payload": {"log": self.match_log}})
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✏️ Scoresheet edited & recalculated."}})
 
-        elif evt_type == "PROCESS_FRAME" and self.use_camera:
+        elif evt_type == "PROCESS_FRAME" and self.vision and self.camera_buzz_enabled:
             frame_data = event.payload.get("frame_data", "")
             if not frame_data: return 
             if frame_data.startswith("data:image/jpeg;base64,"):
@@ -573,7 +584,7 @@ class ScienceBowlModerator:
             expected_event_types = [expected_event_types]
             
         # NEW: Added LOAD_BANK, SAVE_ROSTER, and EDIT_LOG_ENTRY to prevent them from being ignored
-        admin_events = ["EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE", "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT", "SET_READING_MODE", "END_MATCH"]
+        admin_events = ["EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE", "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT", "SET_READING_MODE", "END_MATCH", "SET_CAMERA_BUZZ"]
         
         while True:
             event = await self.inbound_queue.get()
@@ -729,6 +740,29 @@ class ScienceBowlModerator:
     def _manual_phase_snapshot(self) -> dict:
         return dict(self.manual_phase)
 
+    def _camera_state(self) -> dict:
+        return {
+            "enabled": bool(self.camera_buzz_enabled),
+            "zones": len(self.vision.rois) if self.vision else 0,
+        }
+
+    async def _set_camera_buzz(self, enabled: bool):
+        if not self.manual_reader:
+            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "Camera buzz is available in manual reader mode only."}})
+            return
+        if enabled:
+            if self.vision is None:
+                self.vision = VisionService(self.inbound_queue, self.outbound_queue, send_debug_frames=False)
+                self.ui.vision_service = self.vision
+            self.use_camera = True
+            self.camera_buzz_enabled = True
+            self.vision.set_armed(self.manual_phase.get("phase") in ("READING", "BUZZ_WINDOW"))
+        else:
+            self.camera_buzz_enabled = False
+            if self.vision is not None:
+                self.vision.set_armed(False)
+        await self.outbound_queue.put({"type": "CAMERA_BUZZ_STATE", "payload": self._camera_state()})
+
     async def _set_manual_phase(self, phase: str, seconds: float | None = None, *, started_at: float | None = None, **extra):
         """Tell the manual-reader HUD which clock is running, and remember it.
 
@@ -742,6 +776,8 @@ class ScienceBowlModerator:
         }
         payload.update(extra)
         self.manual_phase = payload
+        if self.vision is not None:
+            self.vision.set_armed(bool(self.camera_buzz_enabled and phase in ("READING", "BUZZ_WINDOW")))
         await self.outbound_queue.put({"type": "MANUAL_PHASE", "payload": dict(payload)})
 
     def _drop_stale_manual_events(self) -> None:
@@ -757,7 +793,7 @@ class ScienceBowlModerator:
             except asyncio.QueueEmpty:
                 break
             evt_type = event.type.name if hasattr(event.type, "name") else str(event.type)
-            if evt_type not in ("BUZZ", "LOG_BUZZPOINT", "FORCE_JUDGMENT", "MANUAL_READ_DONE"):
+            if evt_type not in ("BUZZ", "LOG_BUZZPOINT", "FORCE_JUDGMENT", "MANUAL_READ_DONE", "DEAD_TOSSUP"):
                 kept.append(event)
         for event in kept:
             self.inbound_queue.put_nowait(event)
@@ -789,6 +825,7 @@ class ScienceBowlModerator:
         }
         self.state.transition_to(GameState.READING_TOSSUP)
         self.manual_read_started = asyncio.get_running_loop().time()
+        self.manual_dead_action = False
         self.manual_read_complete = bool(skip_read)
         self.manual_buzzpoint = "Full Read" if skip_read else ""
         self.manual_after_read = bool(skip_read)
@@ -810,7 +847,7 @@ class ScienceBowlModerator:
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ 5 Seconds to Buzz..."}})
         else:
             await self._set_manual_phase("READING", None)
-            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "🔊 Read the tossup aloud, then click 'Question read'."}})
+            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "🔊 Read the tossup aloud. Buzzes are live; press Dead when the question dies."}})
 
         deadline = asyncio.get_running_loop().time() + 5.0 if skip_read else None
         buzz_event = None
@@ -830,13 +867,11 @@ class ScienceBowlModerator:
             if evt_type in ("FORCE_RESET_STATE", "CHALLENGE"):
                 await self._set_manual_phase("IDLE")
                 return None, False, False, evt_type, 0.0, ""
-            if evt_type == "MANUAL_READ_DONE":
-                if not self.manual_read_complete:
-                    self.manual_read_complete = True
-                    deadline = asyncio.get_running_loop().time() + 5.0
-                    await self._set_manual_phase("BUZZ_WINDOW", 5.0)
-                    await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ 5 Seconds to Buzz..."}})
-                continue
+            if evt_type == "DEAD_TOSSUP":
+                self.manual_dead_action = True
+                await self._set_manual_phase("IDLE")
+                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "💀 Tossup dead — no buzz."}})
+                return None, False, False, False, 0.0, ""
             if evt_type == "BUZZ":
                 team = event.payload.get("team", "Unknown")
                 if allowed_team and team != allowed_team:
@@ -857,7 +892,7 @@ class ScienceBowlModerator:
         self.manual_buzzpoint = "Full Read" if self.manual_after_read else ""
 
         self.state.transition_to(GameState.LISTENING_TOSSUP_ANSWER)
-        await self.outbound_queue.put({"type": "BUZZ", "payload": {"team": team, "player": player, "raw_team": raw_team, "raw_player": raw_player, "after_read": self.manual_after_read}})
+        await self.outbound_queue.put({"type": "BUZZ", "payload": {"team": team, "player": player, "raw_team": raw_team, "raw_player": raw_player, "after_read": self.manual_after_read, "source": str(buzz_event.payload.get("source", "manual"))}})
         await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🎯 BUZZ: {player} ({team}) — mark the buzzpoint, then judge the answer."}})
         await self._set_manual_phase("ANSWERING", ANSWER_WINDOW_SECONDS, buzzpoint=self.manual_buzzpoint, after_read=self.manual_after_read)
 
@@ -1423,9 +1458,10 @@ class ScienceBowlModerator:
                                 await self._speak_and_wait(f"Time. The correct answer is {tossup_ans_text}.", moderator_only=True)
 
                     else:
-                        await self.log_event("DEAD_TOSSUP", "None", "None", False, 0, "Time", 0.0)
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏰ Time expired. No buzz."}})
-                        await self._speak_and_wait(f"Time. The correct answer is {tossup_ans_text}.", moderator_only=True)
+                        dead_by_moderator = bool(getattr(self, "manual_dead_action", False))
+                        await self.log_event("DEAD_TOSSUP", "None", "None", False, 0, "Dead" if dead_by_moderator else "Time", 0.0)
+                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "💀 Tossup dead — no buzz." if dead_by_moderator else "⏰ Time expired. No buzz."}})
+                        await self._speak_and_wait((f"Dead tossup. The correct answer is {tossup_ans_text}." if dead_by_moderator else f"Time. The correct answer is {tossup_ans_text}."), moderator_only=True)
 
                     await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
 

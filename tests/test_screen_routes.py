@@ -347,10 +347,12 @@ class ManualEntryPointTests(unittest.TestCase):
         self.assertIn("sendEvent('LOAD_BANK', { bank: window.pendingBank });", load)
         self.assertIn("sendEvent('SAVE_ROSTER', rosterData);", load)
 
-    def test_setup_has_no_camera_or_room_code(self):
+    def test_setup_has_an_optional_camera_and_no_room_code(self):
         setup = INDEX_SOURCE[INDEX_SOURCE.index('id="slide-4"')
                              :INDEX_SOURCE.index('id="slide-5"')]
-        self.assertNotIn("camera-select", setup)
+        self.assertIn("camera-select", setup)
+        self.assertIn("Enable camera buzz", setup)
+        self.assertIn("Off by default", setup)
         self.assertNotIn("room-id-input", setup)
         self.assertNotIn("Create room", setup)
         self.assertIn("startInPersonMatch()", setup)
@@ -360,8 +362,11 @@ class ManualEntryPointTests(unittest.TestCase):
                         'id="reader-answer-key"', 'id="manual-team-a-buzzers"',
                         'id="manual-team-b-buzzers"', 'id="btn-override-last-question"',
                         'id="btn-manual-correct"', 'id="btn-manual-incorrect"',
-                        'id="btn-manual-question-read"', 'id="btn-manual-bonus-read"'):
+                        'id="btn-dead-tossup"', 'id="btn-end-buzzpoint"',
+                        'id="btn-manual-bonus-read"', 'id="manual-clock-wrap"',
+                        'id="btn-hud-camera"'):
             self.assertIn(element, INDEX_SOURCE)
+        self.assertNotIn('id="btn-manual-question-read"', INDEX_SOURCE)
         self.assertNotIn('id="btn-full-read"', INDEX_SOURCE)
 
 

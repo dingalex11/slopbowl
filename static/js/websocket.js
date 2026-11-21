@@ -170,6 +170,9 @@ function connectWebSocket(roomId, apiKey = null) {
             if (typeof updateSeatLabels === 'function') updateSeatLabels(payload);
             updateOnlineBuzzButton();
             if (window.ManualReader) window.ManualReader.onConnected(payload);
+            if (window.CameraBuzz && typeof window.CameraBuzz.applyState === 'function') {
+                window.CameraBuzz.applyState({ enabled: Boolean(payload.camera_buzz) });
+            }
             if (window._manualSetupPending && typeof window.openManualHudAfterSetup === 'function') {
                 window.openManualHudAfterSetup();
             }
@@ -184,10 +187,11 @@ function connectWebSocket(roomId, apiKey = null) {
             const micLabel = document.getElementById('player-mic-label');
             if (micLabel) micLabel.innerText = (payload.text || 'STANDBY').slice(0, 42).toUpperCase();
             
-            // EXACT TRIGGER: Start the 5-second physical timer only when the backend opens the buzz window
-            if (payload.text === "⏳ 5 Seconds to Buzz...") {
+            // EXACT TRIGGER: Start the 5-second physical timer only when the backend opens the buzz window.
+            // Manual rooms use the rebound-only window; their HUD owns that clock.
+            if (payload.text === "⏳ 5 Seconds to Buzz..." && !(window.ManualReader && window.ManualReader.isManual())) {
                 const label = document.getElementById('action-timer-label');
-                if (label) label.innerText = "TOSSUP (5s BUZZ)";
+                if (label) label.innerText = "REBOUND (5s)";
                 startActionTimer(5.0, null);
             }
 
@@ -383,6 +387,11 @@ function connectWebSocket(roomId, apiKey = null) {
             
             startListening(timeout, payload.expires_at || null);
         }
+        else if (data.type === 'CAMERA_BUZZ_STATE') {
+            if (window.CameraBuzz && typeof window.CameraBuzz.applyState === 'function') {
+                window.CameraBuzz.applyState(payload);
+            }
+        }
         else if (data.type === 'DEBUG_FRAME') {
             const img = new Image();
             img.onload = () => {
@@ -431,7 +440,7 @@ function connectWebSocket(roomId, apiKey = null) {
                 const manualTeam = payload.team || 'Unknown';
                 const manualPlayer = payload.player || 'Player';
                 const manualPlayerEl = document.getElementById('buzz-player-name');
-                if (manualPlayerEl) manualPlayerEl.innerText = `FLOOR: ${manualTeam} (${manualPlayer})`;
+                if (manualPlayerEl) manualPlayerEl.innerText = `${String(manualPlayer).toUpperCase()} BUZZED — ${manualTeam}`;
                 window.ManualReader.beginBuzz(payload);
                 return;
             }

@@ -1368,3 +1368,165 @@ body[data-view="hud"] #header-match-score.is-live {
     .match-end-actions { width: 100%; }
     .match-end-btn { flex: 1 1 130px; }
 }
+/* --- Manual question actions: Dead ends a no-buzz toss-up, End marks Full Read. --- */
+.match-question-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 12px;
+}
+
+.match-dead-tossup {
+    padding: 6px 12px;
+    border: 1px solid rgba(100, 116, 139, 0.55);
+    border-radius: 3px;
+    background: rgba(71, 85, 105, 0.16);
+    color: #cbd5e1;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.match-dead-tossup:hover:not(:disabled) {
+    border-color: #94a3b8;
+    background: #475569;
+    color: #f8fafc;
+}
+
+.match-dead-tossup:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.match-dead-tossup.hidden,
+.match-cam-badge.hidden,
+.stage-cam-toggle.hidden {
+    display: none;
+}
+
+.match-cam-badge {
+    flex: 0 0 auto;
+    padding: 2px 5px;
+    border: 1px solid rgba(52, 211, 153, 0.55);
+    border-radius: 2px;
+    background: rgba(52, 211, 153, 0.12);
+    color: #6ee7b7;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+}
+
+.stage-cam-toggle {
+    cursor: pointer;
+    background: transparent;
+}
+
+.stage-cam-toggle:hover {
+    border-color: #34d399;
+    color: #6ee7b7;
+}
+
+.stage-cam-toggle.is-on {
+    border-color: rgba(52, 211, 153, 0.6);
+    background: rgba(52, 211, 153, 0.1);
+    color: #6ee7b7;
+}
+
+/* The timer JS swaps bg-teamA for bg-red-500; keep those utilities winning. */
+.match-clock-rail #action-timer-bar {
+    height: 100%;
+    transition: width 100ms linear, background-color 100ms linear;
+}
+
+.match-clock-rail #action-timer-bar.bg-teamA { background: var(--match-a); }
+.match-clock-rail #action-timer-bar.bg-red-500 { background: #ef4444; }
+.match-clock-rail #action-timer-bar.bg-amber-500 { background: #f59e0b; }
+
+/* --- Optional camera setup panel. Nothing renders until the moderator opts in. --- */
+.camera-stage-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border: 1px solid var(--match-line);
+    border-radius: 4px;
+    background: #000;
+}
+
+.camera-stage-frame video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.camera-stage-frame canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+    touch-action: none;
+}
+
+.camera-stage-controls {
+    display: flex;
+    gap: 7px;
+    margin-top: 7px;
+}
+
+.camera-stage-controls select,
+.camera-stage-controls button {
+    padding: 7px 9px;
+    border: 1px solid #1d3548;
+    border-radius: 3px;
+    background: #020408;
+    color: #cbd5e1;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+}
+
+.camera-stage-controls select { flex: 1; min-width: 0; }
+.camera-stage-controls button { cursor: pointer; text-transform: uppercase; font-weight: 800; }
+
+.camera-panel-btn {
+    padding: 7px 10px;
+    border: 1px solid rgba(52, 211, 153, 0.45);
+    border-radius: 3px;
+    background: rgba(52, 211, 153, 0.08);
+    color: #6ee7b7;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.camera-panel-btn-ghost {
+    border-color: rgba(100, 116, 139, 0.5);
+    background: rgba(71, 85, 105, 0.12);
+    color: #cbd5e1;
+}
+
+.camera-calib-instruction {
+    padding: 6px 8px;
+    border-left: 2px solid #fbbf24;
+    background: rgba(245, 158, 11, 0.06);
+    color: #fbbf24;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.camera-calib-instruction.is-complete {
+    border-left-color: #34d399;
+    background: rgba(52, 211, 153, 0.07);
+    color: #6ee7b7;
+}
+
+/* Tailwind's .hidden must win over the grid display. */
+.match-clock-strip.hidden { display: none; }
+
+#camera-panel-body.hidden { display: none; }

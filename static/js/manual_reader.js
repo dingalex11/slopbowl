@@ -16,7 +16,7 @@
     const PHASE_LABELS = {
         IDLE: 'IDLE',
         READING: 'READING',
-        BUZZ_WINDOW: '5s BUZZ WINDOW',
+        BUZZ_WINDOW: 'REBOUND 5s',
         ANSWERING: 'ANSWERING',
         BONUS_READ: 'BONUS READ',
         BONUS_CONFER: 'BONUS CONFER 20s'
@@ -37,6 +37,7 @@
     let afterRead = false;
     let questionFinished = false;
     let verdictSent = false;
+    let tossupEnded = false;
     let buzzClickTimeout = null;
 
     function $(id) {
@@ -57,7 +58,7 @@
     }
 
     function canClickBuzzers() {
-        return manualMode && !buzzActive && (phase === 'READING' || phase === 'BUZZ_WINDOW');
+        return manualMode && !buzzActive && !tossupEnded && (phase === 'READING' || phase === 'BUZZ_WINDOW');
     }
 
     function isBonusPhase() {
@@ -168,7 +169,7 @@
             } else if (phase === 'READING') {
                 hint.textContent = 'Buzz buttons are live during the read. A wrong interrupt is a NEG (−4).';
             } else if (phase === 'BUZZ_WINDOW') {
-                hint.textContent = '5-second window open. Buzz buttons are live.';
+                hint.textContent = 'Rebound window open. Only the wrong-answer team can buzz.';
             } else if (phase === 'ANSWERING') {
                 hint.textContent = 'Answer in progress. Mark the buzzpoint, then judge.';
             } else if (phase === 'BONUS_READ' || phase === 'BONUS_CONFER') {
@@ -221,11 +222,13 @@
         };
         resetReadClock();
         buzzActive = false;
+        tossupEnded = false;
         selectedBuzzpoint = '';
         selectedToken = null;
         afterRead = false;
         questionFinished = false;
         verdictSent = false;
+        setBuzzSource(false);
         setText('reader-question-text', 'Question loaded. Click Start Tossup to reveal it.');
         setText('reader-answer-key', '—');
         const options = $('reader-options');
@@ -238,6 +241,7 @@
         setFullReadEnabled(false);
         setVerdictEnabled(false);
         updateTokenState();
+        updateQuestionActions();
         updateBuzzButtons();
     }
 
@@ -256,10 +260,12 @@
 
         resetReadClock();
         buzzActive = false;
+        tossupEnded = false;
         selectedBuzzpoint = '';
         afterRead = false;
         questionFinished = false;
         verdictSent = false;
+        setBuzzSource(false);
         if (buzzClickTimeout) clearTimeout(buzzClickTimeout);
         buzzClickTimeout = null;
 
@@ -273,6 +279,7 @@
         setVerdictEnabled(false);
         renderOptions();
         renderTokens();
+        updateQuestionActions();
         updateBuzzButtons();
     }
 
@@ -338,22 +345,34 @@
         });
         const holder = $('reader-question-text');
         if (holder) holder.classList.toggle('reader-marking', active);
-        updateEndBuzzButton();
+        updateQuestionActions();
     }
 
-    // The end marker is the existing after-read (Full Read) buzzpoint. It is only
-    // offered once the question is over, so an interrupted answer cannot be recorded
-    // as if the player had heard the whole question.
-    function updateEndBuzzButton() {
+    // Dead ends a toss-up that drew no buzz. End is the full-read marker: with an
+    // active buzz it makes a wrong answer 0 instead of −4.
+    function updateQuestionActions() {
+        const dead = $('btn-dead-tossup');
+        if (dead) {
+            const visible = Boolean(manualMode && phase === 'READING');
+            dead.classList.toggle('hidden', !visible);
+            dead.disabled = !visible || buzzActive || tossupEnded || verdictSent;
+            dead.setAttribute('aria-disabled', String(dead.disabled));
+        }
+
         const button = $('btn-end-buzzpoint');
-        if (!button) return;
-        const tossupVisible = phase === 'READING' || phase === 'BUZZ_WINDOW' || phase === 'ANSWERING';
-        const visible = Boolean(manualMode && tossupVisible);
-        button.classList.toggle('hidden', !visible);
-        button.disabled = !visible || !buzzActive || !questionFinished || verdictSent;
-        const selected = afterRead && selectedBuzzpoint === 'Full Read';
-        button.classList.toggle('is-selected', selected);
-        button.setAttribute('aria-pressed', String(selected));
+        if (button) {
+            const visible = Boolean(manualMode && (phase === 'READING' || phase === 'ANSWERING'));
+            button.classList.toggle('hidden', !visible);
+            button.disabled = !visible || !buzzActive || verdictSent;
+            const selected = afterRead && selectedBuzzpoint === 'Full Read';
+            button.classList.toggle('is-selected', selected);
+            button.setAttribute('aria-pressed', String(selected));
+        }
+    }
+
+    function setBuzzSource(isCamera) {
+        const badge = $('buzz-source-badge');
+        if (badge) badge.classList.toggle('hidden', !isCamera);
     }
 
     function markToken(word, element) {
@@ -388,10 +407,11 @@
     }
 
     function markFullRead() {
-        if (!buzzActive || !questionFinished || verdictSent) return;
+        if (!buzzActive || verdictSent) return;
         selectedBuzzpoint = 'Full Read';
         selectedToken = null;
         afterRead = true;
+        questionFinished = true;
         setText('buzzpoint-current', 'Full read / after end');
         setText('buzzpoint-status', 'Full read');
         setText('manual-verdict-preview', 'INCORRECT (0)');
@@ -433,6 +453,12 @@
     }
 
     // --- PHASES -------------------------------------------------------------
+    function setClockVisible(visible) {
+        const clockWrap = $('manual-clock-wrap');
+        if (!clockWrap) return;
+        clockWrap.classList.toggle('hidden', !manualMode || !visible);
+    }
+
     function setPhase(payload) {
         const data = payload && typeof payload === 'object' ? payload : {};
         const nextPhase = data.phase || 'IDLE';
@@ -441,24 +467,28 @@
 
         if (nextPhase === 'READING') {
             buzzActive = false;
+            tossupEnded = false;
             questionFinished = false;
+            setBuzzSource(false);
             setText('buzz-player-name', 'FLOOR: CLEAR');
             startReadClock(data.started_at);
-            setBuzzReadButton(true);
             setBonusReadButton(false);
+            setClockVisible(false);
             if (typeof stopActionTimer === 'function') stopActionTimer();
         } else if (nextPhase === 'BUZZ_WINDOW') {
+            // Rebound only: the wrong-answer team gets five seconds after an interrupt.
             buzzActive = false;
+            tossupEnded = false;
             questionFinished = true;
-            setText('buzz-player-name', 'FLOOR: AWAITING BUZZ');
+            setText('buzz-player-name', 'FLOOR: REBOUND BUZZ');
             stopReadClock();
-            setBuzzReadButton(false);
             setBonusReadButton(false);
+            setClockVisible(true);
             setBuzzWindowTimer(data.seconds || 5, data.started_at);
         } else if (nextPhase === 'ANSWERING') {
             stopReadClock();
-            setBuzzReadButton(false);
             setBonusReadButton(false);
+            setClockVisible(true);
             startAnswerTimer(data.seconds || 4, data.started_at);
             questionFinished = Boolean(data.after_read || data.buzzpoint === 'Full Read');
             if (questionFinished) {
@@ -466,10 +496,11 @@
             }
         } else if (nextPhase === 'BONUS_READ') {
             buzzActive = false;
+            tossupEnded = false;
             questionFinished = false;
+            setBuzzSource(false);
             setText('buzz-player-name', 'FLOOR: CLEAR');
             startReadClock(data.started_at);
-            setBuzzReadButton(false);
             setBonusReadButton(true);
             setVerdictLabels(true);
             setText('manual-verdict-preview', 'BONUS +10 / 0');
@@ -477,13 +508,15 @@
             setText('buzzpoint-status', 'Ready');
             setFullReadEnabled(false);
             setVerdictEnabled(!verdictSent);
+            setClockVisible(false);
             if (typeof stopActionTimer === 'function') stopActionTimer();
         } else if (nextPhase === 'BONUS_CONFER') {
             buzzActive = false;
+            tossupEnded = false;
             questionFinished = false;
+            setBuzzSource(false);
             setText('buzz-player-name', 'FLOOR: CLEAR');
             stopReadClock();
-            setBuzzReadButton(false);
             setBonusReadButton(false);
             setVerdictLabels(true);
             setText('manual-verdict-preview', 'BONUS +10 / 0');
@@ -491,23 +524,21 @@
             setText('buzzpoint-status', 'Conferring');
             setFullReadEnabled(false);
             setVerdictEnabled(!verdictSent);
+            setClockVisible(true);
             startConferTimer(data.seconds || 20, data.started_at);
         } else {
             buzzActive = false;
+            tossupEnded = false;
             questionFinished = false;
+            setBuzzSource(false);
             setText('buzz-player-name', 'FLOOR: CLEAR');
             stopReadClock();
-            setBuzzReadButton(false);
             setBonusReadButton(false);
+            setClockVisible(false);
             if (typeof stopActionTimer === 'function') stopActionTimer();
         }
         updateBuzzButtons();
         updateTokenState();
-    }
-
-    function setBuzzReadButton(visible) {
-        const button = $('btn-manual-question-read');
-        if (button) button.classList.toggle('hidden', !visible);
     }
 
     function setBonusReadButton(visible) {
@@ -526,7 +557,7 @@
         const elapsed = elapsedSeconds(startedAt);
         const remaining = elapsed == null ? total : Math.max(0, total - elapsed);
         const label = $('action-timer-label');
-        if (label) label.textContent = 'TOSSUP (5s BUZZ)';
+        if (label) label.textContent = 'REBOUND (5s)';
         if (typeof startActionTimer === 'function') startActionTimer(remaining || 0.1, null);
     }
 
@@ -565,8 +596,8 @@
             const side = $(id);
             if (side) side.classList.toggle('hidden', !manualMode);
         });
-        const clockWrap = $('manual-clock-wrap');
-        if (clockWrap) clockWrap.classList.toggle('hidden', !manualMode);
+        const liveClock = phase === 'ANSWERING' || phase === 'BONUS_CONFER' || phase === 'BUZZ_WINDOW';
+        setClockVisible(Boolean(manualMode && liveClock));
         const readActions = $('manual-read-actions');
         if (readActions) readActions.classList.toggle('hidden', !manualMode);
         if (!manualMode) {
@@ -574,6 +605,9 @@
         }
         updateBuzzButtons();
         updateTokenState();
+        if (window.CameraBuzz && typeof window.CameraBuzz.applyState === 'function') {
+            window.CameraBuzz.applyState({});
+        }
     }
 
     function onConnected(payload) {
@@ -585,10 +619,15 @@
     function beginBuzz(payload) {
         const data = payload && typeof payload === 'object' ? payload : {};
         buzzActive = true;
+        tossupEnded = false;
         if (data.after_read) questionFinished = true;
         if (buzzClickTimeout) clearTimeout(buzzClickTimeout);
         buzzClickTimeout = null;
         stopReadClock();
+        const player = String(data.player || data.raw_player || 'Player');
+        const team = String(data.team || data.raw_team || 'Team');
+        setText('buzz-player-name', player.toUpperCase() + ' BUZZED — ' + team);
+        setBuzzSource(data.source === 'camera');
         setText('buzzpoint-status', 'Not marked');
         setText('buzzpoint-current', 'Click the word where the player buzzed');
         setVerdictEnabled(false);
@@ -596,6 +635,15 @@
         updateBuzzButtons();
         updateTokenState();
         if (data.after_read) applyBuzzpoint('Full Read', true);
+    }
+
+    function deadTossup() {
+        if (!manualMode || phase !== 'READING' || buzzActive || tossupEnded || verdictSent) return;
+        tossupEnded = true;
+        setText('buzz-player-name', 'FLOOR: DEAD');
+        updateBuzzButtons();
+        updateQuestionActions();
+        if (typeof sendEvent === 'function') sendEvent('DEAD_TOSSUP', {});
     }
 
     function verdict(correct) {
@@ -606,6 +654,7 @@
         setFullReadEnabled(false);
         setText('buzzpoint-status', 'Verdict sent');
         updateTokenState();
+        updateQuestionActions();
         if (typeof sendEvent === 'function') {
             sendEvent('FORCE_JUDGMENT', { correct: Boolean(correct) });
         }
@@ -615,11 +664,13 @@
         question = { raw_text: '', answer: '', options: [], phase: 'TOSSUP', allowed_team: null };
         phase = 'IDLE';
         buzzActive = false;
+        tossupEnded = false;
         selectedBuzzpoint = '';
         selectedToken = null;
         afterRead = false;
         questionFinished = false;
         verdictSent = false;
+        setBuzzSource(false);
         if (buzzClickTimeout) clearTimeout(buzzClickTimeout);
         buzzClickTimeout = null;
         resetReadClock();
@@ -637,6 +688,7 @@
         setVerdictEnabled(false);
         updateBuzzButtons();
         updateTokenState();
+        updateQuestionActions();
     }
 
     window.ManualReader = {
@@ -650,6 +702,7 @@
         setBuzzpoint: applyBuzzpoint,
         markFullRead: markFullRead,
         markEndBuzzpoint: markFullRead,
+        deadTossup: deadTossup,
         verdict: verdict,
         reset: reset
     };
