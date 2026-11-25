@@ -251,7 +251,7 @@ class ReadingModeScreenTests(unittest.TestCase):
         self.assertIn("sendEvent('SET_READING_MODE', { mode });", UI_SOURCE)
 
     def test_every_station_draws_the_server_choice(self):
-        self.assertIn("else if (data.type === 'READING_MODE')", SOCKET_SOURCE)
+        self.assertIn("READING_MODE(payload) {", SOCKET_SOURCE)
         self.assertIn("renderReadingMode(currentReadingMode)", SOCKET_SOURCE)
         self.assertIn("currentReadingMode = payload.reading_mode || 'stations';", SOCKET_SOURCE)
 
@@ -268,7 +268,7 @@ class ReadingModeScreenTests(unittest.TestCase):
         self.assertIn("function renderModeratorReading(active, kind = null)", SOCKET_SOURCE)
 
     def test_the_banner_follows_the_server_and_clears_for_an_answer(self):
-        self.assertIn("else if (data.type === 'MODERATOR_READING')", SOCKET_SOURCE)
+        self.assertIn("MODERATOR_READING(payload) {", SOCKET_SOURCE)
         self.assertIn("renderModeratorReading(payload.active, payload.kind);", SOCKET_SOURCE)
         self.assertIn("renderModeratorReading(payload.moderator_reading?.active, payload.moderator_reading?.kind);", SOCKET_SOURCE)
         self.assertEqual(SOCKET_SOURCE.count("renderModeratorReading(false);"), 2)

@@ -79,6 +79,32 @@ function setStage(stage) {
     }
 }
 
+// --- ROOM UI STATE ---
+// One server message owns every start/override control, so a bonus transition cannot
+// leave a stale toss-up or re-read button visible.
+function applyRoomUiState(payload) {
+    const btnTossup = document.getElementById('btn-start-tossup');
+    const btnBonus = document.getElementById('btn-start-bonus');
+    const btnReread = document.getElementById('btn-reread-tossup');
+    const btnOverride = document.getElementById('btn-override-last-question');
+
+    btnTossup?.classList.add('hidden');
+    btnBonus?.classList.add('hidden');
+    btnReread?.classList.add('hidden');
+    btnOverride?.classList.add('hidden');
+
+    if (payload.show === 'TOSSUP') btnTossup?.classList.remove('hidden');
+    if (payload.show === 'BONUS') btnBonus?.classList.remove('hidden');
+    if (payload.show === 'REREAD') btnReread?.classList.remove('hidden');
+    if (payload.can_override && currentUserRole === 'owner') btnOverride?.classList.remove('hidden');
+    if (payload.show === 'BONUS') {
+        const floor = document.getElementById('buzz-player-name');
+        if (floor) floor.textContent = 'FLOOR: CLEAR';
+        const hint = document.getElementById('manual-buzz-hint');
+        if (hint) hint.textContent = 'Bonus ready. Click Start Bonus, then read it aloud.';
+    }
+}
+
 // --- QUESTION BANK JSON LOADER ---
 const bankFileInput = document.getElementById('bank-file-input');
 const bankFileName = document.getElementById('bank-file-name');
@@ -575,7 +601,13 @@ async function startInPersonMatch() {
         window._manualRoster = rosterData;
         updateRosterNames(rosterData);
 
-        if (isRoomConnected() && window.activeRoomId && window.ManualReader?.isManual()) {
+        // Reusing an open station is only valid for the same local mode. AI setup
+        // must allocate its own in_person_ai room instead of loading into a manual one.
+        const reuseManualRoom = !aiMode
+            && isRoomConnected()
+            && window.activeRoomId
+            && window.ManualReader?.isManual();
+        if (reuseManualRoom) {
             window._manualSetupPending = true;
             openManualHudAfterSetup();
             return;

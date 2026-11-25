@@ -344,6 +344,15 @@ class ManualEntryPointTests(unittest.TestCase):
         self.assertIn("window.ManualReader?.isManual()", body)
         self.assertIn("closePreviousSocketForSwitch();", body)
 
+    def test_ai_setup_never_reuses_a_live_manual_room(self):
+        # An open manual station must only be reused by the manual setup. Otherwise
+        # Start AI Match would send the packet into the manual room instead of
+        # allocating an in_person_ai room.
+        body = function_source(UI_SOURCE, "startInPersonMatch")
+        self.assertIn("const reuseManualRoom = !aiMode", body)
+        self.assertIn("&& window.ManualReader?.isManual();", body)
+        self.assertIn("if (reuseManualRoom) {", body)
+
     def test_setup_stages_the_packet_until_the_match_starts(self):
         body = function_source(UI_SOURCE, "startInPersonMatch")
         self.assertIn("window.pendingBank = bankJson;", UI_SOURCE)

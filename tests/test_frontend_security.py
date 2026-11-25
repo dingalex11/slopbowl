@@ -47,6 +47,34 @@ class FrontendSecurityTests(unittest.TestCase):
         self.assertIn("renderOnlineRoster", source)
         self.assertIn("ROOM_ROSTER", source)
 
+    def test_room_messages_dispatch_through_one_handler_table(self):
+        source = (ROOT / "static/js/websocket.js").read_text(encoding="utf-8")
+        self.assertIn("const ROOM_MESSAGE_HANDLERS = {", source)
+        self.assertIn("const handler = ROOM_MESSAGE_HANDLERS[data.type];", source)
+        self.assertIn("Object.prototype.hasOwnProperty.call(ROOM_MESSAGE_HANDLERS, data.type)", source)
+        # The old long chain is gone; only the CONNECTED connection-state prelude remains.
+        self.assertNotIn("else if (data.type === ", source)
+        for kind in ("ROOM_ROSTER", "UPDATE_STATUS", "MATCH_COMPLETE", "START_READING", "START_LISTENING", "BUZZ"):
+            self.assertIn(f"    {kind}(payload) {{", source)
+
+    def test_one_ui_state_handler_owns_every_start_control(self):
+        socket_source = (ROOT / "static/js/websocket.js").read_text(encoding="utf-8")
+        ui_source = (ROOT / "static/js/ui.js").read_text(encoding="utf-8")
+        self.assertIn("function applyRoomUiState(payload)", ui_source)
+        self.assertIn("UI_STATE: applyRoomUiState,", socket_source)
+        self.assertEqual(socket_source.count("UI_STATE"), 1)
+        self.assertNotIn("else if (data.type === 'UI_STATE')", socket_source)
+        for control in (
+            "btn-start-tossup", "btn-start-bonus", "btn-reread-tossup",
+            "btn-override-last-question",
+        ):
+            self.assertIn(control, ui_source)
+        self.assertIn("if (payload.show === 'TOSSUP')", ui_source)
+        self.assertIn("if (payload.show === 'BONUS')", ui_source)
+        self.assertIn("if (payload.show === 'REREAD')", ui_source)
+        self.assertIn("if (payload.can_override && currentUserRole === 'owner')", ui_source)
+        self.assertIn("Bonus ready. Click Start Bonus, then read it aloud.", ui_source)
+
     def test_a_stopped_or_replaced_read_never_reports_completion(self):
         """Only the read that is actually being spoken may report completion.
 

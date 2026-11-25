@@ -142,332 +142,9 @@ function connectWebSocket(roomId, apiKey = null) {
                 if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "PING", payload: {} }));
             }, 15000);
         }
-        const statusEl = document.getElementById('header-status');
-
-        if (data.type === 'CONNECTED') {
-            currentUserRole = payload.role || 'viewer';
-            currentRoomMode = payload.mode || 'in_person';
-            currentReadingMode = payload.reading_mode || 'stations';
-            if (typeof renderReadingMode === 'function') renderReadingMode(currentReadingMode);
-            // A station that joins mid-read still learns that the room's voice is the moderator's.
-            renderModeratorReading(payload.moderator_reading?.active, payload.moderator_reading?.kind);
-            assignedSeat = payload.seat || null;
-            currentTeam = payload.team || null;
-            isOnlineCaptain = Boolean(payload.captain);
-            const onlineBuzzControls = document.getElementById('online-buzz-controls');
-            const manualMode = Boolean(payload.manual_reader);
-            onlineBuzzControls?.classList.toggle('hidden', currentRoomMode !== 'online');
-            document.getElementById('match-layout')?.classList.toggle('is-manual', currentRoomMode === 'in_person' && manualMode);
-            document.querySelectorAll('.moderator-only-control').forEach((control) => {
-                control.classList.toggle('hidden', currentUserRole !== 'owner');
-            });
-            document.querySelectorAll('.viewer-only-control').forEach((control) => {
-                control.classList.toggle('hidden', currentUserRole === 'owner');
-            });
-            const ownTeamName = currentTeam === 'Team A' ? document.getElementById('header-team-a-name') : document.getElementById('header-team-b-name');
-            if (ownTeamName && payload.name) ownTeamName.title = `You are ${payload.name}${isOnlineCaptain ? ' (Captain)' : ''}`;
-            if (typeof applyRoleVisibility === 'function') applyRoleVisibility(currentUserRole);
-            if (typeof updateSeatLabels === 'function') updateSeatLabels(payload);
-            updateOnlineBuzzButton();
-            if (window.ManualReader) window.ManualReader.onConnected(payload);
-            if (window.CameraBuzz && typeof window.CameraBuzz.applyState === 'function') {
-                window.CameraBuzz.applyState({ enabled: Boolean(payload.camera_buzz), mode: currentRoomMode });
-            }
-            if (window._manualSetupPending && typeof window.openManualHudAfterSetup === 'function') {
-                window.openManualHudAfterSetup();
-            }
-        }
-        else if (data.type === 'ROOM_ROSTER') {
-            renderOnlineRoster(payload.players || []);
-        }
-        else if (data.type === 'UPDATE_STATUS') {
-            if (statusEl) statusEl.innerText = payload.text || 'READY';
-            const playerStatus = document.getElementById('player-lobby-status');
-            if (playerStatus) playerStatus.innerText = payload.text || 'Connected';
-            const micLabel = document.getElementById('player-mic-label');
-            if (micLabel) micLabel.innerText = (payload.text || 'STANDBY').slice(0, 42).toUpperCase();
-            
-            // EXACT TRIGGER: Start the 5-second physical timer only when the backend opens the buzz window.
-            // Manual rooms use the rebound-only window; their HUD owns that clock.
-            if (payload.text === "⏳ 5 Seconds to Buzz..." && !(window.ManualReader && window.ManualReader.isManual())) {
-                const label = document.getElementById('action-timer-label');
-                if (label) label.innerText = "REBOUND (5s)";
-                startActionTimer(5.0, null);
-            }
-
-            // A rejected packet must reach the page that uploaded it.
-            const settingsStatus = document.getElementById('settings-packet-status');
-            if (settingsStatus && /^❌/.test(payload.text || '')) {
-                settingsStatus.innerText = payload.text;
-                settingsStatus.className = 'mt-4 text-center text-xs font-mono font-bold text-neonPink min-h-5';
-            }
-
-            // The status line alone also proves the packet landed, so the pending
-            // confirmation cannot hang on one missed message.
-            const loaded = /Loaded (\d+) new questions/.exec(payload.text || '');
-            if (loaded) announcePacketLoaded({ count: Number(loaded[1]) });
-        }
-        else if (data.type === 'PREMATCH_READY') {
-            // A new packet is a new match: clear every score and row from the old one.
-            resetMatchHud();
-            announcePacketLoaded(payload);
-        }
-        else if (data.type === 'MATCH_COMPLETE') {
-            currentMatchLog = Array.isArray(payload.log) ? payload.log : currentMatchLog;
-            currentMatchTeardown = Boolean(payload.teardown);
-            window.currentMatchTeardown = currentMatchTeardown;
-            renderScoresheetFromLog(currentMatchLog);
-            // The match may end while a question is still being read or answered.
-            // Silence the room and stop any open recording before showing the final screen.
-            cancelSpeech();
-            cancelListening();
-            stopActionTimer();
-            // A forced end can land between the server's phase updates; leave the HUD
-            // idle behind the summary rather than showing a read that is still running.
-            if (window.ManualReader) window.ManualReader.setPhase({ phase: 'IDLE', seconds: null });
-            if (window.MatchSummary) window.MatchSummary.show(payload, currentMatchLog);
-            // Retry the cloud copy at the match boundary in case the final SYNC_LOG was
-            // dropped; the end screen must not depend on the socket staying alive.
-            if (window.saveMatchLogToCloud && typeof currentRoomId !== 'undefined') {
-                window.saveMatchLogToCloud(currentRoomId, currentMatchLog);
-            }
-        }
-        else if (data.type === 'ERROR') {
-            const roomError = payload.message || 'The room rejected that action.';
-            showEventFeedback(roomError);
-            // Resolve the packet confirmation: a rejected upload must not sit on "waiting".
-            const pendingStatus = document.getElementById('settings-packet-status');
-            if (pendingStatus && (pendingStatus.className || '').includes('text-neonAmber')) {
-                pendingStatus.innerText = `Packet rejected — ${roomError}`;
-                pendingStatus.className = 'mt-4 text-center text-xs font-mono font-bold text-neonPink min-h-5';
-            }
-        }
-        // ... [Existing websocket.js handlers like NEW_LOG_ENTRY] ...
-        
-        else if (data.type === 'SYNC_LOG') {
-            currentMatchLog = Array.isArray(payload.log) ? payload.log : [];
-            // The server's full log is authoritative: rebuilding removes any row the
-            // moderator reopened with Override Last Question.
-            renderScoresheetFromLog(currentMatchLog);
-            // Push the full array of JSON log entries to Firestore
-            if (window.saveMatchLogToCloud && typeof currentRoomId !== 'undefined') {
-                window.saveMatchLogToCloud(currentRoomId, currentMatchLog);
-            }
-        }
-        else if (data.type === 'UI_STATE') {
-            const btnTossup = document.getElementById('btn-start-tossup');
-            const btnBonus = document.getElementById('btn-start-bonus');
-            const btnReread = document.getElementById('btn-reread-tossup');
-            const btnOverride = document.getElementById('btn-override-last-question');
-
-            btnTossup?.classList.add('hidden');
-            btnBonus?.classList.add('hidden');
-            btnReread?.classList.add('hidden');
-            btnOverride?.classList.add('hidden');
-
-            if (payload.show === 'TOSSUP') btnTossup?.classList.remove('hidden');
-            if (payload.show === 'BONUS') btnBonus?.classList.remove('hidden');
-            if (payload.show === 'REREAD') btnReread?.classList.remove('hidden');
-            if (payload.can_override && currentUserRole === 'owner') btnOverride?.classList.remove('hidden');
-            if (payload.show === 'BONUS') {
-                const floor = document.getElementById('buzz-player-name');
-                if (floor) floor.textContent = 'FLOOR: CLEAR';
-                const hint = document.getElementById('manual-buzz-hint');
-                if (hint) hint.textContent = 'Bonus ready. Click Start Bonus, then read it aloud.';
-            }
-        }
-        else if (data.type === 'ROOM_CLOSED') {
-            const reason = payload.reason || 'Match ended';
-            if (typeof showToast === 'function') showToast(`${reason} — room closed.`);
-        }
-        else if (data.type === 'MANUAL_PHASE') {
-            if (window.ManualReader) window.ManualReader.setPhase(payload);
-        }
-        else if (data.type === 'BUZZPOINT_SET') {
-            if (window.ManualReader) window.ManualReader.setBuzzpoint(payload.buzzpoint, payload.after_read);
-        }
-        else if (data.type === 'UPDATE_QUESTION') {
-            currentStageType = "TOSSUP";
-            if (payload.manual && window.ManualReader) {
-                currentStageType = payload.phase === 'BONUS' ? 'BONUS' : 'TOSSUP';
-                window.ManualReader.setQuestion(payload);
-            } else {
-                // Online AI and in-person AI rooms keep the original audio-only readout;
-                // manual rooms render the packet into the reader panel instead.
-                const camBadge = document.getElementById('buzz-source-badge');
-                if (camBadge) camBadge.classList.add('hidden');
-                setStage('READ_TOSSUP');
-            }
-            
-            const catMap = {
-                "BIOLOGY": "BIO", 
-                "CHEMISTRY": "CHEM", 
-                "PHYSICS": "PHY",
-                "MATH": "MATH", 
-                "EARTH SCIENCE": "ESS", 
-                "ENERGY": "NRG",
-                "EARTH AND SPACE": "ESS", 
-                "GENERAL SCIENCE": "GEN"
-            };
-            const rawCat = (payload.category || 'GENERAL').toUpperCase();
-            currentCategoryAbbrev = catMap[rawCat] || rawCat.substring(0, 4);
-
-            const catBadge = document.getElementById('stage-cat-badge');
-            
-            if (catBadge) catBadge.innerText = payload.category || 'GENERAL';
-            // No question or answer text is written to the DOM.
-        } 
-        else if (data.type === 'NEW_LOG_ENTRY') {
-            applyLogEntry(payload);
-        }
-        else if (data.type === 'MODERATOR_READING') {
-            renderModeratorReading(payload.active, payload.kind);
-        }
-        else if (data.type === 'DOWNLOAD_CSV') {
-            const csv = typeof payload.csv_data === 'string' ? payload.csv_data : '';
-            if (!csv) {
-                showEventFeedback('The match log is empty.');
-                return;
-            }
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = 'slopbowl_match_log.csv';
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(url);
-        }
-        else if (data.type === 'READING_MODE') {
-            // The moderator's choice, echoed to every station in the room.
-            currentReadingMode = payload.mode || 'stations';
-            if (typeof renderReadingMode === 'function') renderReadingMode(currentReadingMode);
-        }
-        else if (data.type === 'START_READING') {
-            if (window.ManualReader && window.ManualReader.isManual()) return;
-            if (payload.moderator_only && currentUserRole !== 'owner') return;
-            if (currentRoomMode === 'online') {
-                currentReadingId = payload.reading_id || null;
-                isReadingOnline = true;
-                onlineReadCompletions = new Set();
-            }
-            advancePlayerToBuzzer();
-            speakText(payload.text, payload.reading_id || null);
-        }
-        else if (data.type === 'OPEN_BUZZ') {
-            onlineBuzzOpen = true;
-            currentOnlineBuzzTeam = payload.team || null;
-            onlineCaptainOnly = Boolean(payload.captain_only);
-            updateOnlineBuzzButton();
-            advancePlayerToBuzzer();
-        }
-        else if (data.type === 'CLOSE_BUZZ') {
-            onlineBuzzOpen = false;
-            currentOnlineBuzzTeam = null;
-            onlineCaptainOnly = false;
-            updateOnlineBuzzButton();
-        }
-        else if (data.type === 'START_LISTENING') {
-            if (window.ManualReader && window.ManualReader.isManual()) return;
-            // In-person requests only reach the moderator; online requests only reach the answerer.
-            const timeout = payload.timeout || 5.0;
-            // The answer window replaces the read, so the "moderator is reading" banner is done.
-            renderModeratorReading(false);
-            
-            if (timeout > 15.0) {
-                currentStageType = "BONUS";
-                updateOnlineBuzzButton();
-                const label = document.getElementById('action-timer-label');
-                if (label) label.innerText = "BONUS CONFER (20s)";
-                startActionTimer(20.0, 5.0);
-            } else {
-                const label = document.getElementById('action-timer-label');
-                if (label) label.innerText = "ANSWERING";
-                startActionTimer(timeout, 2.0);
-            }
-            
-            startListening(timeout, payload.expires_at || null);
-        }
-        else if (data.type === 'CAMERA_BUZZ_STATE') {
-            if (window.CameraBuzz && typeof window.CameraBuzz.applyState === 'function') {
-                window.CameraBuzz.applyState(payload);
-            }
-        }
-        else if (data.type === 'DEBUG_FRAME') {
-            const img = new Image();
-            img.onload = () => {
-                const matchCanvas = document.getElementById('match-calib-canvas');
-                if (matchCanvas && matchCanvas.offsetParent !== null) {
-                    matchCanvas.width = img.width;
-                    matchCanvas.height = img.height;
-                    const ctx = matchCanvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
-                }
-            };
-            img.src = payload.frame_data;
-        }
-        else if (data.type === 'UI_STATE') {
-            const btnTossup = document.getElementById('btn-start-tossup');
-            const btnBonus = document.getElementById('btn-start-bonus');
-            
-            if (btnTossup && btnBonus) {
-                if (payload.show === 'TOSSUP') {
-                    btnTossup.classList.remove('hidden');
-                    btnBonus.classList.add('hidden');
-                } else if (payload.show === 'BONUS') {
-                    btnTossup.classList.add('hidden');
-                    btnBonus.classList.remove('hidden');
-                } else {
-                    btnTossup.classList.add('hidden');
-                    btnBonus.classList.add('hidden');
-                }
-            }
-        }
-        else if (data.type === 'UPDATE_SCORE') {
-            ['score-header-a', 'hud-score-a'].forEach((id) => {
-                const scoreA = document.getElementById(id);
-                if (scoreA && payload.score_a !== undefined) scoreA.innerText = payload.score_a;
-            });
-            ['score-header-b', 'hud-score-b'].forEach((id) => {
-                const scoreB = document.getElementById(id);
-                if (scoreB && payload.score_b !== undefined) scoreB.innerText = payload.score_b;
-            });
-        }
-        else if (data.type === 'BUZZ') {
-            stopActionTimer(); 
-            renderModeratorReading(false);
-            if (currentRoomMode === 'in_person' && window.ManualReader && window.ManualReader.isManual()) {
-                setStage('BUZZ');
-                const manualTeam = payload.team || 'Unknown';
-                const manualPlayer = payload.player || 'Player';
-                const manualPlayerEl = document.getElementById('buzz-player-name');
-                if (manualPlayerEl) manualPlayerEl.innerText = `${String(manualPlayer).toUpperCase()} BUZZED — ${manualTeam}`;
-                window.ManualReader.beginBuzz(payload);
-                return;
-            }
-            if (isReading) {
-                const spokenWord = currentSpokenWord;
-                // Stopping the read must not report a completion: the server takes the
-                // next completion it sees as this read finishing, and that used to
-                // start the next question's 5-second buzz timer before it was read.
-                cancelSpeech();
-                sendEvent('LOG_BUZZPOINT', { buzzpoint: spokenWord });
-            }
-            
-            setStage('BUZZ');
-            const team = payload.team || 'Unknown';
-            const player = payload.player || 'Player';
-            
-            const playerEl = document.getElementById('buzz-player-name');
-            if (playerEl) playerEl.innerText = `FLOOR: ${team} (${player})`;
-            const camBadge = document.getElementById('buzz-source-badge');
-            if (camBadge) camBadge.classList.toggle('hidden', payload.source !== 'camera');
-            
-            const playerStage = document.getElementById('player-stage-label');
-            if (playerStage) playerStage.innerText = `BUZZ: ${team} (${player})`;
-            document.body.style.backgroundColor = '#2a0505';
-            setTimeout(() => document.body.style.backgroundColor = '#000000', 300);
+        const handler = ROOM_MESSAGE_HANDLERS[data.type];
+        if (Object.prototype.hasOwnProperty.call(ROOM_MESSAGE_HANDLERS, data.type) && typeof handler === 'function') {
+            handler(payload);
         }
     };
 
@@ -524,6 +201,297 @@ function connectWebSocket(roomId, apiKey = null) {
         reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
     };
 }
+
+// One handler per server message type. Own-property lookup keeps unknown or inherited
+// names inert, exactly like the previous fall-through chain.
+const ROOM_MESSAGE_HANDLERS = {
+    CONNECTED(payload) {
+        currentUserRole = payload.role || 'viewer';
+        currentRoomMode = payload.mode || 'in_person';
+        currentReadingMode = payload.reading_mode || 'stations';
+        if (typeof renderReadingMode === 'function') renderReadingMode(currentReadingMode);
+        // A station that joins mid-read still learns that the room's voice is the moderator's.
+        renderModeratorReading(payload.moderator_reading?.active, payload.moderator_reading?.kind);
+        assignedSeat = payload.seat || null;
+        currentTeam = payload.team || null;
+        isOnlineCaptain = Boolean(payload.captain);
+        const onlineBuzzControls = document.getElementById('online-buzz-controls');
+        const manualMode = Boolean(payload.manual_reader);
+        onlineBuzzControls?.classList.toggle('hidden', currentRoomMode !== 'online');
+        document.getElementById('match-layout')?.classList.toggle('is-manual', currentRoomMode === 'in_person' && manualMode);
+        document.querySelectorAll('.moderator-only-control').forEach((control) => {
+            control.classList.toggle('hidden', currentUserRole !== 'owner');
+        });
+        document.querySelectorAll('.viewer-only-control').forEach((control) => {
+            control.classList.toggle('hidden', currentUserRole === 'owner');
+        });
+        const ownTeamName = currentTeam === 'Team A' ? document.getElementById('header-team-a-name') : document.getElementById('header-team-b-name');
+        if (ownTeamName && payload.name) ownTeamName.title = `You are ${payload.name}${isOnlineCaptain ? ' (Captain)' : ''}`;
+        if (typeof applyRoleVisibility === 'function') applyRoleVisibility(currentUserRole);
+        if (typeof updateSeatLabels === 'function') updateSeatLabels(payload);
+        updateOnlineBuzzButton();
+        if (window.ManualReader) window.ManualReader.onConnected(payload);
+        if (window.CameraBuzz && typeof window.CameraBuzz.applyState === 'function') {
+            window.CameraBuzz.applyState({ enabled: Boolean(payload.camera_buzz), mode: currentRoomMode });
+        }
+        if (window._manualSetupPending && typeof window.openManualHudAfterSetup === 'function') {
+            window.openManualHudAfterSetup();
+        }
+    },
+    ROOM_ROSTER(payload) {
+        renderOnlineRoster(payload.players || []);
+    },
+    UPDATE_STATUS(payload) {
+        const statusEl = document.getElementById('header-status');
+        if (statusEl) statusEl.innerText = payload.text || 'READY';
+        const playerStatus = document.getElementById('player-lobby-status');
+        if (playerStatus) playerStatus.innerText = payload.text || 'Connected';
+        const micLabel = document.getElementById('player-mic-label');
+        if (micLabel) micLabel.innerText = (payload.text || 'STANDBY').slice(0, 42).toUpperCase();
+
+        // EXACT TRIGGER: Start the 5-second physical timer only when the backend opens the buzz window.
+        // Manual rooms use the rebound-only window; their HUD owns that clock.
+        if (payload.text === "⏳ 5 Seconds to Buzz..." && !(window.ManualReader && window.ManualReader.isManual())) {
+            const label = document.getElementById('action-timer-label');
+            if (label) label.innerText = "REBOUND (5s)";
+            startActionTimer(5.0, null);
+        }
+
+        // A rejected packet must reach the page that uploaded it.
+        const settingsStatus = document.getElementById('settings-packet-status');
+        if (settingsStatus && /^❌/.test(payload.text || '')) {
+            settingsStatus.innerText = payload.text;
+            settingsStatus.className = 'mt-4 text-center text-xs font-mono font-bold text-neonPink min-h-5';
+        }
+
+        // The status line alone also proves the packet landed, so the pending
+        // confirmation cannot hang on one missed message.
+        const loaded = /Loaded (\d+) new questions/.exec(payload.text || '');
+        if (loaded) announcePacketLoaded({ count: Number(loaded[1]) });
+    },
+    PREMATCH_READY(payload) {
+        // A new packet is a new match: clear every score and row from the old one.
+        resetMatchHud();
+        announcePacketLoaded(payload);
+    },
+    MATCH_COMPLETE(payload) {
+        currentMatchLog = Array.isArray(payload.log) ? payload.log : currentMatchLog;
+        currentMatchTeardown = Boolean(payload.teardown);
+        window.currentMatchTeardown = currentMatchTeardown;
+        renderScoresheetFromLog(currentMatchLog);
+        // The match may end while a question is still being read or answered.
+        // Silence the room and stop any open recording before showing the final screen.
+        cancelSpeech();
+        cancelListening();
+        stopActionTimer();
+        // A forced end can land between the server's phase updates; leave the HUD
+        // idle behind the summary rather than showing a read that is still running.
+        if (window.ManualReader) window.ManualReader.setPhase({ phase: 'IDLE', seconds: null });
+        if (window.MatchSummary) window.MatchSummary.show(payload, currentMatchLog);
+        // Retry the cloud copy at the match boundary in case the final SYNC_LOG was
+        // dropped; the end screen must not depend on the socket staying alive.
+        if (window.saveMatchLogToCloud && typeof currentRoomId !== 'undefined') {
+            window.saveMatchLogToCloud(currentRoomId, currentMatchLog);
+        }
+    },
+    ERROR(payload) {
+        const roomError = payload.message || 'The room rejected that action.';
+        showEventFeedback(roomError);
+        // Resolve the packet confirmation: a rejected upload must not sit on "waiting".
+        const pendingStatus = document.getElementById('settings-packet-status');
+        if (pendingStatus && (pendingStatus.className || '').includes('text-neonAmber')) {
+            pendingStatus.innerText = `Packet rejected — ${roomError}`;
+            pendingStatus.className = 'mt-4 text-center text-xs font-mono font-bold text-neonPink min-h-5';
+        }
+    },
+    SYNC_LOG(payload) {
+        currentMatchLog = Array.isArray(payload.log) ? payload.log : [];
+        // The server's full log is authoritative: rebuilding removes any row the
+        // moderator reopened with Override Last Question.
+        renderScoresheetFromLog(currentMatchLog);
+        // Push the full array of JSON log entries to Firestore
+        if (window.saveMatchLogToCloud && typeof currentRoomId !== 'undefined') {
+            window.saveMatchLogToCloud(currentRoomId, currentMatchLog);
+        }
+    },
+    UI_STATE: applyRoomUiState,
+    ROOM_CLOSED(payload) {
+        const reason = payload.reason || 'Match ended';
+        if (typeof showToast === 'function') showToast(`${reason} — room closed.`);
+    },
+    MANUAL_PHASE(payload) {
+        if (window.ManualReader) window.ManualReader.setPhase(payload);
+    },
+    BUZZPOINT_SET(payload) {
+        if (window.ManualReader) window.ManualReader.setBuzzpoint(payload.buzzpoint, payload.after_read);
+    },
+    UPDATE_QUESTION(payload) {
+        currentStageType = "TOSSUP";
+        if (payload.manual && window.ManualReader) {
+            currentStageType = payload.phase === 'BONUS' ? 'BONUS' : 'TOSSUP';
+            window.ManualReader.setQuestion(payload);
+        } else {
+            // Online AI and in-person AI rooms keep the original audio-only readout;
+            // manual rooms render the packet into the reader panel instead.
+            const camBadge = document.getElementById('buzz-source-badge');
+            if (camBadge) camBadge.classList.add('hidden');
+            setStage('READ_TOSSUP');
+        }
+
+        const catMap = {
+            "BIOLOGY": "BIO",
+            "CHEMISTRY": "CHEM",
+            "PHYSICS": "PHY",
+            "MATH": "MATH",
+            "EARTH SCIENCE": "ESS",
+            "ENERGY": "NRG",
+            "EARTH AND SPACE": "ESS",
+            "GENERAL SCIENCE": "GEN"
+        };
+        const rawCat = (payload.category || 'GENERAL').toUpperCase();
+        currentCategoryAbbrev = catMap[rawCat] || rawCat.substring(0, 4);
+
+        const catBadge = document.getElementById('stage-cat-badge');
+
+        if (catBadge) catBadge.innerText = payload.category || 'GENERAL';
+        // No question or answer text is written to the DOM.
+    },
+    NEW_LOG_ENTRY(payload) {
+        applyLogEntry(payload);
+    },
+    MODERATOR_READING(payload) {
+        renderModeratorReading(payload.active, payload.kind);
+    },
+    DOWNLOAD_CSV(payload) {
+        const csv = typeof payload.csv_data === 'string' ? payload.csv_data : '';
+        if (!csv) {
+            showEventFeedback('The match log is empty.');
+            return;
+        }
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'slopbowl_match_log.csv';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    },
+    READING_MODE(payload) {
+        // The moderator's choice, echoed to every station in the room.
+        currentReadingMode = payload.mode || 'stations';
+        if (typeof renderReadingMode === 'function') renderReadingMode(currentReadingMode);
+    },
+    START_READING(payload) {
+        if (window.ManualReader && window.ManualReader.isManual()) return;
+        if (payload.moderator_only && currentUserRole !== 'owner') return;
+        if (currentRoomMode === 'online') {
+            currentReadingId = payload.reading_id || null;
+            isReadingOnline = true;
+            onlineReadCompletions = new Set();
+        }
+        advancePlayerToBuzzer();
+        speakText(payload.text, payload.reading_id || null);
+    },
+    OPEN_BUZZ(payload) {
+        onlineBuzzOpen = true;
+        currentOnlineBuzzTeam = payload.team || null;
+        onlineCaptainOnly = Boolean(payload.captain_only);
+        updateOnlineBuzzButton();
+        advancePlayerToBuzzer();
+    },
+    CLOSE_BUZZ(payload) {
+        onlineBuzzOpen = false;
+        currentOnlineBuzzTeam = null;
+        onlineCaptainOnly = false;
+        updateOnlineBuzzButton();
+    },
+    START_LISTENING(payload) {
+        if (window.ManualReader && window.ManualReader.isManual()) return;
+        // In-person requests only reach the moderator; online requests only reach the answerer.
+        const timeout = payload.timeout || 5.0;
+        // The answer window replaces the read, so the "moderator is reading" banner is done.
+        renderModeratorReading(false);
+
+        if (timeout > 15.0) {
+            currentStageType = "BONUS";
+            updateOnlineBuzzButton();
+            const label = document.getElementById('action-timer-label');
+            if (label) label.innerText = "BONUS CONFER (20s)";
+            startActionTimer(20.0, 5.0);
+        } else {
+            const label = document.getElementById('action-timer-label');
+            if (label) label.innerText = "ANSWERING";
+            startActionTimer(timeout, 2.0);
+        }
+
+        startListening(timeout, payload.expires_at || null);
+    },
+    CAMERA_BUZZ_STATE(payload) {
+        if (window.CameraBuzz && typeof window.CameraBuzz.applyState === 'function') {
+            window.CameraBuzz.applyState(payload);
+        }
+    },
+    DEBUG_FRAME(payload) {
+        const img = new Image();
+        img.onload = () => {
+            const matchCanvas = document.getElementById('match-calib-canvas');
+            if (matchCanvas && matchCanvas.offsetParent !== null) {
+                matchCanvas.width = img.width;
+                matchCanvas.height = img.height;
+                const ctx = matchCanvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+            }
+        };
+        img.src = payload.frame_data;
+    },
+    UPDATE_SCORE(payload) {
+        ['score-header-a', 'hud-score-a'].forEach((id) => {
+            const scoreA = document.getElementById(id);
+            if (scoreA && payload.score_a !== undefined) scoreA.innerText = payload.score_a;
+        });
+        ['score-header-b', 'hud-score-b'].forEach((id) => {
+            const scoreB = document.getElementById(id);
+            if (scoreB && payload.score_b !== undefined) scoreB.innerText = payload.score_b;
+        });
+    },
+    BUZZ(payload) {
+        stopActionTimer();
+        renderModeratorReading(false);
+        if (currentRoomMode === 'in_person' && window.ManualReader && window.ManualReader.isManual()) {
+            setStage('BUZZ');
+            const manualTeam = payload.team || 'Unknown';
+            const manualPlayer = payload.player || 'Player';
+            const manualPlayerEl = document.getElementById('buzz-player-name');
+            if (manualPlayerEl) manualPlayerEl.innerText = `${String(manualPlayer).toUpperCase()} BUZZED — ${manualTeam}`;
+            window.ManualReader.beginBuzz(payload);
+            return;
+        }
+        if (isReading) {
+            const spokenWord = currentSpokenWord;
+            // Stopping the read must not report a completion: the server takes the
+            // next completion it sees as this read finishing, and that used to
+            // start the next question's 5-second buzz timer before it was read.
+            cancelSpeech();
+            sendEvent('LOG_BUZZPOINT', { buzzpoint: spokenWord });
+        }
+
+        setStage('BUZZ');
+        const team = payload.team || 'Unknown';
+        const player = payload.player || 'Player';
+
+        const playerEl = document.getElementById('buzz-player-name');
+        if (playerEl) playerEl.innerText = `FLOOR: ${team} (${player})`;
+        const camBadge = document.getElementById('buzz-source-badge');
+        if (camBadge) camBadge.classList.toggle('hidden', payload.source !== 'camera');
+
+        const playerStage = document.getElementById('player-stage-label');
+        if (playerStage) playerStage.innerText = `BUZZ: ${team} (${player})`;
+        document.body.style.backgroundColor = '#2a0505';
+        setTimeout(() => document.body.style.backgroundColor = '#000000', 300);
+    },
+};
 
 function isRoomConnected() {
     return !!(ws && ws.readyState === WebSocket.OPEN);

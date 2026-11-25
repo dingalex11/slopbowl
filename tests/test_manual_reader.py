@@ -521,13 +521,13 @@ class ManualReaderPageTests(unittest.TestCase):
         self.assertNotIn("token.dataset.word === selectedBuzzpoint", MANUAL_SOURCE)
 
     def test_the_socket_dispatches_manual_phase_buzzpoint_and_camera_state(self):
-        self.assertIn("data.type === 'MANUAL_PHASE'", SOCKET_SOURCE)
-        self.assertIn("data.type === 'BUZZPOINT_SET'", SOCKET_SOURCE)
-        self.assertIn("data.type === 'CAMERA_BUZZ_STATE'", SOCKET_SOURCE)
+        self.assertIn("MANUAL_PHASE(payload) {", SOCKET_SOURCE)
+        self.assertIn("BUZZPOINT_SET(payload) {", SOCKET_SOURCE)
+        self.assertIn("CAMERA_BUZZ_STATE(payload) {", SOCKET_SOURCE)
         self.assertIn("window.CameraBuzz.applyState(payload)", SOCKET_SOURCE)
         self.assertIn("window.ManualReader.beginBuzz(payload);", SOCKET_SOURCE)
         self.assertIn("window.ManualReader.onConnected(payload);", SOCKET_SOURCE)
-        self.assertIn("data.type === 'DOWNLOAD_CSV'", SOCKET_SOURCE)
+        self.assertIn("DOWNLOAD_CSV(payload) {", SOCKET_SOURCE)
         self.assertIn("link.download = 'slopbowl_match_log.csv';", SOCKET_SOURCE)
 
     def test_bonus_verdicts_do_not_need_a_buzzpoint(self):
