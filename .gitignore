@@ -12,6 +12,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Local logs
+*.log
+
 # Local Match Data & Analytics
 *.csv
 *.md
