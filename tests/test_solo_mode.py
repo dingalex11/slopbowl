@@ -15,6 +15,7 @@ from services import ui_service
 
 ROOT = Path(__file__).resolve().parents[1]
 SOLO_SOURCE = (ROOT / "static/js/solo.js").read_text(encoding="utf-8")
+SOLO_GRADING_SOURCE = (ROOT / "static/js/solo_grading.js").read_text(encoding="utf-8")
 INDEX_SOURCE = (ROOT / "index.html").read_text(encoding="utf-8")
 SHELL_SOURCE = (ROOT / "static/js/slopbowl_ui.js").read_text(encoding="utf-8")
 AUTH_SOURCE = (ROOT / "static/js/auth.js").read_text(encoding="utf-8")
@@ -97,7 +98,20 @@ class SoloModeTests(unittest.TestCase):
         """Packet text is untrusted: it must reach the page as text nodes only."""
         self.assertNotIn("innerHTML", SOLO_SOURCE)
         self.assertIn("span.textContent", SOLO_SOURCE)
-        self.assertIn("function soloNormalizeText(", SOLO_SOURCE)
+
+    def test_the_grading_mirror_loads_before_the_drill(self):
+        self.assertIn('<script src="/static/js/solo_grading.js"></script>', INDEX_SOURCE)
+        self.assertLess(INDEX_SOURCE.index("static/js/solo_grading.js"),
+                        INDEX_SOURCE.index("static/js/solo.js"))
+        for wrapper in (
+            "window.SoloGrading.judgeAnswer(question, response)",
+            "window.SoloGrading.judgeBonus(question, response)",
+        ):
+            self.assertIn(wrapper, SOLO_SOURCE)
+        self.assertIn("function soloNormalizeText(", SOLO_GRADING_SOURCE)
+        self.assertIn("function soloCandidateAnswers(", SOLO_GRADING_SOURCE)
+        self.assertIn("SOLO_MC_LINE", SOLO_GRADING_SOURCE)
+        self.assertNotIn("SOLO_MC_LINE", SOLO_SOURCE)
 
     def test_leaving_the_drill_slides_releases_speech_and_timers(self):
         self.assertIn("if (typeof soloLeavePractice === 'function') soloLeavePractice(slideNum);", SHELL_SOURCE)

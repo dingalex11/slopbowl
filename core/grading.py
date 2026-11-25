@@ -1,8 +1,9 @@
 """Normalized answer grading for typed Buzzpoint Board responses.
 
 The Board grades on the server, so the rules live here. The solo drill keeps a mirrored
-copy of the same algorithm in ``static/js/solo.js`` (``soloJudgeAnswer``); the two are
-deliberately kept in step.
+copy of the same algorithm in ``static/js/solo_grading.js`` (``SoloGrading.judgeAnswer``),
+with thin ``soloJudgeAnswer`` wrappers in ``static/js/solo.js``; the two are deliberately
+kept in step.
 
 A packet line may carry alternatives — ``6,000 (ACCEPT: 6 x 10^3)`` — and by packet
 convention every listed alternative is an equally correct answer. A line may also list its

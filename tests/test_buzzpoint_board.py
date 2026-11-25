@@ -22,6 +22,7 @@ from services import challenge_service, ui_service
 ROOT = Path(__file__).resolve().parents[1]
 BUZZPOINT_SOURCE = (ROOT / "static/js/buzzpoint.js").read_text(encoding="utf-8")
 SOLO_SOURCE = (ROOT / "static/js/solo.js").read_text(encoding="utf-8")
+SOLO_GRADING_SOURCE = (ROOT / "static/js/solo_grading.js").read_text(encoding="utf-8")
 ANALYTICS_SOURCE = (ROOT / "static/js/buzzboard_analytics.js").read_text(encoding="utf-8")
 ROUTER_SOURCE = (ROOT / "static/js/router.js").read_text(encoding="utf-8")
 INDEX_SOURCE = (ROOT / "index.html").read_text(encoding="utf-8")
@@ -222,7 +223,7 @@ class MultipleChoiceRuleTests(unittest.TestCase):
 
 
 class SoloJudgeMirrorTests(unittest.TestCase):
-    """``core/grading.py`` is the reference; ``soloJudgeAnswer`` must not drift from it.
+    """``core/grading.py`` is the reference; ``SoloGrading.judgeAnswer`` must not drift from it.
 
     There is no JS runtime in the suite, so the mirror is pinned by asserting on its source
     the way the other frontend tests do. The behaviour of both sides was verified against
@@ -236,17 +237,17 @@ class SoloJudgeMirrorTests(unittest.TestCase):
             "soloTypoAllowance", "soloPhrasesEqual",
         ):
             with self.subTest(function=name):
-                self.assertIn(f"function {name}(", SOLO_SOURCE)
+                self.assertIn(f"function {name}(", SOLO_GRADING_SOURCE)
 
     def test_the_solo_judge_reads_the_same_packet_markers(self):
         # The ACCEPT group, the annotation parenthetical, the W/X/Y/Z choice line, and the
         # bounded typo bands must all be present on both sides.
-        self.assertIn("accept", SOLO_SOURCE.lower())
-        self.assertIn("SOLO_MC_LINE", SOLO_SOURCE)
-        self.assertIn("SOLO_UNIT_WORDS", SOLO_SOURCE)
+        self.assertIn("accept", SOLO_GRADING_SOURCE.lower())
+        self.assertIn("SOLO_MC_LINE", SOLO_GRADING_SOURCE)
+        self.assertIn("SOLO_UNIT_WORDS", SOLO_GRADING_SOURCE)
         for band in ("if (word.length < 6) return 0;", "if (word.length < 9) return 1;"):
             with self.subTest(band=band):
-                self.assertIn(band, SOLO_SOURCE)
+                self.assertIn(band, SOLO_GRADING_SOURCE)
 
     def test_the_solo_judge_is_wired_into_the_drill(self):
         self.assertIn("soloJudgeAnswer(entry.question, response)", SOLO_SOURCE)
