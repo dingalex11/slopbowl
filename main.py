@@ -14,19 +14,23 @@ import uvicorn
 from core.config import INBOUND_QUEUE_SIZE, OUTBOUND_QUEUE_SIZE, PROJECT_ROOT
 from core.validation import validate_question_bank
 
-from core.events import Event, EventType
+from core.events import MANUAL_START_EVENTS, Event, EventType
+from core.reading import ReadTimingPolicy, TossupSession
+from core.room_events import RoomEventPump
 from core.state_machine import StateEngine, GameState
-from services.judge_service import JudgeService
+from services.judge_service import JudgeService, JudgeUnavailable
 from services.ui_service import HTMLGUIService
 from services.camera_service import VisionService 
 
-MANUAL_START_EVENTS = ("MANUAL_START_TOSSUP", "MANUAL_REREAD_TOSSUP", "MANUAL_START_BONUS")
-
 # Reports a reading station sends about a read it was asked to speak. READING_FAILED is
 # not a finished read: the browser could not speak the question at all.
-READING_REPORTS = ("READING_DONE", "READING_FAILED")
 READ_FAILED_WARNING = "⚠️ This station could not read the question aloud — check its speech settings."
 READ_TIMEOUT_WARNING = "⚠️ The read never reported finishing — the buzz window is open."
+JUDGE_NOT_CONFIGURED_WARNING = "⚠️ AI judge unavailable — add an API key in Settings before starting an AI match."
+JUDGE_UNAVAILABLE_WARNING = (
+    "⚠️ AI judge unavailable — this answer was not scored and no penalty was applied. "
+    "Check the API key or connection; Override Last Question can reopen it."
+)
 
 # Conservative spoken pace used to sanity-check read reports: real speech is slower, so a
 # report that arrives faster than this cannot describe a question that was spoken.
@@ -57,16 +61,6 @@ def read_clock() -> float:
 # the bonus captain's answer window both use this.
 ANSWER_WINDOW_SECONDS = 4.0
 
-# Events the loops must keep serving while a question is live. Anything here is
-# processed (or answered) instead of being silently dropped mid-read or mid-buzz.
-ADMIN_EVENTS = (
-    "EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE",
-    "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE",
-    "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT",
-    "SET_READING_MODE", "END_MATCH", "CLOSE_MATCH", "SET_CAMERA_BUZZ",
-) + MANUAL_START_EVENTS
-
-
 class MatchEnded(Exception):
     """Abort the question in flight and return the room to its idle loop."""
 
@@ -84,6 +78,9 @@ class ScienceBowlModerator:
     def __init__(self, use_audio=True, use_camera=False, initial_bank=None, inbound_queue_size=INBOUND_QUEUE_SIZE, outbound_queue_size=OUTBOUND_QUEUE_SIZE, manual_reader=False):
         self.inbound_queue = asyncio.Queue(maxsize=inbound_queue_size)
         self.outbound_queue = asyncio.Queue(maxsize=outbound_queue_size)
+        self.event_pump = RoomEventPump(self.inbound_queue, self.process_admin_event)
+        self.tossup_session = TossupSession(self.inbound_queue, self.event_pump, lambda: read_clock())
+        self.read_session = self.tossup_session.read
         
         self.use_audio = use_audio
         self.use_camera = use_camera
@@ -131,13 +128,6 @@ class ScienceBowlModerator:
         self.online_mode = False
         self.online_participants = {}
         self.answering_user_id = None
-        self.current_reading_id = None
-        self.read_earliest_end = 0.0
-        self.read_deadline = 0.0
-        self.read_assumed_end = 0.0
-        self.read_report_doubted = False
-        self.reading_expected_users = set()
-        self.reading_completions = set()
         self.online_buzz_open = False
         self.online_buzz_team = None
         self.online_buzz_captain_only = False
@@ -154,6 +144,54 @@ class ScienceBowlModerator:
         self.manual_buzzpoint = ""
         self.manual_after_read = False
         self.manual_question = {}
+
+    @property
+    def current_reading_id(self):
+        return self.read_session.current_reading_id
+
+    @current_reading_id.setter
+    def current_reading_id(self, value):
+        self.read_session.current_reading_id = value
+
+    @property
+    def read_earliest_end(self):
+        return self.read_session.read_earliest_end
+
+    @read_earliest_end.setter
+    def read_earliest_end(self, value):
+        self.read_session.read_earliest_end = value
+
+    @property
+    def read_deadline(self):
+        return self.read_session.read_deadline
+
+    @read_deadline.setter
+    def read_deadline(self, value):
+        self.read_session.read_deadline = value
+
+    @property
+    def read_assumed_end(self):
+        return self.read_session.read_assumed_end
+
+    @read_assumed_end.setter
+    def read_assumed_end(self, value):
+        self.read_session.read_assumed_end = value
+
+    @property
+    def reading_expected_users(self):
+        return self.read_session.reading_expected_users
+
+    @reading_expected_users.setter
+    def reading_expected_users(self, value):
+        self.read_session.reading_expected_users = set(value)
+
+    @property
+    def reading_completions(self):
+        return self.read_session.reading_completions
+
+    @reading_completions.setter
+    def reading_completions(self, value):
+        self.read_session.reading_completions = set(value)
 
     async def _set_moderator_reading(self, active: bool, kind: str | None = None):
         """Tell player stations that the moderator's voice is the one being heard.
@@ -185,6 +223,59 @@ class ScienceBowlModerator:
         can_override = show in ("TOSSUP", "BONUS") and self._last_logged_question_number() is not None
         self.ui_state = {"show": show, "overrides": bool(overrides), "can_override": can_override}
         await self.outbound_queue.put({"type": "UI_STATE", "payload": dict(self.ui_state)})
+
+    async def _announce_judge_unavailable(self, message: str, reason: str = ""):
+        """Make a failed judgement visible instead of quietly treating it as wrong."""
+        payload = {"message": message}
+        if reason:
+            payload["reason"] = reason
+        await self.outbound_queue.put({"type": "JUDGE_UNAVAILABLE", "payload": payload})
+        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": message}})
+
+    async def _advance_unjudged(self, team: str, player: str, buzzpoint: str, buzz_time: float, reason: str = ""):
+        """Record a no-score question and move on; a judge outage must not become a neg."""
+        await self.log_event("UNJUDGED", team or "None", player or "None", None, 0, buzzpoint, buzz_time)
+        await self._announce_judge_unavailable(JUDGE_UNAVAILABLE_WARNING, reason)
+        await self.outbound_queue.put({"type": "UPDATE_SCORE", "payload": {"score_a": self.state.team_a_score, "score_b": self.state.team_b_score}})
+        self.state.next_question()
+        self.current_q_idx += 1
+        await self.outbound_queue.put({"type": "SYNC_LOG", "payload": {"log": self.match_log}})
+        self.answering_user_id = None
+        self.answer_audio_open = False
+        await asyncio.sleep(2)
+
+    async def _transcribe_with_judge(self, b64_audio: str) -> str:
+        if not self.judge:
+            raise JudgeUnavailable("No AI judge API key is configured.")
+        try:
+            transcript = await self.judge.transcribe_audio(b64_audio)
+        except JudgeUnavailable:
+            raise
+        except Exception as exc:
+            print(f"[STT ERROR]: {exc}")
+            raise JudgeUnavailable("The speech-to-text request failed.") from exc
+        if not isinstance(transcript, str):
+            raise JudgeUnavailable("The speech-to-text service returned no transcript.")
+        return transcript
+
+    async def _evaluate_with_judge(self, spoken_answer: str, correct_answer: str, category: str, is_multiple_choice: bool = False) -> bool:
+        if not self.judge:
+            raise JudgeUnavailable("No AI judge API key is configured.")
+        try:
+            verdict = await self.judge.evaluate_answer(
+                spoken_answer,
+                correct_answer,
+                category,
+                is_multiple_choice=is_multiple_choice,
+            )
+        except JudgeUnavailable:
+            raise
+        except Exception as exc:
+            print(f"[JUDGE AGENT ERROR]: {exc}")
+            raise JudgeUnavailable("The AI judge request failed.") from exc
+        if not isinstance(verdict, bool):
+            raise JudgeUnavailable("The AI judge returned no verdict.")
+        return verdict
 
     def _idle_start_message(self) -> str:
         """Explain what a Start Tossup click is missing while the loop has nothing to read."""
@@ -271,9 +362,7 @@ class ScienceBowlModerator:
         self.manual_read_complete = False
         self.manual_buzzpoint = ""
         self.manual_after_read = False
-        self.current_reading_id = None
-        self.reading_expected_users.clear()
-        self.reading_completions.clear()
+        self.read_session.reset()
         self.online_buzz_open = False
         self.online_buzz_team = None
         self.online_buzz_captain_only = False
@@ -312,9 +401,7 @@ class ScienceBowlModerator:
         self.manual_buzzpoint = ""
         self.manual_after_read = False
         self.manual_question = {}
-        self.current_reading_id = None
-        self.reading_expected_users.clear()
-        self.reading_completions.clear()
+        self.read_session.reset()
         self.online_buzz_open = False
         self.online_buzz_team = None
         self.online_buzz_captain_only = False
@@ -361,7 +448,7 @@ class ScienceBowlModerator:
             writer.writerow({key: self._safe_csv_value(value) for key, value in row.items()})
         return output.getvalue()
 
-    async def log_event(self, event_type: str, team: str, player: str, is_correct: bool, points: int, buzzpoint: str = "", buzz_time: float = 0.0):
+    async def log_event(self, event_type: str, team: str, player: str, is_correct: bool | None, points: int, buzzpoint: str = "", buzz_time: float = 0.0):
         entry = {
             "Q_Num": self.state.question_number,
             "Event_Type": event_type,
@@ -388,12 +475,17 @@ class ScienceBowlModerator:
             raise MatchEnded()
         if evt_type == "AUTH_INIT" and not self.manual_reader:
             api_key = event.payload.get("api_key")
-            if api_key:
+            if not api_key:
+                self.judge = None
+                await self._announce_judge_unavailable(JUDGE_NOT_CONFIGURED_WARNING, "No API key was provided.")
+            else:
                 try:
                     self.judge = JudgeService(api_key=api_key)
                     await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "✅ Cloud API Key Linked & AI Judge Online!"}})
                 except Exception as e:
-                    print(f"⚠️ [WARNING]: Judge Service failed to initialize: {e}")
+                    self.judge = None
+                    print(f"[WARNING]: Judge Service failed to initialize: {e}")
+                    await self._announce_judge_unavailable(JUDGE_NOT_CONFIGURED_WARNING, "The AI judge could not be initialized.")
 
         elif evt_type in MANUAL_START_EVENTS:
             # A start that arrives while a question is live must not vanish: it is not
@@ -591,45 +683,7 @@ class ScienceBowlModerator:
                 print(f"❌ [FRAME DECODE ERROR]: {e}")
 
     async def wait_for_moderator_action(self, expected_event_types: list):
-        if isinstance(expected_event_types, str):
-            expected_event_types = [expected_event_types]
-            
-        # NEW: Added LOAD_BANK, SAVE_ROSTER, and EDIT_LOG_ENTRY to prevent them from being ignored
-        admin_events = ["EXPORT_CSV", "SAVE_CALIBRATION", "RESET_CALIBRATION", "CALIBRATE_BASELINE", "PROCESS_FRAME", "PING", "UPDATE_STATUS", "PAUSE_MATCH", "ADJUST_SCORE", "EDIT_LOG_ENTRY", "FORCE_ACCEPT", "LOAD_BANK", "SAVE_ROSTER", "AUTH_INIT", "SET_READING_MODE", "END_MATCH", "SET_CAMERA_BUZZ"]
-        
-        while True:
-            event = await self.inbound_queue.get()
-            evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
-            print(f"[DEBUG]: Queue received event -> {evt_type}")
-            if evt_type in admin_events:
-                if evt_type not in ["PING", "PAUSE_MATCH"]:
-                    await self.process_admin_event(event)
-                continue 
-                
-            if evt_type in expected_event_types:
-                return event
-            elif evt_type in ["FORCE_RESET_STATE", "CHALLENGE"]:
-                return Event(type="FORCE_RESET_STATE")
-
-    def _drop_stale_reading_completions(self):
-        """Discard read reports left over from an earlier speech.
-
-        A stopped utterance reports completion just like a finished one (the browser
-        fires 'error: interrupted' on cancel), so a surplus reply can be sitting in the
-        queue when the next read begins. Without this the stale reply satisfies the
-        fresh read and the question jumps straight to the buzz window and its timer.
-        """
-        kept = []
-        while not self.inbound_queue.empty():
-            try:
-                event = self.inbound_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
-            if evt_type not in READING_REPORTS:
-                kept.append(event)
-        for event in kept:
-            self.inbound_queue.put_nowait(event)
+        return await self.event_pump.wait_for_action(expected_event_types)
 
     async def _speak_and_wait(self, text: str, *, moderator_only: bool = False, announce_kind: str | None = None):
         if not self.use_audio or not text:
@@ -639,9 +693,9 @@ class ScienceBowlModerator:
         if self.online_mode and self.reading_mode == "moderator":
             moderator_only = True
 
-        self._drop_stale_reading_completions()
+        self.read_session.drop_stale_reports(self.inbound_queue)
 
-        reading_id = self._new_reading_id(moderator_only=moderator_only)
+        reading_id = self._new_reading_id()
         payload = {"text": text, "moderator_only": moderator_only}
         if reading_id:
             payload["reading_id"] = reading_id
@@ -651,102 +705,47 @@ class ScienceBowlModerator:
             await self._set_moderator_reading(True, indicator)
         await self.outbound_queue.put({"type": "START_READING", "payload": payload})
         
-        while True:
-            try:
-                reply = await asyncio.wait_for(self.inbound_queue.get(), timeout=self._read_wait_slice())
-            except asyncio.TimeoutError:
-                if not self._read_wait_expired():
-                    continue  # Still within the read's time: wake again shortly.
-                print("[DEBUG]: Read watchdog expired; continuing without a report.")
-                self.current_reading_id = None
-                break
-            evt_type = reply.type.name if hasattr(reply.type, 'name') else str(reply.type)
-            report = self._reading_result(reply)
-            if report is not None:
-                if report == "done" and self._report_is_early():
-                    # Faster than the text can be spoken, so it is not this read finishing.
-                    continue
-                self.current_reading_id = None
-                break
-            elif evt_type in ADMIN_EVENTS:
-                if evt_type not in ["PING", "PAUSE_MATCH"]:
-                    await self.process_admin_event(reply)
-            elif evt_type in READING_REPORTS:
-                continue  # A report for an earlier read: it is not this one.
-            else:
-                self.inbound_queue.put_nowait(reply)
-                await asyncio.sleep(0.05)
+        outcome, _ = await self.read_session.wait_for_report(
+            self.inbound_queue,
+            self.event_pump,
+            online_mode=self.online_mode,
+            requeue_other=True,
+        )
+        if outcome == "timeout":
+            print("[DEBUG]: Read watchdog expired; continuing without a report.")
+            self.read_session.current_reading_id = None
 
         if indicator:
             await self._set_moderator_reading(False)
 
-    def _set_read_window(self, text: str, *, immediate: bool = False) -> None:
-        """Record when a report about this read can be believed, and when to give up.
+    def _read_timing_policy(self) -> ReadTimingPolicy:
+        return ReadTimingPolicy(
+            min_read_seconds=MIN_READ_SECONDS,
+            chars_per_second=READ_CHARS_PER_SECOND,
+            early_report_fraction=READ_EARLY_REPORT_FRACTION,
+            watchdog_factor=READ_WATCHDOG_FACTOR,
+            watchdog_min_seconds=READ_WATCHDOG_MIN_SECONDS,
+            slow_chars_per_second=READ_SLOW_CHARS_PER_SECOND,
+        )
 
-        The reading station is normally the only thing that knows speaking stopped, but an
-        older station reports the read as finished the instant it starts. The earliest
-        believable end is therefore derived from the text length, a slow reading pace
-        bounds what the guessed end may be, and a watchdog keeps the match moving when no
-        report arrives at all.
-        """
-        now = read_clock()
-        self.read_report_doubted = False
-        if immediate:
-            self.read_earliest_end = now
-            self.read_assumed_end = now
-            self.read_deadline = now + READ_WATCHDOG_MIN_SECONDS
-            return
-        length = len(text or "")
-        estimate = max(MIN_READ_SECONDS, length / READ_CHARS_PER_SECOND)
-        self.read_earliest_end = now + estimate * READ_EARLY_REPORT_FRACTION
-        self.read_assumed_end = now + max(MIN_READ_SECONDS, length / READ_SLOW_CHARS_PER_SECOND)
-        self.read_deadline = now + estimate * READ_WATCHDOG_FACTOR + READ_WATCHDOG_MIN_SECONDS
+    def _set_read_window(self, text: str, *, immediate: bool = False) -> None:
+        self.read_session.set_window(text, immediate=immediate, policy=self._read_timing_policy())
 
     def note_impossible_read_report(self) -> None:
-        """Remember that a station claimed a read finished before it could be spoken."""
-        self.read_report_doubted = True
-
-    def _read_wait_target(self) -> float:
-        """When the read must be over, report or not, and how long one wait may block."""
-        target = self.read_assumed_end if self.read_report_doubted else self.read_deadline
-        return min(target, self.read_deadline)
-
-    def _read_wait_expired(self) -> bool:
-        return read_clock() >= self._read_wait_target()
-
-    def _read_wait_slice(self) -> float:
-        """Wait in short slices, so an impossible report raised mid-wait is noticed at once."""
-        return max(0.05, min(0.5, self._read_wait_target() - read_clock()))
-
-    def _report_is_early(self) -> bool:
-        return read_clock() < self.read_earliest_end
+        self.read_session.note_impossible_report()
 
     def read_report_is_believable(self) -> bool:
-        """False while a report that arrives now cannot describe a spoken question."""
-        return not self._report_is_early()
+        return self.read_session.report_is_believable()
 
-    def _reading_result(self, event) -> str | None:
-        """Classify a read report as 'done'/'failed', or None when it is not this read."""
-        evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
-        if evt_type not in READING_REPORTS:
-            return None
-        if self.online_mode and event.payload.get("reading_id") != self.current_reading_id:
-            return None
-        return "failed" if evt_type == "READING_FAILED" else "done"
-
-    def _new_reading_id(self, moderator_only=False):
-        if not self.online_mode:
-            return None
-        import uuid
-        self.current_reading_id = uuid.uuid4().hex
-        # The moderator station is the authoritative reader; remote clients still
-        # hear the same read, but a dropped player connection must not stall a turn.
-        self.reading_expected_users = {
+    def _new_reading_id(self):
+        expected_users = {
             uid for uid, participant in self.online_participants.items()
             if participant.role == "owner"
-        }
-        self.reading_completions = set()
-        return self.current_reading_id
+        } if self.online_mode else set()
+        return self.read_session.new_reading(
+            online_mode=self.online_mode,
+            expected_users=expected_users,
+        )
 
     def _manual_phase_snapshot(self) -> dict:
         return dict(self.manual_phase)
@@ -877,15 +876,10 @@ class ScienceBowlModerator:
             if deadline is not None and asyncio.get_running_loop().time() >= deadline:
                 await self._set_manual_phase("IDLE")
                 return None, False, False, False, 0.0, ""
-            try:
-                event = await asyncio.wait_for(self.inbound_queue.get(), timeout=0.25 if deadline is not None else 0.5)
-            except asyncio.TimeoutError:
+            event = await self.tossup_session.wait_for_event(0.25 if deadline is not None else 0.5)
+            if event is None or event is self.tossup_session.HANDLED:
                 continue
             evt_type = event.type.name if hasattr(event.type, "name") else str(event.type)
-            if evt_type in ADMIN_EVENTS:
-                if evt_type not in ("PING", "PAUSE_MATCH"):
-                    await self.process_admin_event(event)
-                continue
             if evt_type in ("FORCE_RESET_STATE", "CHALLENGE"):
                 await self._set_manual_phase("IDLE")
                 return None, False, False, evt_type, 0.0, ""
@@ -920,15 +914,10 @@ class ScienceBowlModerator:
 
         correct = None
         while correct is None:
-            try:
-                event = await asyncio.wait_for(self.inbound_queue.get(), timeout=0.25)
-            except asyncio.TimeoutError:
+            event = await self.tossup_session.wait_for_event(0.25)
+            if event is None or event is self.tossup_session.HANDLED:
                 continue
             evt_type = event.type.name if hasattr(event.type, "name") else str(event.type)
-            if evt_type in ADMIN_EVENTS:
-                if evt_type not in ("PING", "PAUSE_MATCH"):
-                    await self.process_admin_event(event)
-                continue
             if evt_type in ("FORCE_RESET_STATE", "CHALLENGE"):
                 await self._set_manual_phase("IDLE")
                 return None, False, False, evt_type, 0.0, ""
@@ -1001,15 +990,10 @@ class ScienceBowlModerator:
             await self._set_manual_phase("BONUS_READ", None, team=team)
 
         while True:
-            try:
-                event = await asyncio.wait_for(self.inbound_queue.get(), timeout=0.25)
-            except asyncio.TimeoutError:
+            event = await self.tossup_session.wait_for_event(0.25)
+            if event is None or event is self.tossup_session.HANDLED:
                 continue
             evt_type = event.type.name if hasattr(event.type, "name") else str(event.type)
-            if evt_type in ADMIN_EVENTS:
-                if evt_type not in ("PING", "PAUSE_MATCH"):
-                    await self.process_admin_event(event)
-                continue
             if evt_type in ("FORCE_RESET_STATE", "CHALLENGE"):
                 await self._set_manual_phase("IDLE")
                 return None, evt_type
@@ -1051,7 +1035,7 @@ class ScienceBowlModerator:
         if not skip_read:
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "🔊 Reading Tossup..."}})
             if self.use_audio and text_to_read:
-                self._drop_stale_reading_completions()
+                self.read_session.drop_stale_reports(self.inbound_queue)
                 reading_id = self._new_reading_id()
                 reading_payload = {"text": text_to_read}
                 if reading_id:
@@ -1079,60 +1063,54 @@ class ScienceBowlModerator:
         buzz_time = 0.0
         buzzpoint_word = "Full Read"
         read_warning = None
+        judge_failure = None
         
-        start_time = asyncio.get_running_loop().time()
-
-        while True:
-            try:
-                event = await asyncio.wait_for(self.inbound_queue.get(), timeout=self._read_wait_slice())
-            except asyncio.TimeoutError:
-                if not self._read_wait_expired():
-                    continue  # Still within the read's time: wake again shortly.
-                print("[DEBUG]: Read watchdog expired; opening the buzz window.")
-                read_warning = READ_TIMEOUT_WARNING
-                if shared_read:
-                    await self._set_moderator_reading(False)
-                break
+        async def handle_read_event(event):
             evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
-            
-            if evt_type in ADMIN_EVENTS:
-                if evt_type not in ["PING", "PAUSE_MATCH"]:
-                    await self.process_admin_event(event)
-                continue 
-                
             if evt_type in ("FORCE_RESET_STATE", "CHALLENGE"):
                 self._set_camera_window(False)
                 await self._set_online_buzz_window(False)
                 if shared_read:
                     await self._set_moderator_reading(False)
-                return None, False, False, evt_type, 0.0, ""
+                return evt_type
+            if evt_type != "BUZZ":
+                return None
+            team = event.payload.get('team', 'Unknown')
+            if allowed_team and team != allowed_team:
+                return None
+            if self.online_mode and event.role not in ("owner", "player"):
+                return None
+            if not self.state.handle_buzz(team, 0, True):
+                return None
+            await self._set_online_buzz_window(False)
+            if shared_read:
+                await self._set_moderator_reading(False)
+            return "buzz"
 
-            reading_result = self._reading_result(event)
-            if reading_result is not None:
-                if reading_result == "done" and self._report_is_early():
-                    # The question cannot have been spoken this fast: keep waiting for the
-                    # read that is really playing instead of opening the buzz window.
-                    self.note_impossible_read_report()
-                    continue
-                self.current_reading_id = None
-                if reading_result == "failed":
-                    read_warning = READ_FAILED_WARNING
-                if shared_read:
-                    await self._set_moderator_reading(False)
-                break
-            elif evt_type == "BUZZ":
-                team = event.payload.get('team', 'Unknown')
-                if allowed_team and team != allowed_team:
-                    continue 
-                if self.online_mode and event.role not in ("owner", "player"):
-                    continue
-                if self.state.handle_buzz(team, 0, True):
-                    buzz_event = event
-                    is_interrupt = True
-                    await self._set_online_buzz_window(False)
-                    if shared_read:
-                        await self._set_moderator_reading(False)
-                    break
+        start_time = asyncio.get_running_loop().time()
+        outcome, event = await self.read_session.wait_for_report(
+            self.inbound_queue,
+            self.event_pump,
+            online_mode=self.online_mode,
+            on_other=handle_read_event,
+            on_early=self.note_impossible_read_report,
+        )
+        if outcome == "timeout":
+            print("[DEBUG]: Read watchdog expired; opening the buzz window.")
+            read_warning = READ_TIMEOUT_WARNING
+            if shared_read:
+                await self._set_moderator_reading(False)
+        elif outcome in ("FORCE_RESET_STATE", "CHALLENGE"):
+            return None, False, False, outcome, 0.0, ""
+        elif outcome == "buzz":
+            buzz_event = event
+            is_interrupt = True
+        elif outcome == "failed":
+            read_warning = READ_FAILED_WARNING
+            if shared_read:
+                await self._set_moderator_reading(False)
+        elif outcome == "done" and shared_read:
+            await self._set_moderator_reading(False)
 
         if not buzz_event:
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ 5 Seconds to Buzz..."}})
@@ -1148,13 +1126,12 @@ class ScienceBowlModerator:
                     if remaining <= 0:
                         raise asyncio.TimeoutError()
 
-                    event = await asyncio.wait_for(self.inbound_queue.get(), timeout=remaining)
-                    evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
-                    
-                    if evt_type in ADMIN_EVENTS:
-                        if evt_type not in ["PING", "PAUSE_MATCH"]:
-                            await self.process_admin_event(event)
+                    event = await self.tossup_session.wait_for_event(remaining)
+                    if event is None:
+                        raise asyncio.TimeoutError()
+                    if event is self.tossup_session.HANDLED:
                         continue
+                    evt_type = event.type.name if hasattr(event.type, 'name') else str(event.type)
 
                     if evt_type == "FORCE_RESET_STATE":
                         self._set_camera_window(False)
@@ -1194,18 +1171,18 @@ class ScienceBowlModerator:
                     time_left = 1.5 - (asyncio.get_running_loop().time() - wait_start)
                     if time_left <= 0: break
                     
-                    reply = await asyncio.wait_for(self.inbound_queue.get(), timeout=time_left)
+                    reply = await self.tossup_session.wait_for_event(time_left)
+                    if reply is None:
+                        break
+                    if reply is self.tossup_session.HANDLED:
+                        continue
                     evt_type = reply.type.name if hasattr(reply.type, 'name') else str(reply.type)
                     
                     if evt_type == "LOG_BUZZPOINT":
                         buzzpoint_word = reply.payload.get("buzzpoint", "")
                         break
-                    elif evt_type in ADMIN_EVENTS:
-                        if evt_type not in ["PING", "PAUSE_MATCH"]:
-                            await self.process_admin_event(reply)
-                    else:
-                        self.inbound_queue.put_nowait(reply)
-                        await asyncio.sleep(0.05)
+                    self.inbound_queue.put_nowait(reply)
+                    await asyncio.sleep(0.05)
             except asyncio.TimeoutError:
                 pass
 
@@ -1214,7 +1191,7 @@ class ScienceBowlModerator:
         await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🔊 {phrase}"}})
         
         if self.use_audio:
-            self._drop_stale_reading_completions()
+            self.read_session.drop_stale_reports(self.inbound_queue)
 
             reading_id = self._new_reading_id()
             reading_payload = {"text": phrase}
@@ -1226,31 +1203,15 @@ class ScienceBowlModerator:
             await self.outbound_queue.put({"type": "START_READING", "payload": reading_payload})
 
             
-            while True:
-                try:
-                    reply = await asyncio.wait_for(self.inbound_queue.get(), timeout=self._read_wait_slice())
-                except asyncio.TimeoutError:
-                    if not self._read_wait_expired():
-                        continue  # Still within the read's time: wake again shortly.
-                    print("[DEBUG]: Read watchdog expired; continuing without a report.")
-                    self.current_reading_id = None
-                    break
-                evt_type = reply.type.name if hasattr(reply.type, 'name') else str(reply.type)
-
-                report = self._reading_result(reply)
-                if report is not None:
-                    if report == "done" and self._report_is_early():
-                        continue  # Not this read finishing: it cannot have been spoken yet.
-                    self.current_reading_id = None
-                    break
-                elif evt_type in ADMIN_EVENTS:
-                    if evt_type not in ["PING", "PAUSE_MATCH"]:
-                        await self.process_admin_event(reply)
-                elif evt_type in READING_REPORTS:
-                    continue  # A report for an earlier read: it is not this one.
-                else:
-                    self.inbound_queue.put_nowait(reply)
-                    await asyncio.sleep(0.05)
+            outcome, _ = await self.read_session.wait_for_report(
+                self.inbound_queue,
+                self.event_pump,
+                online_mode=self.online_mode,
+                requeue_other=True,
+            )
+            if outcome == "timeout":
+                print("[DEBUG]: Read watchdog expired; continuing without a report.")
+                self.read_session.current_reading_id = None
         
         spoken_answer = ""
         if self.use_audio:
@@ -1262,25 +1223,24 @@ class ScienceBowlModerator:
             })
             try:
                 while True:
-                    reply = await asyncio.wait_for(self.inbound_queue.get(), timeout=12.0)
+                    reply = await self.tossup_session.wait_for_event(12.0)
+                    if reply is None:
+                        raise asyncio.TimeoutError()
+                    if reply is self.tossup_session.HANDLED:
+                        continue
                     evt_type = reply.type.name if hasattr(reply.type, 'name') else str(reply.type)
                     
                     if evt_type == "ANSWER_AUDIO" and (not self.online_mode or reply.user_id == self.answering_user_id):
                         self.answer_audio_open = False
                         await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ Transcribing Tossup..."}})
                         b64_audio = reply.payload.get("audio_data", "")
-                        
-                        if self.judge:
-                            spoken_answer = await self.judge.transcribe_audio(b64_audio)
+                        try:
+                            spoken_answer = await self._transcribe_with_judge(b64_audio)
+                        except JudgeUnavailable as exc:
+                            judge_failure = str(exc)
                         else:
-                            spoken_answer = ""
-                            
-                        await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🗣️ Heard: '{spoken_answer}'"}})
+                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🗣️ Heard: '{spoken_answer}'"}})
                         break
-                        
-                    elif evt_type in ADMIN_EVENTS:
-                        if evt_type not in ["PING", "PAUSE_MATCH"]:
-                            await self.process_admin_event(reply)
             except asyncio.TimeoutError:
                 spoken_answer = ""
             finally:
@@ -1291,19 +1251,26 @@ class ScienceBowlModerator:
             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🎤 Capturing Mock Mic: '{spoken_answer}'"}})
         
         self.state.transition_to(GameState.EVALUATING_TOSSUP) 
-        
-        if self.judge:
-            correct = await self.judge.evaluate_answer(
-                spoken_answer, 
-                tossup_answer, 
-                category,
-                is_multiple_choice=q_data.get('type', '') == 'MC'
-            )
-        else:
-            correct = False
+
+        correct = None
+        if judge_failure is None:
+            try:
+                correct = await self._evaluate_with_judge(
+                    spoken_answer,
+                    tossup_answer,
+                    category,
+                    is_multiple_choice=q_data.get('type', '') == 'MC'
+                )
+            except JudgeUnavailable as exc:
+                judge_failure = str(exc)
             
         self.current_reading_id = None
-        return buzz_event.payload, correct, is_interrupt, False, buzz_time, buzzpoint_word
+        payload = dict(buzz_event.payload)
+        if judge_failure is not None:
+            # A lost judge is not a lost answer: the caller must leave it unjudged.
+            payload["judge_unavailable"] = judge_failure
+            return payload, None, is_interrupt, False, buzz_time, buzzpoint_word
+        return payload, correct, is_interrupt, False, buzz_time, buzzpoint_word
 
     async def run_game_loop(self):
         await asyncio.sleep(1)
@@ -1365,6 +1332,15 @@ class ScienceBowlModerator:
                         self.current_q_idx += 1
                         continue
 
+                    # Without a judge the AI cannot adjudicate a tossup. Say so instead
+                    # of reading it and later turning the failure into a penalty.
+                    if not self.manual_reader and not self.judge:
+                        await self._announce_judge_unavailable(
+                            JUDGE_NOT_CONFIGURED_WARNING,
+                            "No AI judge API key is configured.",
+                        )
+                        continue
+
                     # HIDE BUTTONS WHILE READING/EVALUATING
                     await self._set_ui_state("NONE")
 
@@ -1380,6 +1356,16 @@ class ScienceBowlModerator:
                         await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
                         self.state.next_question()
                         self.current_q_idx += 1
+                        continue
+
+                    if payload and correct is None:
+                        await self._advance_unjudged(
+                            payload.get('team', 'Unknown Team'),
+                            payload.get('player', 'Captain'),
+                            buzz_text,
+                            buzz_time,
+                            payload.get('judge_unavailable', ''),
+                        )
                         continue
                 
                     bonus_earned_by = None
@@ -1460,6 +1446,16 @@ class ScienceBowlModerator:
                                 await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⚠️ CHALLENGE! Clock paused. Edit scoresheet, then Start Next Tossup."}})
                                 self.state.next_question()
                                 self.current_q_idx += 1
+                                continue
+
+                            if payload2 and correct2 is None:
+                                await self._advance_unjudged(
+                                    payload2.get('team', other_team),
+                                    payload2.get('player', 'Captain'),
+                                    buzz_text2,
+                                    buzz_time2,
+                                    payload2.get('judge_unavailable', ''),
+                                )
                                 continue
                             
                             if payload2 and correct2:
@@ -1588,6 +1584,7 @@ class ScienceBowlModerator:
 
                         self.state.transition_to(GameState.BONUS_CONFERRING) 
                         spoken_bonus = ""
+                        bonus_judge_failure = None
                         if self.online_mode:
                             self.answering_user_id = None
                     
@@ -1622,9 +1619,8 @@ class ScienceBowlModerator:
                                         await self._set_online_buzz_window(False)
                                         challenge_triggered = True
                                         break
-                                    elif evt_type in ADMIN_EVENTS:
-                                        if evt_type not in ["PING", "PAUSE_MATCH"]:
-                                            await self.process_admin_event(reply)
+                                    elif await self.event_pump.dispatch_admin(reply):
+                                        continue
                                 except asyncio.TimeoutError:
                                     break
                             if self.online_mode and not buzzed_in:
@@ -1663,16 +1659,18 @@ class ScienceBowlModerator:
                                             self.answer_audio_open = False
                                             await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": "⏳ Transcribing Bonus..."}})
                                             b64_audio = reply.payload.get("audio_data", "")
-                                            if self.judge:
-                                                spoken_bonus = await self.judge.transcribe_audio(b64_audio)
-                                            await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🗣️ Heard: '{spoken_bonus}'"}})
+                                            try:
+                                                spoken_bonus = await self._transcribe_with_judge(b64_audio)
+                                            except JudgeUnavailable as exc:
+                                                bonus_judge_failure = str(exc)
+                                            else:
+                                                await self.outbound_queue.put({"type": "UPDATE_STATUS", "payload": {"text": f"🗣️ Heard: '{spoken_bonus}'"}})
                                             break
                                         elif evt_type == "CHALLENGE":
                                             challenge_triggered = True
                                             break
-                                        elif evt_type in ADMIN_EVENTS:
-                                            if evt_type not in ["PING", "PAUSE_MATCH"]:
-                                                await self.process_admin_event(reply)
+                                        elif await self.event_pump.dispatch_admin(reply):
+                                            continue
                                 except asyncio.TimeoutError:
                                     spoken_bonus = ""
                                 finally:
@@ -1691,11 +1689,27 @@ class ScienceBowlModerator:
 
                         self.state.transition_to(GameState.EVALUATING_BONUS) 
                         bonus_ans_text = str(q_data.get('bonus_answer', ''))
-                    
-                        if self.judge:
-                            bonus_correct = await self.judge.evaluate_answer(spoken_bonus, bonus_ans_text, str(q_data.get('category', 'GENERAL')))
-                        else:
-                            bonus_correct = False
+
+                        bonus_correct = None
+                        if bonus_judge_failure is None:
+                            try:
+                                bonus_correct = await self._evaluate_with_judge(
+                                    spoken_bonus,
+                                    bonus_ans_text,
+                                    str(q_data.get('category', 'GENERAL')),
+                                )
+                            except JudgeUnavailable as exc:
+                                bonus_judge_failure = str(exc)
+
+                        if bonus_judge_failure is not None:
+                            await self._advance_unjudged(
+                                bonus_earned_by,
+                                "Captain",
+                                "Full Read",
+                                0.0,
+                                bonus_judge_failure,
+                            )
+                            continue
                     
                         self.state.apply_bonus_points(bonus_correct) 
                         if bonus_correct:

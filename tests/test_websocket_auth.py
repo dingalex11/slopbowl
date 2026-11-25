@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from services import auth_service, ui_service
+from services import auth_service, room_manager, ui_service
 
 
 class FakeUser:
@@ -221,7 +221,7 @@ class WebSocketAuthorizationTests(unittest.TestCase):
             manager.rooms["round-one"] = object()
             manager.room_tasks["round-one"] = []
             manager.last_activity["round-one"] = time.monotonic()
-            with patch.object(ui_service, "delete_room") as delete:
+            with patch.object(room_manager, "delete_room") as delete:
                 await manager._expire_room("round-one")
             self.assertNotIn("round-one", manager.rooms)
             self.assertNotIn("round-one", manager.last_activity)
@@ -245,7 +245,7 @@ class WebSocketAuthorizationTests(unittest.TestCase):
             manager.last_activity["finished"] = time.monotonic()
             moderator.outbound_queue.put_nowait({"type": "ROOM_CLOSE_REQUESTED", "payload": {}})
 
-            with patch.object(ui_service, "delete_room") as delete:
+            with patch.object(room_manager, "delete_room") as delete:
                 await manager.listen_for_outbound("finished", moderator)
                 for _ in range(50):
                     if "finished" not in manager.rooms:
@@ -272,7 +272,7 @@ class WebSocketAuthorizationTests(unittest.TestCase):
             manager.last_activity["idle-room"] = time.monotonic() - 30
             manager.rooms["busy-room"] = FakeModerator()
             manager.last_activity["busy-room"] = time.monotonic()
-            with patch.object(ui_service, "ROOM_IDLE_TTL_SECONDS", 10), patch.object(ui_service, "delete_room") as delete:
+            with patch.object(room_manager, "ROOM_IDLE_TTL_SECONDS", 10), patch.object(room_manager, "delete_room") as delete:
                 await manager.reap_idle_rooms()
             self.assertNotIn("idle-room", manager.rooms)
             self.assertIn("busy-room", manager.rooms)
@@ -286,9 +286,9 @@ class WebSocketAuthorizationTests(unittest.TestCase):
             manager = ui_service.RoomManager()
             manager.rooms["idle-room"] = FakeModerator()
             manager.last_activity["idle-room"] = time.monotonic() - 30
-            with patch.object(ui_service, "ROOM_IDLE_TTL_SECONDS", 10), patch.object(
-                ui_service, "ROOM_REAP_INTERVAL_SECONDS", 0.01
-            ), patch.object(ui_service, "delete_room"):
+            with patch.object(room_manager, "ROOM_IDLE_TTL_SECONDS", 10), patch.object(
+                room_manager, "ROOM_REAP_INTERVAL_SECONDS", 0.01
+            ), patch.object(room_manager, "delete_room"):
                 manager._ensure_reaper()
                 try:
                     for _ in range(50):

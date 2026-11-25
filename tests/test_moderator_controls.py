@@ -1,15 +1,41 @@
 import asyncio
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import main
 from core.events import Event
 from core.state_machine import GameState
 from main import READ_FAILED_WARNING, READ_TIMEOUT_WARNING, ScienceBowlModerator
+from services.judge_service import JudgeService, JudgeUnavailable
 
 # The read guard is about how long a question takes to speak. Tests that are not about it
 # switch it off so a report is believed the moment it arrives.
 NO_READ_GUARD = dict(READ_EARLY_REPORT_FRACTION=0.0, MIN_READ_SECONDS=0.0)
+
+
+class FailingEvaluationJudge:
+    """Speech-to-text works, but every verdict request fails."""
+
+    async def transcribe_audio(self, b64_audio):
+        return "Answer"
+
+    async def evaluate_answer(self, spoken_answer, correct_answer, category, is_multiple_choice=False):
+        raise JudgeUnavailable("The AI judge request failed.")
+
+
+class FailingBonusJudge:
+    def __init__(self):
+        self.verdicts = 0
+
+    async def transcribe_audio(self, b64_audio):
+        return "Answer"
+
+    async def evaluate_answer(self, spoken_answer, correct_answer, category, is_multiple_choice=False):
+        self.verdicts += 1
+        if self.verdicts == 1:
+            return True
+        raise JudgeUnavailable("The AI judge request failed.")
 
 
 class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
@@ -329,7 +355,7 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("⏳ 5 Seconds to Buzz...", early_statuses, "an impossible report ended the read")
 
             # The real read reports when it is done, and only then does the window open.
-            self.assertTrue(moderator._report_is_early() is False, "the phantom report was still inside the believable window")
+            self.assertTrue(moderator.read_session.report_is_early() is False, "the phantom report was still inside the believable window")
             moderator.inbound_queue.put_nowait(Event(type="READING_DONE", payload={}))
             await watch(1.5)
             late_statuses = [m["payload"].get("text") for m in seen if m.get("type") == "UPDATE_STATUS"]
@@ -643,6 +669,210 @@ class ModeratorControlTests(unittest.IsolatedAsyncioTestCase):
 
         message = await moderator.outbound_queue.get()
         self.assertEqual(message["type"], "ROOM_CLOSE_REQUESTED")
+
+    async def test_close_match_during_a_wait_is_forwarded(self):
+        """A close clicked while the start control is armed must reach the room manager."""
+        moderator = ScienceBowlModerator(use_audio=False)
+        task = asyncio.create_task(moderator.wait_for_moderator_action(["MANUAL_START_TOSSUP"]))
+        try:
+            moderator.inbound_queue.put_nowait(Event(type="CLOSE_MATCH", payload={}))
+            message = await self._next_message(moderator)
+
+            self.assertEqual(message["type"], "ROOM_CLOSE_REQUESTED")
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_a_duplicate_start_does_not_interrupt_a_wait_for_another_action(self):
+        """The pump must not turn an unrelated duplicate click into a status event."""
+        moderator = ScienceBowlModerator(use_audio=False)
+        task = asyncio.create_task(moderator.wait_for_moderator_action(["OVERRIDE_LAST_QUESTION"]))
+        try:
+            moderator.inbound_queue.put_nowait(Event(type="MANUAL_START_TOSSUP", payload={}))
+            moderator.inbound_queue.put_nowait(Event(type="OVERRIDE_LAST_QUESTION", payload={}))
+
+            action = await asyncio.wait_for(task, 2)
+
+            self.assertEqual(action.type, "OVERRIDE_LAST_QUESTION")
+            self.assertTrue(moderator.outbound_queue.empty())
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+class JudgeFailureTests(unittest.IsolatedAsyncioTestCase):
+    async def _wait_for(self, moderator, message_type, predicate=None, timeout=5.0):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                self.fail(f"timed out waiting for {message_type}")
+            try:
+                message = await asyncio.wait_for(moderator.outbound_queue.get(), remaining)
+            except asyncio.TimeoutError:
+                self.fail(f"timed out waiting for {message_type}")
+            if message.get("type") == message_type and (predicate is None or predicate(message.get("payload", {}))):
+                return message
+
+    async def _wait_for_status(self, moderator, needle, timeout=5.0):
+        return await self._wait_for(
+            moderator,
+            "UPDATE_STATUS",
+            lambda payload: needle.lower() in str(payload.get("text", "")).lower(),
+            timeout,
+        )
+
+    async def test_transcription_api_failure_is_explicit(self):
+        judge = JudgeService(api_key="test-key")
+        judge.client = SimpleNamespace(
+            audio=SimpleNamespace(
+                transcriptions=SimpleNamespace(create=AsyncMock(side_effect=RuntimeError("upstream down")))
+            )
+        )
+
+        with self.assertRaises(JudgeUnavailable):
+            await judge.transcribe_audio("data:audio/webm;base64,eA==")
+
+    async def test_evaluation_api_failure_is_explicit(self):
+        judge = JudgeService(api_key="test-key")
+        judge.client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=AsyncMock(side_effect=RuntimeError("upstream down")))
+            )
+        )
+
+        with self.assertRaises(JudgeUnavailable):
+            await judge.evaluate_answer("Answer", "Answer", "GENERAL")
+
+    async def test_ai_start_without_key_warns_and_does_not_consume_question(self):
+        moderator = ScienceBowlModerator(
+            use_audio=False,
+            initial_bank=[{"tossup_text": "Question", "tossup_answer": "Answer"}],
+        )
+        task = asyncio.create_task(moderator.run_game_loop())
+        try:
+            await self._wait_for(moderator, "UI_STATE", lambda payload: payload.get("show") == "TOSSUP")
+            moderator.inbound_queue.put_nowait(Event(type="MANUAL_START_TOSSUP", payload={}))
+
+            await self._wait_for_status(moderator, "api key")
+
+            self.assertEqual(moderator.current_q_idx, 0)
+            self.assertEqual(moderator.state.team_a_score, 0)
+            self.assertEqual(moderator.state.team_b_score, 0)
+            self.assertEqual(moderator.match_log, [])
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_failed_verdict_is_unjudged_without_score_or_penalty(self):
+        moderator = ScienceBowlModerator(
+            use_audio=False,
+            initial_bank=[{"tossup_text": "Question", "tossup_answer": "Answer"}],
+        )
+        moderator.judge = FailingEvaluationJudge()
+        task = asyncio.create_task(moderator.run_game_loop())
+        try:
+            await self._wait_for(moderator, "UI_STATE", lambda payload: payload.get("show") == "TOSSUP")
+            moderator.inbound_queue.put_nowait(Event(type="MANUAL_START_TOSSUP", payload={}))
+            await self._wait_for_status(moderator, "5 seconds to buzz")
+            moderator.inbound_queue.put_nowait(Event(type="BUZZ", payload={"team": "Team A", "player": "A-1"}))
+
+            await self._wait_for_status(moderator, "not scored")
+
+            self.assertEqual(moderator.state.team_a_score, 0)
+            self.assertEqual(moderator.state.team_b_score, 0)
+            self.assertEqual(len(moderator.match_log), 1)
+            row = moderator.match_log[0]
+            self.assertEqual(row["Event_Type"], "UNJUDGED")
+            self.assertIsNone(row["Correct"])
+            self.assertEqual(row["Points"], 0)
+            self.assertEqual(moderator.current_q_idx, 1)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_bonus_verdict_failure_awards_no_bonus_points(self):
+        moderator = ScienceBowlModerator(
+            use_audio=False,
+            initial_bank=[{
+                "tossup_text": "Question",
+                "tossup_answer": "Answer",
+                "bonus_text": "Bonus question",
+                "bonus_answer": "Bonus answer",
+            }],
+        )
+        moderator.judge = FailingBonusJudge()
+        task = asyncio.create_task(moderator.run_game_loop())
+        try:
+            await self._wait_for(moderator, "UI_STATE", lambda payload: payload.get("show") == "TOSSUP")
+            moderator.inbound_queue.put_nowait(Event(type="MANUAL_START_TOSSUP", payload={}))
+            await self._wait_for_status(moderator, "5 seconds to buzz")
+            moderator.inbound_queue.put_nowait(Event(type="BUZZ", payload={"team": "Team A", "player": "A-1"}))
+            await self._wait_for(moderator, "UI_STATE", lambda payload: payload.get("show") == "BONUS")
+            moderator.inbound_queue.put_nowait(Event(type="MANUAL_START_BONUS", payload={}))
+
+            await self._wait_for_status(moderator, "not scored")
+
+            self.assertEqual(moderator.state.team_a_score, 4)
+            self.assertEqual(moderator.state.team_b_score, 0)
+            self.assertEqual([row["Event_Type"] for row in moderator.match_log], ["TOSSUP", "UNJUDGED"])
+            unjudged = moderator.match_log[-1]
+            self.assertIsNone(unjudged["Correct"])
+            self.assertEqual(unjudged["Points"], 0)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_an_interrupt_with_a_failed_verdict_is_returned_unjudged(self):
+        moderator = ScienceBowlModerator(
+            use_audio=True,
+            initial_bank=[{"tossup_text": "Question", "tossup_answer": "Answer"}],
+        )
+        moderator.judge = FailingEvaluationJudge()
+        moderator.state.transition_to(GameState.READING_TOSSUP)
+        patched = [patch.object(main, key, value) for key, value in NO_READ_GUARD.items()]
+        for item in patched:
+            item.start()
+        self.addCleanup(lambda: [item.stop() for item in patched])
+        task = asyncio.create_task(moderator._handle_tossup_attempt(moderator.question_bank[0]))
+
+        async def drive_to_failed_verdict():
+            reads = 0
+            while True:
+                message = await asyncio.wait_for(moderator.outbound_queue.get(), 3.0)
+                kind = message.get("type")
+                if kind == "START_READING":
+                    reads += 1
+                    if reads == 1:
+                        moderator.inbound_queue.put_nowait(
+                            Event(type="BUZZ", payload={"team": "Team A", "player": "A-1"})
+                        )
+                        moderator.inbound_queue.put_nowait(
+                            Event(type="LOG_BUZZPOINT", payload={"buzzpoint": "Full Read"})
+                        )
+                    else:
+                        moderator.inbound_queue.put_nowait(Event(
+                            type="READING_DONE",
+                            payload={"reading_id": message["payload"].get("reading_id")},
+                        ))
+                elif kind == "START_LISTENING":
+                    moderator.inbound_queue.put_nowait(Event(
+                        type="ANSWER_AUDIO",
+                        payload={"audio_data": "data:audio/webm;base64,eA=="},
+                    ))
+                    return
+
+        try:
+            await drive_to_failed_verdict()
+            payload, correct, is_interrupt, interrupt_action, buzz_time, buzzpoint = await asyncio.wait_for(task, 3.0)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        self.assertTrue(is_interrupt)
+        self.assertIsNone(correct)
+        self.assertIn("judge_unavailable", payload)
+        self.assertEqual(interrupt_action, False)
 
 
 if __name__ == "__main__":

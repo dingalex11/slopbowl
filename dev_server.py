@@ -28,6 +28,7 @@ from fastapi.responses import HTMLResponse  # noqa: E402  (after the env guard)
 
 import main as moderator_module  # noqa: E402
 import services.auth_service as auth_service  # noqa: E402
+import services.room_manager as room_manager  # noqa: E402
 import services.ui_service as ui_service  # noqa: E402
 from core.config import APP_ENV, PROJECT_ROOT  # noqa: E402
 from core.events import Event  # noqa: E402
@@ -160,7 +161,7 @@ ui_service.get_room_participant = get_room_participant
 ui_service.create_in_person_room = create_in_person_room
 ui_service.create_online_room = create_online_room
 ui_service.join_online_room = join_online_room
-ui_service.delete_room = delete_room
+room_manager.delete_room = delete_room
 
 _real_moderator = moderator_module.ScienceBowlModerator
 
@@ -173,8 +174,8 @@ def _moderator_with_dev_packet(*args, **kwargs):
     return _real_moderator(*args, **kwargs)
 
 
-# ui_service imports the class inside RoomManager.connect, so patch it on the module
-# the class is really imported from.
+# room_manager imports the class inside RoomManager.connect, so patch it on the
+# module the class is really imported from.
 moderator_module.ScienceBowlModerator = _moderator_with_dev_packet
 
 

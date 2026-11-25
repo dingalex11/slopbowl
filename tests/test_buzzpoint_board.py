@@ -27,7 +27,7 @@ ROUTER_SOURCE = (ROOT / "static/js/router.js").read_text(encoding="utf-8")
 INDEX_SOURCE = (ROOT / "index.html").read_text(encoding="utf-8")
 AUTH_SOURCE = (ROOT / "static/js/auth.js").read_text(encoding="utf-8")
 RULES_SOURCE = (ROOT / "firestore.rules").read_text(encoding="utf-8")
-UI_SERVICE_SOURCE = (ROOT / "services/ui_service.py").read_text(encoding="utf-8")
+CHALLENGE_ROUTES_SOURCE = (ROOT / "services/challenge_routes.py").read_text(encoding="utf-8")
 CHALLENGE_SERVICE_SOURCE = (ROOT / "services/challenge_service.py").read_text(encoding="utf-8")
 
 
@@ -861,8 +861,8 @@ class ChallengeSettingsTests(unittest.TestCase):
     def test_the_challenge_stores_the_settings_the_captain_chose(self):
         self.assertIn('"readBonuses": read_bonuses', CHALLENGE_SERVICE_SOURCE)
         self.assertIn('"displayMode": display_mode', CHALLENGE_SERVICE_SOURCE)
-        self.assertIn('read_bonuses=data.get("readBonuses", True)', UI_SERVICE_SOURCE)
-        self.assertIn('display_mode=data.get("displayMode", "hybrid")', UI_SERVICE_SOURCE)
+        self.assertIn('read_bonuses=data.get("readBonuses", True)', CHALLENGE_ROUTES_SOURCE)
+        self.assertIn('display_mode=data.get("displayMode", "hybrid")', CHALLENGE_ROUTES_SOURCE)
 
     def test_audio_only_hides_the_words_but_keeps_the_progress_bar(self):
         self.assertIn("bukRun.displayMode === 'audio-only'", BUZZPOINT_SOURCE)
@@ -968,8 +968,8 @@ class ProfileChallengeTests(unittest.TestCase):
         self.assertIn("Authorization: `Bearer ${token}`", AUTH_SOURCE)
         self.assertIn("def list_challenges(owner_uid):", CHALLENGE_SERVICE_SOURCE)
         self.assertIn('where("ownerUid", "==", owner_uid).stream()', CHALLENGE_SERVICE_SOURCE)
-        self.assertIn('@app.get("/api/challenges")', UI_SERVICE_SOURCE)
-        self.assertIn("challenge_service.list_challenges, user.uid", UI_SERVICE_SOURCE)
+        self.assertIn('@router.get("/api/challenges")', CHALLENGE_ROUTES_SOURCE)
+        self.assertIn("challenge_service.list_challenges, user.uid", CHALLENGE_ROUTES_SOURCE)
         self.assertIn("const user = currentProfileUser();", AUTH_SOURCE)
         self.assertIn("window.getFirebaseIdToken", AUTH_SOURCE)
         self.assertIn("renderProfileChallenges([], null);", AUTH_SOURCE)
@@ -1065,11 +1065,11 @@ class ChallengeRouteContractTests(unittest.TestCase):
                           f"{path} must require a signed-in user")
 
     def test_a_spent_attempt_is_a_conflict_not_a_bad_request(self):
-        self.assertIn("status_code=409", UI_SERVICE_SOURCE)
+        self.assertIn("status_code=409", CHALLENGE_ROUTES_SOURCE)
 
     def test_seeding_is_refused_in_production(self):
-        self.assertIn('if APP_ENV == "production":', UI_SERVICE_SOURCE)
-        self.assertIn('raise HTTPException(status_code=404, detail="Not found")', UI_SERVICE_SOURCE)
+        self.assertIn('if APP_ENV == "production":', CHALLENGE_ROUTES_SOURCE)
+        self.assertIn('raise HTTPException(status_code=404, detail="Not found")', CHALLENGE_ROUTES_SOURCE)
 
     def test_the_fourth_station_is_wired_into_the_shell(self):
         self.assertIn('id="slide-13"', INDEX_SOURCE)
@@ -1105,7 +1105,7 @@ class BoardByCodeTests(unittest.TestCase):
     def test_the_board_is_fetched_as_the_captain(self):
         self.assertIn("await bbxApi(`/api/challenges/${encodeURIComponent(clean)}/board`)", ANALYTICS_SOURCE)
         self.assertIn("if (token) headers.Authorization = `Bearer ${token}`;", ANALYTICS_SOURCE)
-        self.assertIn('@app.get("/api/challenges/{code}/board")', UI_SERVICE_SOURCE)
+        self.assertIn('@router.get("/api/challenges/{code}/board")', CHALLENGE_ROUTES_SOURCE)
 
     def test_a_fetched_board_is_parsed_by_the_upload_parser(self):
         # The exporter the download button uses, then the parser a dropped file uses.
@@ -1122,14 +1122,14 @@ class BoardByCodeTests(unittest.TestCase):
 
     def test_the_code_is_validated_the_way_the_server_validates_it(self):
         self.assertIn("/^[a-z0-9]{4,8}$/", ANALYTICS_SOURCE)
-        self.assertIn('_CHALLENGE_CODE_RE = re.compile(r"^[a-z0-9]{4,8}$")', UI_SERVICE_SOURCE)
+        self.assertIn('_CHALLENGE_CODE_RE = re.compile(r"^[a-z0-9]{4,8}$")', CHALLENGE_ROUTES_SOURCE)
 
     def test_an_unauthorised_or_unknown_board_says_which_it_was(self):
         self.assertIn("if (error.status === 403 || error.status === 404)", ANALYTICS_SOURCE)
         self.assertIn("if (error.status === 401) return 'Sign in as the captain to load a board by code.';", ANALYTICS_SOURCE)
         self.assertIn("if (error.status === 503) return detail ||", ANALYTICS_SOURCE)
         # The server answers 403 for "not the captain", and the client shows its wording.
-        self.assertIn('raise HTTPException(status_code=403, detail=str(exc))', UI_SERVICE_SOURCE)
+        self.assertIn('raise HTTPException(status_code=403, detail=str(exc))', CHALLENGE_ROUTES_SOURCE)
 
     def test_a_board_with_no_runs_says_so_instead_of_claiming_success(self):
         self.assertIn("if (!added) {", ANALYTICS_SOURCE)

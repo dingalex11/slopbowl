@@ -4,6 +4,11 @@ import asyncio
 import base64
 from openai import AsyncOpenAI
 
+
+class JudgeUnavailable(RuntimeError):
+    """The AI judge could not produce a verdict, so the attempt was not judged."""
+
+
 class JudgeService:
     # Require api_key in the initializer
     def __init__(self, api_key: str):
@@ -52,8 +57,8 @@ class JudgeService:
             return transcript
             
         except Exception as e:
-            print(f"❌ [STT ERROR]: {e}")
-            return ""
+            print(f"[STT ERROR]: {e}")
+            raise JudgeUnavailable("The speech-to-text request failed.") from e
 
     async def evaluate_answer(
         self, 
@@ -118,9 +123,12 @@ class JudgeService:
             )
 
             result = json.loads(response.choices[0].message.content)
-            print(f"[JUDGE AGENT]: Result -> {result.get('is_correct', False)} ({result.get('reason', '')})")
-            return result.get("is_correct", False)
+            verdict = result.get("is_correct")
+            if not isinstance(verdict, bool):
+                raise ValueError("The judge response did not contain a boolean verdict.")
+            print(f"[JUDGE AGENT]: Result -> {verdict} ({result.get('reason', '')})")
+            return verdict
 
         except Exception as e:
             print(f"[JUDGE AGENT ERROR]: {e}")
-            return False
+            raise JudgeUnavailable("The AI judge request failed.") from e

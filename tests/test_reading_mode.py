@@ -25,7 +25,7 @@ from unittest.mock import patch
 
 import main
 import services.ui_service as ui_service
-from core.events import Event
+from core.events import Event, ONLINE_PUBLIC_OUTPUTS
 from core.validation import validate_client_event
 from main import ScienceBowlModerator
 
@@ -256,10 +256,10 @@ class ReadingModeScreenTests(unittest.TestCase):
         self.assertIn("currentReadingMode = payload.reading_mode || 'stations';", SOCKET_SOURCE)
 
     def test_the_server_tells_late_joiners_the_mode_and_the_live_read(self):
-        service_source = (ROOT / "services/ui_service.py").read_text(encoding="utf-8")
+        service_source = (ROOT / "services/room_manager.py").read_text(encoding="utf-8")
         self.assertIn('"reading_mode": getattr(moderator, "reading_mode", "stations")', service_source)
         self.assertIn('"moderator_reading": dict(getattr(moderator, "moderator_reading"', service_source)
-        self.assertIn('"MODERATOR_READING"', service_source)
+        self.assertIn("MODERATOR_READING", ONLINE_PUBLIC_OUTPUTS)
 
     def test_the_online_player_banner_is_restored(self):
         self.assertIn('id="player-read-banner"', INDEX_SOURCE)
